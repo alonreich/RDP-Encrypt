@@ -116,7 +116,7 @@
             <ScrollViewer Grid.Row="1">
                 <ListBox Name="LstProfiles">
                     <ListBox.ItemTemplate>
-                        <DataTemplate>
+                        <DataTemplate x:DataType="local:RdpProfile">
                             <Border Background="#121215" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="6" Padding="16">
                                 <Grid ColumnDefinitions="*,Auto">
                                     <StackPanel Grid.Column="0" VerticalAlignment="Center">

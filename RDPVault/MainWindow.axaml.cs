@@ -52,7 +52,13 @@ public partial class MainWindow : Window
 
     private async System.Threading.Tasks.Task AttemptHelloUnlockAsync()
     {
-        bool success = await SessionManager.Current.UnlockWithHelloAsync();
+        TxtLockError.IsVisible = false;
+        TxtLockStatus.Text = "Validating hardware TPM signature. Please wait...";
+        TxtLockStatus.IsVisible = true;
+        BtnHello.IsEnabled = false;
+
+        bool success = await System.Threading.Tasks.Task.Run(async () => await SessionManager.Current.UnlockWithHelloAsync());
+        
         if (success)
         {
             Dispatcher.UIThread.InvokeAsync(UpdateUIState);
@@ -61,8 +67,10 @@ public partial class MainWindow : Window
         {
             Dispatcher.UIThread.InvokeAsync(() =>
             {
+                TxtLockStatus.IsVisible = false;
                 TxtLockError.Text = "Hardware signature rejected.";
                 TxtLockError.IsVisible = true;
+                BtnHello.IsEnabled = true;
             });
         }
     }
@@ -93,29 +101,50 @@ public partial class MainWindow : Window
         if (e.Key == Key.Enter) SubmitPassword();
     }
 
-    private void SubmitPassword()
+    private async void SubmitPassword()
     {
         TxtLockError.IsVisible = false;
+        TxtLockStatus.IsVisible = false;
         if (string.IsNullOrWhiteSpace(TxtPassword.Text)) return;
+
+        string pwd = TxtPassword.Text;
+        TxtPassword.IsEnabled = false;
+        BtnUnlock.IsEnabled = false;
+        BtnHello.IsEnabled = false;
 
         try
         {
             if (!File.Exists(SessionManager.Current.VaultPath))
             {
-                // First run
+                TxtLockStatus.Text = "Generating high-entropy cryptographic keys. Please wait...";
+                TxtLockStatus.IsVisible = true;
+                
                 var payload = new VaultPayload();
-                SessionManager.Current.CreateNew(TxtPassword.Text, payload);
+                await System.Threading.Tasks.Task.Run(() => SessionManager.Current.CreateNew(pwd, payload));
+                
                 UpdateUIState();
                 return;
             }
 
-            SessionManager.Current.UnlockWithPassword(TxtPassword.Text);
+            TxtLockStatus.Text = "Decrypting vault structure...";
+            TxtLockStatus.IsVisible = true;
+
+            await System.Threading.Tasks.Task.Run(() => SessionManager.Current.UnlockWithPassword(pwd));
             UpdateUIState();
         }
         catch (Exception ex)
         {
+            TxtLockStatus.IsVisible = false;
             TxtLockError.Text = ex.Message;
             TxtLockError.IsVisible = true;
+        }
+        finally
+        {
+            TxtPassword.IsEnabled = true;
+            BtnUnlock.IsEnabled = true;
+            BtnHello.IsEnabled = true;
+            TxtPassword.Text = "";
+            TxtPassword.Focus();
         }
     }
 

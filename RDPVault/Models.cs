@@ -17,7 +17,7 @@ public class RdpProfile
     public bool FullScreen { get; set; } = true;
     public int Width { get; set; } = 1280;
     public int Height { get; set; } = 800;
-    public bool AllowClipboard { get; set; } = false;
+    public bool AllowClipboard { get; set; } = true;
     public bool AllowDrives { get; set; } = false;
     public bool AllowPrinters { get; set; } = false;
     public bool AllowSmartCards { get; set; } = false;

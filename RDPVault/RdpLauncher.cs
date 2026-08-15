@@ -68,6 +68,41 @@ public static class RdpLauncher
             }
             catch { /* process info no longer available */ }
 
+            try
+            {
+                if (File.Exists(tempRdp))
+                {
+                    bool changed = false;
+                    var lines = File.ReadAllLines(tempRdp);
+                    foreach (var line in lines)
+                    {
+                        var trimmed = line.Trim();
+                        if (trimmed.StartsWith("redirectclipboard:i:", StringComparison.OrdinalIgnoreCase))
+                        {
+                            p.AllowClipboard = trimmed.EndsWith("1");
+                            changed = true;
+                        }
+                        else if (trimmed.StartsWith("redirectdrives:i:", StringComparison.OrdinalIgnoreCase))
+                        {
+                            p.AllowDrives = trimmed.EndsWith("1");
+                            changed = true;
+                        }
+                        else if (trimmed.StartsWith("redirectprinters:i:", StringComparison.OrdinalIgnoreCase))
+                        {
+                            p.AllowPrinters = trimmed.EndsWith("1");
+                            changed = true;
+                        }
+                        else if (trimmed.StartsWith("redirectsmartcards:i:", StringComparison.OrdinalIgnoreCase))
+                        {
+                            p.AllowSmartCards = trimmed.EndsWith("1");
+                            changed = true;
+                        }
+                    }
+                    if (changed) SessionManager.Current.Save();
+                }
+            }
+            catch { }
+
             TryDelete(tempRdp);
             if (target != null) DeleteCredential(target);
             TraceCleaner.Sweep();          // immediate scrub the moment the window closes

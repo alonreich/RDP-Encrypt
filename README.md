@@ -6,7 +6,7 @@ It completely bypasses standard Windows Credential Manager limitations, scrubs a
 
 ## Core Architecture
 
-- **NativeAOT Silicon**: Compiled natively ahead-of-time. No .NET runtime required. Just drop the `installer.cmd` and execute.
+- **NativeAOT Silicon**: Compiled natively ahead-of-time. No .NET runtime required. A single standalone `.exe` handles everything.
 - **TPM Hardware Signatures**: Windows DPAPI has been ripped out. Quick Unlocks use raw physical cryptography from your motherboard's Trusted Platform Module (TPM). Without your physical biometric (Windows Hello), the TPM locks down and Mimikatz RAM-scraping is mathematically impossible.
 - **Paper Recovery Keys**: When a vault is created, a 24-word offline cryptographic seed phrase is generated for catastrophic cross-machine recovery.
 - **Vault Self-Destruct**: Exceed the configurable failed-attempt limit, and the vault structurally obliterates itself.
@@ -17,13 +17,14 @@ It completely bypasses standard Windows Credential Manager limitations, scrubs a
 
 1. Download the latest automated NativeAOT binary:
    [Download RDP Vault](https://github.com/alonreich/RDP-Encrypt/releases/latest/download/RDPVault.exe)
-2. Run `installer.cmd` to register `.rdpvlink` bindings directly into the Windows Registry natively without UAC prompts.
-3. The executable inherently binds to `appwiz.cpl` allowing native "Add/Remove Programs" modifications.
+2. Launch the downloaded `RDPVault.exe`. A Setup Wizard will intercept startup.
+3. Choose **"Install to this PC"** for a full native deployment, or **"Run Portably"** to securely operate out of a USB drive with zero traces on the host machine.
+4. If Installed, the executable natively creates Desktop/Start Menu shortcuts, copies itself to `%LocalAppData%`, and binds to `appwiz.cpl` allowing native "Add/Remove Programs" modifications.
 
 ## Uninstallation
 
-Execute `uninstaller.cmd` directly or uninstall via Windows `appwiz.cpl`. The teardown process:
-1. Force-terminates all active IPC pipes.
-2. Shreds temporary `.rdp` configurations.
-3. Completely destroys the `RDPVault` payload directory.
-4. Executes a process-detaching batch deletion to permanently wipe the uninstaller itself from your disk.
+Uninstall directly via Windows **Programs and Features (`appwiz.cpl`)**. The teardown process:
+1. Triggers the internal `--uninstall` command gracefully.
+2. Unregisters all `.rdpvlink` handlers and deletes Registry footprints.
+3. Completely destroys the `%LocalAppData%\RDPVault` payload directory.
+4. Executes a process-detaching batch deletion command to permanently shred the running executable from your disk silently.

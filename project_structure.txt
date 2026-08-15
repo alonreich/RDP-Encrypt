@@ -9,15 +9,15 @@ Status       : Compiles clean (0 warnings / 0 errors), published, smoke-tested.
 --------------------------------------------------------------------------------
 SECTION 0 — TL;DR (READ THIS FIRST)
 --------------------------------------------------------------------------------
-RDP Vault is a single portable Windows EXE intended to live on a USB stick.
+RDP Vault is a NativeAOT-compiled, highly secure Avalonia UI application.
 It stores the user's RDP connection profiles (hosts, ports, usernames, optional
-passwords) inside ONE encrypted file ("vault.rdpv") that sits NEXT TO the exe.
-It launches connections through Windows' own mstsc.exe, and after each RDP
-window closes it aggressively deletes every local trace mstsc normally leaves
-(registry history, Default.rdp, jump lists, recents, UserAssist, prefetch,
-TERMSRV credentials). It auto-relocks after idle time (default 60 min) while
-keeping live RDP sessions alive, supports per-PC Windows Hello quick unlock,
-and locks + exits the moment the USB/app folder disappears.
+passwords) inside ONE encrypted file ("vault.rdpv"). It launches connections 
+through Windows' own mstsc.exe, and aggressively deletes every local trace 
+(registry history, Default.rdp, jump lists, recents, UserAssist, prefetch, 
+TERMSRV credentials). It features automatic relocking, Vault Self-Destruct 
+upon bruteforce attempts, BitLocker enforcement, pure hardware TPM-backed 
+Quick Unlocks, Paper Recovery Phrase generation, and direct single-click 
+shortcut connections via custom .rdpvlink files.
 
 If you are an AI agent asked to modify this project: read Sections 3, 4, 5, 8
 and 12 before touching anything. Do not weaken the crypto. Do not write any
@@ -36,16 +36,16 @@ Target user : A person who connects via RDP (Remote Desktop) to their own or
                   host:port, with credentials optionally saved (user's choice).
               (c) After 1 hour of not using the app, everything re-locks —
                   but WITHOUT killing running RDP sessions (no interruption).
-              (d) On the user's OWN trusted PCs, unlock with Windows Hello
-                  fingerprint/face/PIN instead of typing the password. Hello is
-                  per-PC/per-account by nature, so on foreign PCs the master
-                  password is always required.
-              (e) High security end-to-end (see security model, Section 9).
+              (d) On trusted PCs, unlock with Windows Hello fingerprint/face
+                  using a strict TPM-hardware signature instead of DPAPI.
+              (e) One-click desktop shortcuts (.rdpvlink) for immediate 
+                  frictionless connections without surfacing the UI.
+              (f) High security end-to-end including Vault Self-Destruct.
 
-Usage model : Portable app. Copy RDPVault.exe to a USB stick, run it there.
-              vault.rdpv is created beside it on first run. Single instance
-              per machine is enforced. Pulling the USB = instant lock + exit
-              (optionally also killing launched RDP sessions).
+Usage model : NativeAOT executable deployed via an installer.cmd script.
+              Single instance per machine is enforced via NamedPipe IPC, 
+              which also natively intercepts .rdpvlink commands to seamlessly 
+              launch sessions in the background.
 
 --------------------------------------------------------------------------------
 SECTION 2 — TECHNOLOGY STACK (EXACT)
@@ -55,20 +55,18 @@ Language        : C# (C# 12 feature level), nullable reference types ENABLED,
 Platform        : .NET 9, target framework moniker:
                   net9.0-windows10.0.19041.0  (Windows 10 2004-era WinRT
                   projections needed for Windows Hello APIs).
-UI framework    : WPF (XAML + code-behind, no MVVM framework, no external UI
-                  libraries — intentionally dependency-light).
+UI framework    : Avalonia UI (XAML + code-behind, cross-platform UI logic 
+                  but strict Windows integrations).
 Output type     : WinExe (windowed, no console).
-                  Published as ONE file (PublishSingleFile=true), framework-
-                  dependent (requires .NET 9 Desktop Runtime on target PC),
-                  win-x64. Result: publish\RDPVault.exe (~25.7 MB).
+                  Published as NativeAOT single file (PublishAot=true), fully
+                  standalone without relying on a framework runtime.
 
-NuGet packages (ONLY TWO — keep it this way unless justified):
-  1. Isopoh.Cryptography.Argon2            2.0.0
+NuGet packages:
+  1. Isopoh.Cryptography.Argon2
      → Argon2id password hashing / KDF (managed implementation).
-  2. System.Security.Cryptography.ProtectedData 9.0.0
-     → DPAPI (Windows Data Protection API) for quick-unlock seals.
+  2. Avalonia UI packages (Avalonia, Avalonia.Desktop, Avalonia.Themes.Fluent)
 
-Windows-only APIs used (no extra packages):
+Windows-only APIs used:
   - AES-GCM via System.Security.Cryptography.AesGcm (.NET BCL)
   - Windows.Security.Credentials.KeyCredentialManager  (WinRT, Hello keys)
   - Windows.Security.Cryptography / .Core              (WinRT buffers)
@@ -90,40 +88,27 @@ SECTION 3 — REPOSITORY / FILE MAP (WHAT LIVES WHERE)
 RDP_Encrypt\                       (repo root, c:\Full_Control\RDP_Encrypt)
 ├── project_structure.txt          ← THIS FILE. Update it when reality changes.
 ├── README.md                      ← end-user manual (simple language).
+├── build.cmd                      ← Official pipeline script building NativeAOT.
+├── installer.cmd / uninstaller.cmd ← Deployment scripts for appwiz.cpl mapping.
 ├── publish\
-│   └── RDPVault.exe               ← the shippable single-file build.
+│   └── RDPVault.exe               ← the shippable standalone NativeAOT build.
 └── RDPVault\                      ← the source project.
-    ├── RDPVault.csproj            project definition (TFM, packages, WPF).
-    │                              NOTE: DebugType=embedded, SatelliteResource
-    │                              Languages=en to keep output small.
-    ├── Models.cs                  data model: RdpProfile, VaultSettings,
-    │                              VaultPayload, SealEntry, VaultFile(+KdfParams,
-    │                              +WrappedBlob). This is the vault schema.
-    ├── Crypto.cs                  VaultCrypto static class: Argon2id KDF,
-    │                              AES-256-GCM seal/open, create/open/save,
-    │                              DPAPI seals, MachineId, serialization.
-    ├── WindowsHello.cs            Hello enrollment + verification (TPM key).
-    ├── TraceCleaner.cs            ALL residue deletion logic (registry/files/
-    │                              credentials). See Section 6.
-    ├── RdpLauncher.cs             .rdp file generation, CredWrite session
-    │                              credential, mstsc launch + exit watcher,
-    │                              KillAll/AnyLive for launched sessions.
-    ├── SessionManager.cs          in-memory session state (master key), auto-
-    │                              lock timer, USB watcher, single-instance
-    │                              mutex+pipe, Hello seal management, password
-    │                              change, Save orchestration.
-    ├── App.xaml / App.xaml.cs     application entry, dark theme resources,
-    │                              startup flow (setup → main → Hello attempt),
-    │                              exit sweep.
-    ├── MainWindow.xaml / .cs      main window: locked panel (password + Hello
-    │                              button) / unlocked profile list, connect,
-    │                              lock, settings entry point.
-    ├── SetupWindow.xaml / .cs     first-run: create master password (min 8,
-    │                              strength meter, confirmation).
-    ├── ProfileEditorWindow.xaml / .cs  add/edit one computer (host/port/user/
-    │                              password/size/redirections toggles).
-    └── SettingsWindow.xaml / .cs  auto-lock minutes, Hello on/off, password
-                                   change, DeepSweep + KillOnUsb toggles.
+    ├── RDPVault.csproj            project definition (Avalonia, NativeAOT).
+    ├── Models.cs                  data model (now includes TpmBlob in SealEntry).
+    ├── Crypto.cs                  VaultCrypto: Argon2id KDF, AES-256-GCM seal, 
+                                   TPM signature derivations.
+    ├── WindowsHello.cs            Hardware TPM interaction (returns raw signatures).
+    ├── SecurityEnforcer.cs        BitLocker evaluation & Self-Destruct execution.
+    ├── ShortcutGenerator.cs       Creates physical .rdpvlink files for connections.
+    ├── RecoveryKeyGenerator.cs    Generates 24-word paper backup seeds.
+    ├── TraceCleaner.cs            Residue deletion logic.
+    ├── RdpLauncher.cs             .rdp file generation and mstsc launch.
+    ├── SessionManager.cs          IPC named pipe, PendingLaunchId processing,
+                                   state and mutex orchestration.
+    ├── App.axaml / App.axaml.cs   Avalonia application entry.
+    ├── MainWindow.axaml / .cs     Main window UI (profiles, shortcuts).
+    ├── ProfileEditorWindow.axaml / .cs  Profile creation (includes Multi-Mon).
+    └── SettingsWindow.axaml / .cs Settings management (Self-Destruct params).
 
 There is NO test project yet (see Section 11). There is no .sln committed
 dependency — build/publish the .csproj directly.
@@ -152,20 +137,20 @@ Key hierarchy:
   masterPassword ──Argon2id(Kdf params)──▶ passwordKey (ephemeral)
   random masterKey (32B) ──AES-GCM(passwordKey)──▶ file.Wrap      ("wrapped")
   payload JSON   ──AES-GCM(masterKey)─────▶ file.Data
-  masterKey (on enabled PCs) ──DPAPI(CurrentUser)──▶ Seals[i].Dpapi
+  TPM Signature  ──Argon2id(Salt)──▶ tpmKey ──AES-GCM(masterKey)──▶ Seals[i].TpmBlob
 
-Quick-unlock seal binding (per PC):
-  MachineId = first 8 bytes (16 hex chars) of SHA-256(
-      "{MachineName}|{UserDomainName}|{UserName}" )  (UTF-8 input)
-  Seals ride INSIDE the encrypted vault file, so they travel with the USB but
-  can only be DPAPI-unprotected on the exact machine+account that created them.
-  KeyId = hex SHA-256 of the Hello key's public key blob
-      (CryptographicPublicKeyBlobType.BCryptPublicKey). At unlock we recompute
-      the fingerprint and REQUIRE an exact match with the enrolled KeyId before
-      accepting the Hello proof (prevents substituting a different key).
+Quick-unlock hardware binding (per PC):
+  MachineId = first 8 bytes (16 hex chars) of SHA-256("{MachineName}|...").
+  DPAPI has been completely eliminated. We now utilize physical TPM signatures.
   Hello proof = KeyCredential.RequestSignAsync over challenge
-      "RDPVault::QuickUnlock::v1::<MachineId>" (UTF-8). Success status means
-      Windows actually verified finger/face/PIN.
+      "RDPVault::QuickUnlock::v2::<MachineId>".
+  The resulting raw physical Signature output from the TPM is piped into an 
+  Argon2id KDF to mathematically formulate the master decryption key (tpmKey).
+  This physically prevents Mimikatz RAM-scraping attacks.
+
+Paper Recovery Key:
+  At creation, a 24-word Paper Recovery Key is generated acting as the ultimate 
+  offline backup against hardware failures or forgotten Master Passwords.
 
 In-memory hygiene: masterKey + payload live only while unlocked; Lock() zeroes
 the masterKey. Password-derived keys are zeroed in finally blocks. NO secret
@@ -488,21 +473,19 @@ SECTION 12 — QUICK REFERENCE CARD
 --------------------------------------------------------------------------------
 Cipher            : AES-256-GCM (12B nonce, 16B tag, per-seal random nonce)
 KDF               : Argon2id v1.3, 64 MiB, t=3, lanes=4, 16B salt, 32B out
-Quick unlock      : DPAPI(CurrentUser) seal + Windows Hello TPM key
-                    (KeyId = SHA-256(pubkey blob), challenge signed per unlock)
+Quick unlock      : Raw Hardware TPM Signature + Argon2id formulation (DPAPI eliminated)
 Vault file        : vault.rdpv (JSON envelope, V=1), atomic tmp+Replace save
+Shortcuts         : .rdpvlink extensions natively piped via LAUNCH:<TargetProfileId>
 Single instance   : mutex Local\RDPVault_SingleInstance + pipe RDPVault_Show
 Auto-lock         : 60 min default idle (1–1440), sessions survive
 USB removal       : poll 2s → lock → optional KillAll + DeepSweep → exit
-Trace sweep       : on RDP close / unlock / lock / exit; DeepSweep adds
-                    TERMSRV/* credential wipe
+Trace sweep       : on RDP close / unlock / lock / exit; DeepSweep adds wipe
+Security Enforcer : Self-Destruct protocol + BitLocker enforcement validation
 Session cred      : CredWriteW TERMSRV/{host}, Persist=SESSION, deleted on close
-Language          : C# 12 / .NET 9 / WPF / net9.0-windows10.0.19041.0
-Deps              : Isopoh.Cryptography.Argon2 2.0.0,
-                    System.Security.Cryptography.ProtectedData 9.0.0
-Build             : dotnet publish RDPVault\RDPVault.csproj -c Release
-                    -r win-x64 -p:PublishSingleFile=true -o publish
-Output            : publish\RDPVault.exe (~25.7 MB single file)
+Language          : C# 12 / .NET 9 / Avalonia UI / net9.0-windows10.0.19041.0
+Deps              : Isopoh.Cryptography.Argon2, Avalonia
+Build             : .\build.cmd (NativeAOT compilation + GitHub Release automation)
+Output            : publish\RDPVault.exe (Standalone NativeAOT binary)
 
 END OF FILE — keep synchronized with the code.
 ================================================================================

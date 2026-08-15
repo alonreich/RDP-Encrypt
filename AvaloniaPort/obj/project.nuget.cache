@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "spR0ds26kOc=",
+  "dgSpecHash": "0vgdmkDuuAY=",
   "success": true,
-  "projectFilePath": "c:\\Full_Control\\RDP_Encrypt\\AvaloniaPort\\AvaloniaPort.csproj",
+  "projectFilePath": "C:\\Full_Control\\RDP_Encrypt\\AvaloniaPort\\AvaloniaPort.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\alon\\.nuget\\packages\\avalonia\\12.0.3\\avalonia.12.0.3.nupkg.sha512",
     "C:\\Users\\alon\\.nuget\\packages\\avalonia.angle.windows.natives\\2.1.25547.20250602\\avalonia.angle.windows.natives.2.1.25547.20250602.nupkg.sha512",

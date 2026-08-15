@@ -2,8 +2,145 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
-        x:Class="AvaloniaPort.MainWindow"
-        Title="AvaloniaPort">
-    Welcome to Avalonia!
+        xmlns:local="clr-namespace:RDPVault"
+        mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="550"
+        x:Class="RDPVault.MainWindow"
+        Title="RDP Vault"
+        Width="800" Height="550"
+        WindowStartupLocation="CenterScreen"
+        Background="#0E0E10"
+        Foreground="#EDEDED"
+        FontFamily="Inter, Arial">
+
+    <Window.Styles>
+        <Style Selector="Button">
+            <Setter Property="Background" Value="#1A1A1E"/>
+            <Setter Property="Foreground" Value="#EDEDED"/>
+            <Setter Property="BorderBrush" Value="#2E2E35"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="Padding" Value="12,8"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="Background" Duration="0:0:0.2"/>
+                    <BrushTransition Property="BorderBrush" Duration="0:0:0.2"/>
+                </Transitions>
+            </Setter>
+        </Style>
+        <Style Selector="Button:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#2A2A30"/>
+            <Setter Property="BorderBrush" Value="#454550"/>
+        </Style>
+        <Style Selector="Button.Accent">
+            <Setter Property="Background" Value="#005FB8"/>
+            <Setter Property="BorderBrush" Value="#006CD0"/>
+            <Setter Property="Foreground" Value="White"/>
+        </Style>
+        <Style Selector="Button.Accent:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#006CD0"/>
+            <Setter Property="BorderBrush" Value="#007AE8"/>
+        </Style>
+        <Style Selector="Button.Danger">
+            <Setter Property="Background" Value="#B80000"/>
+            <Setter Property="BorderBrush" Value="#D00000"/>
+        </Style>
+        <Style Selector="Button.Danger:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#D00000"/>
+        </Style>
+        <Style Selector="TextBox">
+            <Setter Property="Background" Value="#141417"/>
+            <Setter Property="BorderBrush" Value="#2E2E35"/>
+            <Setter Property="Foreground" Value="#EDEDED"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="Padding" Value="8,6"/>
+        </Style>
+        <Style Selector="TextBox:focus /template/ Border">
+            <Setter Property="BorderBrush" Value="#005FB8"/>
+        </Style>
+        <Style Selector="ListBox">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+        </Style>
+        <Style Selector="ListBoxItem">
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Margin" Value="0,0,0,8"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="Background" Duration="0:0:0.15"/>
+                </Transitions>
+            </Setter>
+        </Style>
+        <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#15151A"/>
+        </Style>
+        <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+            <Setter Property="Background" Value="#1A1A22"/>
+        </Style>
+    </Window.Styles>
+
+    <Grid>
+        <!-- LOCKED PANEL -->
+        <Border Name="LockedPanel" Background="#0E0E10" IsVisible="True" ZIndex="100">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="320" Spacing="16">
+                <TextBlock Text="RDP VAULT" FontSize="28" FontWeight="Bold" Foreground="#EDEDED" HorizontalAlignment="Center" LetterSpacing="2"/>
+                <TextBlock Text="Enter Master Password or use TPM Quick Unlock." FontSize="13" Foreground="#8A8A93" HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center" Margin="0,0,0,10"/>
+                
+                <TextBox Name="TxtPassword" PasswordChar="•" Watermark="Master Password" KeyDown="TxtPassword_KeyDown"/>
+                
+                <Button Name="BtnUnlock" Content="Unlock Vault" Classes="Accent" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="BtnUnlock_Click"/>
+                
+                <Button Name="BtnHello" Content="Hardware TPM Unlock" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="BtnHello_Click" IsVisible="False" Margin="0,10,0,0"/>
+                
+                <TextBlock Name="TxtLockError" Foreground="#E83030" FontSize="13" HorizontalAlignment="Center" IsVisible="False" Margin="0,10,0,0"/>
+            </StackPanel>
+        </Border>
+
+        <!-- MAIN PANEL -->
+        <Grid Name="MainPanel" IsVisible="False" RowDefinitions="Auto,*,Auto" Margin="20">
+            <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,20">
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10">
+                    <TextBlock Text="RDP VAULT" FontSize="20" FontWeight="Bold" VerticalAlignment="Center" LetterSpacing="1"/>
+                    <Border Background="#1A1A1E" CornerRadius="4" Padding="6,2" VerticalAlignment="Center">
+                        <TextBlock Name="TxtCount" Text="0 Profiles" FontSize="12" Foreground="#8A8A93"/>
+                    </Border>
+                </StackPanel>
+                
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10">
+                    <Button Name="BtnSettings" Content="Settings" Click="BtnSettings_Click"/>
+                    <Button Name="BtnLock" Content="Lock Vault" Click="BtnLock_Click"/>
+                </StackPanel>
+            </Grid>
+
+            <ScrollViewer Grid.Row="1">
+                <ListBox Name="LstProfiles">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <Border Background="#121215" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="6" Padding="16">
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Name}" FontSize="16" FontWeight="SemiBold"/>
+                                        <TextBlock Text="{Binding DisplayHost}" FontSize="13" Foreground="#8A8A93" Margin="0,4,0,0"/>
+                                        <TextBlock Text="{Binding Username}" FontSize="12" Foreground="#6A6A73" Margin="0,2,0,0"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                        <Button Content="Connect" Classes="Accent" Click="BtnConnect_Click" Tag="{Binding .}"/>
+                                        <Button Content="Shortcut" Click="BtnShortcut_Click" Tag="{Binding .}"/>
+                                        <Button Content="Edit" Click="BtnEdit_Click" Tag="{Binding .}"/>
+                                        <Button Content="Delete" Classes="Danger" Click="BtnDelete_Click" Tag="{Binding .}"/>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </ScrollViewer>
+
+            <Grid Grid.Row="2" Margin="0,20,0,0">
+                <Button Name="BtnAddProfile" Content="+ Add Profile" HorizontalAlignment="Left" Click="BtnAddProfile_Click"/>
+                <TextBlock Name="TxtStatus" Text="Connected to Hardware TPM." FontSize="12" Foreground="#6A6A73" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+            </Grid>
+        </Grid>
+    </Grid>
 </Window>

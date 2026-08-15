@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("AvaloniaPort")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+b9fcd5b7d459917cfb4aab076f2701a393d90f6a")]
 [assembly: System.Reflection.AssemblyProductAttribute("AvaloniaPort")]
 [assembly: System.Reflection.AssemblyTitleAttribute("AvaloniaPort")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "c:\\Full_Control\\RDP_Encrypt\\AvaloniaPort\\AvaloniaPort.csproj": {}
+    "C:\\Full_Control\\RDP_Encrypt\\AvaloniaPort\\AvaloniaPort.csproj": {}
   },
   "projects": {
-    "c:\\Full_Control\\RDP_Encrypt\\AvaloniaPort\\AvaloniaPort.csproj": {
+    "C:\\Full_Control\\RDP_Encrypt\\AvaloniaPort\\AvaloniaPort.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "c:\\Full_Control\\RDP_Encrypt\\AvaloniaPort\\AvaloniaPort.csproj",
+        "projectUniqueName": "C:\\Full_Control\\RDP_Encrypt\\AvaloniaPort\\AvaloniaPort.csproj",
         "projectName": "AvaloniaPort",
-        "projectPath": "c:\\Full_Control\\RDP_Encrypt\\AvaloniaPort\\AvaloniaPort.csproj",
+        "projectPath": "C:\\Full_Control\\RDP_Encrypt\\AvaloniaPort\\AvaloniaPort.csproj",
         "packagesPath": "C:\\Users\\alon\\.nuget\\packages\\",
-        "outputPath": "c:\\Full_Control\\RDP_Encrypt\\AvaloniaPort\\obj\\",
+        "outputPath": "C:\\Full_Control\\RDP_Encrypt\\AvaloniaPort\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\alon\\AppData\\Roaming\\NuGet\\NuGet.Config"

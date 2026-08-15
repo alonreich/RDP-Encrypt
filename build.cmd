@@ -190,7 +190,7 @@ if not defined VSWHERE (
   echo ERROR: Native AOT platform linker not found.
   exit /b 1
 )
-for /f "usebackq delims=" %%I in ("%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2^>nul) do (
+for /f "usebackq delims=" %%I in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2^>nul`) do (
   if exist "%%I\Common7\Tools\VsDevCmd.bat" (
     set "VSCMD_SKIP_SENDTELEMETRY=1"
     call "%%I\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul

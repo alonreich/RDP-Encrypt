@@ -33,6 +33,11 @@ namespace RDPVault
             else if (profile.Width == 1024 && profile.Height == 768) cmb.SelectedIndex = 7;
             else if (profile.Width == 800 && profile.Height == 600) cmb.SelectedIndex = 8;
             else cmb.SelectedIndex = 0;
+
+            this.FindControl<CheckBox>("ChkClipboard").IsChecked = profile.AllowClipboard;
+            this.FindControl<CheckBox>("ChkDrives").IsChecked = profile.AllowDrives;
+            this.FindControl<CheckBox>("ChkPrinters").IsChecked = profile.AllowPrinters;
+            this.FindControl<CheckBox>("ChkSmartCards").IsChecked = profile.AllowSmartCards;
         }
 
         private void BtnSave_Click(object? sender, RoutedEventArgs e)
@@ -54,6 +59,11 @@ namespace RDPVault
             else if (idx == 6) { Profile.Width = 1280; Profile.Height = 800; }
             else if (idx == 7) { Profile.Width = 1024; Profile.Height = 768; }
             else if (idx == 8) { Profile.Width = 800; Profile.Height = 600; }
+
+            Profile.AllowClipboard = this.FindControl<CheckBox>("ChkClipboard").IsChecked ?? false;
+            Profile.AllowDrives = this.FindControl<CheckBox>("ChkDrives").IsChecked ?? false;
+            Profile.AllowPrinters = this.FindControl<CheckBox>("ChkPrinters").IsChecked ?? false;
+            Profile.AllowSmartCards = this.FindControl<CheckBox>("ChkSmartCards").IsChecked ?? false;
 
             Close(true);
         }

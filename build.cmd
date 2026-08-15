@@ -41,7 +41,7 @@ set "PROJECT_EXE=RDPVault.exe"
 set "OUTPUT_EXE=RDPVault.exe"
 set "OUTPUT_DIR=.\compiled"
 set "PUBLISH_BASE_ARGS=-p:TreatWarningsAsErrors=false"
-set "PUBLISH_AOT_ARGS=-p:PublishAot=true -p:SelfContained=true"
+set "PUBLISH_AOT_ARGS=-p:PublishSingleFile=true -p:SelfContained=true"
 set "DOTNET_LOG_ARGS=-consoleLoggerParameters:ErrorsOnly"
 
 echo ###########################################################
@@ -54,14 +54,13 @@ call :CLEAN_ALL
 
 echo.
 echo ###########################################################
-echo CHECKING NATIVE AOT TOOLCHAIN...
 echo ###########################################################
-call :DETECT_NATIVE_AOT
-if errorlevel 1 exit /b 1
+echo CHECKING AVALONIA SINGLE FILE PIPELINE...
+echo ###########################################################
 
 echo.
 echo ###########################################################
-echo BUILDING RDP Vault: NativeAOT win-x64
+echo BUILDING RDP Vault: Self-Contained SingleFile win-x64
 echo ###########################################################
 call :BUILD_NATIVE
 if errorlevel 1 exit /b 1
@@ -115,10 +114,10 @@ if not defined LOCALHASH (
   echo [PUBLISH] STOPPED: could not fingerprint the freshly built exe.
   exit /b 1
 )
-for /f "usebackq delims=" %%D in (powershell -NoProfile -Command "Get-Date -Format yyyy.MM.dd") do set "TAG=v%%D"
+for /f "usebackq delims=" %%D in (`powershell -NoProfile -Command "Get-Date -Format yyyy.MM.dd"`) do set "TAG=v%%D"
 
 set "REMOVED=0"
-for /f "usebackq delims=" %%T in (gh release list --repo !REPO! --json tagName --jq ".[].tagName" 2^>nul) do (
+for /f "usebackq delims=" %%T in (`gh release list --repo !REPO! --json tagName --jq ".[].tagName" 2^>nul`) do (
   gh release delete %%T --repo !REPO! --cleanup-tag --yes >nul 2>&1
   set /a REMOVED+=1
 )
@@ -130,7 +129,7 @@ if errorlevel 1 (
 )
 
 set "REMOTEHASH="
-for /f "usebackq delims=" %%V in (gh release view !TAG! --repo !REPO! --json assets --jq ".assets[0].digest" 2^>nul) do set "REMOTEHASH=%%V"
+for /f "usebackq delims=" %%V in (`gh release view !TAG! --repo !REPO! --json assets --jq ".assets[0].digest" 2^>nul`) do set "REMOTEHASH=%%V"
 set "REMOTEHASH=!REMOTEHASH:sha256:=!"
 if /I not "!REMOTEHASH!"=="!LOCALHASH!" (
   echo [PUBLISH] STOPPED: the uploaded asset does NOT match the file that was just built.
@@ -177,27 +176,7 @@ exit /b 0
 if not exist "%OUTPUT_DIR%\%OUTPUT_EXE%" exit /b 1
 exit /b 0
 
-:DETECT_NATIVE_AOT
-where link.exe >nul 2>&1
-if not errorlevel 1 goto DETECT_NATIVE_AOT_OK
 
-set "VSWHERE="
-where vswhere.exe >nul 2>&1
-if not errorlevel 1 set "VSWHERE=vswhere.exe"
-if not defined VSWHERE if exist "%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
-
-if not defined VSWHERE (
-  echo ERROR: Native AOT platform linker not found.
-  exit /b 1
-)
-for /f "usebackq delims=" %%I in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2^>nul`) do (
-  if exist "%%I\Common7\Tools\VsDevCmd.bat" goto DETECT_NATIVE_AOT_OK
-)
-echo ERROR: Native AOT platform linker not found.
-exit /b 1
-
-:DETECT_NATIVE_AOT_OK
-exit /b 0
 
 :TERMINATE_PROCESSES
 taskkill /F /IM RDPVault.exe /T 2>nul

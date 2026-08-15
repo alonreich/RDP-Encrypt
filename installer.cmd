@@ -16,6 +16,11 @@ reg add "%REG_PATH%" /v UninstallString /d "\"%INSTALL_DIR%\uninstaller.cmd\"" /
 reg add "%REG_PATH%" /v DisplayVersion /d "1.0.0" /f >nul
 reg add "%REG_PATH%" /v Publisher /d "Alon Reich" /f >nul
 
+set "CLASS_PATH=HKCU\Software\Classes"
+reg add "%CLASS_PATH%\.rdpvlink" /d "RDPVault.Link" /f >nul
+reg add "%CLASS_PATH%\RDPVault.Link\shell\open\command" /d "\"%INSTALL_DIR%\RDPVault.exe\" --launch \"%%1\"" /f >nul
+reg add "%CLASS_PATH%\RDPVault.Link\DefaultIcon" /d "\"%INSTALL_DIR%\RDPVault.exe\",0" /f >nul
+
 echo Creating Desktop Shortcut...
 powershell -NoProfile -Command "$wshell = New-Object -ComObject WScript.Shell; $s = $wshell.CreateShortcut('%USERPROFILE%\Desktop\RDP Vault.lnk'); $s.TargetPath = '%INSTALL_DIR%\RDPVault.exe'; $s.WorkingDirectory = '%INSTALL_DIR%'; $s.Save()"
 

@@ -1,20 +1,20 @@
+using System;
 using System.IO;
 using System.IO.Pipes;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Avalonia.Threading;
 
 namespace RDPVault;
 
-/// <summary>
-/// Holds the unlocked vault state in memory: master key + payload.
-/// Owns the auto-lock timer and the USB-removal watcher.
-/// A named mutex guarantees only one instance runs per vault.
-/// </summary>
 public sealed class SessionManager : IDisposable
 {
     public static SessionManager Current { get; } = new();
 
     public string VaultPath { get; }
-    public string ExeRoot { get; }   // e.g. E:\  (USB stick root, or a folder on a disk)
+    public string ExeRoot { get; }
+    public string? PendingLaunchId { get; private set; }
 
     public VaultFile? File { get; private set; }
     public byte[]? Master { get; private set; }
@@ -22,8 +22,7 @@ public sealed class SessionManager : IDisposable
 
     public bool IsUnlocked => Master != null;
 
-    public string DisplayRoot => Path.GetFileNameWithoutExtension(
-        Environment.ProcessPath ?? "RDPVault.exe");
+    public string DisplayRoot => Path.GetFileNameWithoutExtension(Environment.ProcessPath ?? "RDPVault.exe");
 
     private readonly Mutex _singleMutex;
     private readonly DispatcherTimer _lockTimer = new() { Interval = TimeSpan.FromSeconds(1) };
@@ -32,8 +31,9 @@ public sealed class SessionManager : IDisposable
     private DateTime _lastActivity = DateTime.UtcNow;
     private bool _exiting;
 
-    public event Action? Locked;             // vault re-locked (timer / USB / manual)
+    public event Action? Locked;
     public event Action? UsbRemoved;
+    public event Action? ShowRequested;
 
     private SessionManager()
     {
@@ -41,17 +41,33 @@ public sealed class SessionManager : IDisposable
         ExeRoot = Path.GetPathRoot(exeDir) ?? "C:\\";
         VaultPath = Path.Combine(exeDir, "vault.rdpv");
 
+        var args = Environment.GetCommandLineArgs();
+        string pipeMsg = "SHOW";
+        if (args.Length >= 3 && args[1] == "--launch" && System.IO.File.Exists(args[2]))
+        {
+            try
+            {
+                string content = System.IO.File.ReadAllText(args[2]);
+                if (content.StartsWith("TargetProfileId="))
+                {
+                    string target = content.Substring(16).Trim();
+                    PendingLaunchId = target;
+                    pipeMsg = $"LAUNCH:{target}";
+                }
+            }
+            catch { }
+        }
+
         bool createdNew;
         _singleMutex = new Mutex(true, @"Local\RDPVault_SingleInstance", out createdNew);
         if (!createdNew)
         {
-            // Tell the running instance to surface, then exit.
             try
             {
                 using var client = new NamedPipeClientStream(".", "RDPVault_Show", PipeDirection.Out);
                 client.Connect(500);
                 using var w = new StreamWriter(client) { AutoFlush = true };
-                w.Write("SHOW");
+                w.Write(pipeMsg);
             }
             catch { }
             Environment.Exit(0);
@@ -67,8 +83,6 @@ public sealed class SessionManager : IDisposable
         _lockTimer.Start();
         _usbTimer.Start();
     }
-
-    // ---------------- unlock / lock / save ----------------
 
     public void LoadFile()
         => File = System.Text.Json.JsonSerializer.Deserialize<VaultFile>(
@@ -100,12 +114,6 @@ public sealed class SessionManager : IDisposable
         AfterUnlock();
     }
 
-    /// <summary>
-    /// Windows Hello quick unlock:
-    /// 1. find this PC's seal in the vault, 2. make Windows prompt finger/face/PIN
-    /// and verify the key fingerprint, 3. unseal the master key, 4. unlock.
-    /// Returns false when unsupported, no seal, or the user fails verification.
-    /// </summary>
     public async Task<bool> UnlockWithHelloAsync()
     {
         LoadFile();
@@ -113,10 +121,10 @@ public sealed class SessionManager : IDisposable
         SealEntry? seal = File!.Seals.FirstOrDefault(s => s.MachineId == machineId);
         if (seal == null || string.IsNullOrEmpty(seal.KeyId)) return false;
 
-        bool verified = await WindowsHello.VerifyAsync(seal.KeyId);
-        if (!verified) return false;
+        byte[]? signature = await WindowsHello.GetSignatureAsync(seal.KeyId);
+        if (signature == null) return false;
 
-        byte[]? master = VaultCrypto.UnsealLocal(File!, out _);
+        byte[]? master = VaultCrypto.UnsealTpm(File!, seal, signature);
         if (master == null) return false;
 
         try { Payload = VaultCrypto.OpenPayload(File!, master); }
@@ -127,7 +135,6 @@ public sealed class SessionManager : IDisposable
         return true;
     }
 
-    /// <summary>True if this PC has a usable quick-unlock seal AND Hello is available.</summary>
     public bool HelloSealAvailable()
     {
         try
@@ -160,11 +167,16 @@ public sealed class SessionManager : IDisposable
     private void AfterUnlock()
     {
         _lastActivity = DateTime.UtcNow;
-        TraceCleaner.Sweep();      // hygiene: clear residue possibly left by earlier crash
+        TraceCleaner.Sweep();
         StartTimers();
-    }
 
-    // ---------------- timers ----------------
+        if (!string.IsNullOrEmpty(PendingLaunchId) && Payload != null)
+        {
+            var p = Payload.Profiles.FirstOrDefault(x => x.Id == PendingLaunchId);
+            if (p != null) Dispatcher.UIThread.InvokeAsync(() => RdpLauncher.Launch(p));
+            PendingLaunchId = null;
+        }
+    }
 
     public void Touch() => _lastActivity = DateTime.UtcNow;
 
@@ -173,7 +185,7 @@ public sealed class SessionManager : IDisposable
         if (!IsUnlocked || Payload == null) return;
         int minutes = Math.Max(1, Payload.Settings.LockMinutes);
         if (DateTime.UtcNow - _lastActivity >= TimeSpan.FromMinutes(minutes))
-            Lock(killSessions: false);   // keep live RDP windows; only lock the vault
+            Lock(killSessions: false);
     }
 
     private void CheckUsbStillPresent()
@@ -181,7 +193,6 @@ public sealed class SessionManager : IDisposable
         if (_exiting) return;
         try
         {
-            // The app folder must still exist (works for USB sticks and fixed folders).
             if (!Directory.Exists(AppContext.BaseDirectory)) throw new IOException("root gone");
             if (!System.IO.File.Exists(Environment.ProcessPath)) throw new IOException("exe gone");
         }
@@ -196,24 +207,19 @@ public sealed class SessionManager : IDisposable
         }
     }
 
-    // ---------------- quick-unlock seals ----------------
-
-    /// <summary>Enable Hello quick unlock on THIS PC (prompt). Vault must be unlocked.</summary>
     public async Task<bool> EnableHelloSealAsync()
     {
         if (File == null || Master == null || Payload == null) return false;
-        string? keyId = await WindowsHello.EnrollAsync();
-        if (keyId == null) return false;
+        var enroll = await WindowsHello.EnrollAndSignAsync();
+        if (enroll == null) return false;
 
-        var seal = VaultCrypto.SealLocal(Master);
-        seal.KeyId = keyId;
+        var seal = VaultCrypto.SealTpm(Master, enroll.Value.KeyId, enroll.Value.Signature, File);
         var seals = File.Seals.Where(s => s.MachineId != seal.MachineId).ToList();
         seals.Add(seal);
         VaultCrypto.Save(File, Master, Payload, VaultPath, newPassword: null, newSeals: seals);
         return true;
     }
 
-    /// <summary>Remove this PC's quick-unlock seal (password needed from now on).</summary>
     public void DisableHelloSeal()
     {
         if (File == null || Master == null || Payload == null) return;
@@ -222,16 +228,12 @@ public sealed class SessionManager : IDisposable
         VaultCrypto.Save(File, Master, Payload, VaultPath, newPassword: null, newSeals: seals);
     }
 
-    /// <summary>Change master password; also invalidates every quick-unlock seal.</summary>
     public void ChangePassword(string oldPassword, string newPassword)
     {
         LoadFile();
-        _ = VaultCrypto.Open(File!, oldPassword);   // throws InvalidDataException when wrong
-        // Password change = possible compromise → wipe all quick-unlock seals.
-        VaultCrypto.Save(File!, Master!, Payload!, VaultPath, newPassword, newSeals: new List<SealEntry>());
+        _ = VaultCrypto.Open(File!, oldPassword);
+        VaultCrypto.Save(File!, Master!, Payload!, VaultPath, newPassword, newSeals: new System.Collections.Generic.List<SealEntry>());
     }
-
-    // ---------------- show-again pipe ----------------
 
     private async Task PipeLoop()
     {
@@ -242,14 +244,31 @@ public sealed class SessionManager : IDisposable
                 using var server = new NamedPipeServerStream("RDPVault_Show", PipeDirection.In);
                 await server.WaitForConnectionAsync();
                 using var r = new StreamReader(server);
-                if (await r.ReadToEndAsync() == "SHOW") Touch();
-                ShowRequested?.Invoke();
+                string? msg = await r.ReadToEndAsync();
+                if (msg == "SHOW")
+                {
+                    Touch();
+                    Dispatcher.UIThread.InvokeAsync(() => ShowRequested?.Invoke());
+                }
+                else if (msg != null && msg.StartsWith("LAUNCH:"))
+                {
+                    string target = msg.Substring(7);
+                    Touch();
+                    if (IsUnlocked && Payload != null)
+                    {
+                        var p = Payload.Profiles.FirstOrDefault(x => x.Id == target);
+                        if (p != null) Dispatcher.UIThread.InvokeAsync(() => RdpLauncher.Launch(p));
+                    }
+                    else
+                    {
+                        PendingLaunchId = target;
+                        Dispatcher.UIThread.InvokeAsync(() => ShowRequested?.Invoke());
+                    }
+                }
             }
             catch { }
         }
     }
-
-    public event Action? ShowRequested;
 
     public void Dispose()
     {

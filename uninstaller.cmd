@@ -12,6 +12,8 @@ set "REG_PATH=HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\RDPVault"
 
 echo Removing registry hooks...
 reg delete "%REG_PATH%" /f >nul 2>&1
+reg delete "HKCU\Software\Classes\.rdpvlink" /f >nul 2>&1
+reg delete "HKCU\Software\Classes\RDPVault.Link" /f >nul 2>&1
 
 echo Removing Desktop shortcuts...
 del /f /q "%USERPROFILE%\Desktop\RDP Vault.lnk" >nul 2>&1

@@ -1,23 +1,17 @@
+using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Isopoh.Cryptography.Argon2;
-using Isopoh.Cryptography.SecureArray;
 
 namespace RDPVault;
 
-/// <summary>
-/// Vault cryptography:
-/// - Password --Argon2id--> password key --AES-GCM unwrap--> master key --AES-GCM--> payload.
-/// - Optional per-PC "seals": master key wrapped by DPAPI (CurrentUser) so the same
-///   Windows account can unseal it instantly, optionally gated by Windows Hello.
-/// No plaintext ever touches disk; keys live in pinned/locked byte arrays in memory.
-/// </summary>
 public static class VaultCrypto
 {
-    private const int MasterKeyBytes = 32; // AES-256
+    private const int MasterKeyBytes = 32;
     private const int NonceBytes = 12;
 
     public static readonly JsonSerializerOptions JsonOpts = new()
@@ -26,16 +20,14 @@ public static class VaultCrypto
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
-    // ---------- Argon2id ----------
-
     public static byte[] DerivePasswordKey(string password, VaultFile.KdfParams kdf)
     {
         byte[] salt = Convert.FromBase64String(kdf.Salt);
         var config = new Argon2Config
         {
-            Type = Argon2Type.HybridAddressing, // Argon2id
+            Type = Argon2Type.HybridAddressing,
             Version = Argon2Version.Nineteen,
-            MemoryCost = kdf.Mem,       // KiB
+            MemoryCost = kdf.Mem,
             TimeCost = kdf.Iter,
             Lanes = kdf.Lanes,
             Threads = kdf.Lanes,
@@ -49,8 +41,6 @@ public static class VaultCrypto
         Array.Copy(hash.Buffer, key, MasterKeyBytes);
         return key;
     }
-
-    // ---------- AES-GCM helpers ----------
 
     private static (byte[] nonce, byte[] ct) AeadSeal(byte[] key, byte[] plaintext)
     {
@@ -78,8 +68,6 @@ public static class VaultCrypto
     private static byte[] OpenBlob(byte[] key, VaultFile.WrappedBlob blob)
         => AeadOpen(key, Convert.FromBase64String(blob.Nonce), Convert.FromBase64String(blob.Ct));
 
-    // ---------- Create / open / save ----------
-
     public static VaultFile CreateVault(string password, VaultPayload payload, string vaultPath)
     {
         var file = new VaultFile();
@@ -100,7 +88,6 @@ public static class VaultCrypto
         }
     }
 
-    /// <summary>Verify password & return (masterKey, payload). Throws InvalidDataException on wrong password.</summary>
     public static (byte[] Master, VaultPayload Payload) Open(VaultFile file, string password)
     {
         byte[] passwordKey = DerivePasswordKey(password, file.Kdf);
@@ -121,7 +108,6 @@ public static class VaultCrypto
         }
     }
 
-    /// <summary>Re-save payload (and optionally new password / new seals) under the given master key.</summary>
     public static void Save(VaultFile file, byte[] master, VaultPayload payload, string vaultPath,
                             string? newPassword = null, List<SealEntry>? newSeals = null)
     {
@@ -129,7 +115,6 @@ public static class VaultCrypto
 
         if (newPassword != null)
         {
-            // Re-KDF salt keeps old pre-images useless.
             file.Kdf.Salt = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
             file.Kdf.Mem = 262144;
             file.Kdf.Iter = 5;
@@ -140,18 +125,14 @@ public static class VaultCrypto
 
         file.Data = SealToBlob(master, Serialize(payload));
 
-        // Atomic write: temp file + replace, so a crash can never corrupt the vault.
         string tmp = vaultPath + ".tmp";
         File.WriteAllText(tmp, JsonSerializer.Serialize(file, JsonOpts));
         if (File.Exists(vaultPath)) File.Replace(tmp, vaultPath, null);
         else File.Move(tmp, vaultPath);
     }
 
-    /// <summary>Decrypt payload with a master key obtained from a seal. Throws if key is wrong.</summary>
     public static VaultPayload OpenPayload(VaultFile file, byte[] master)
         => Deserialize(OpenBlob(master, file.Data));
-
-    // ---------- DPAPI seals (quick unlock on this PC only) ----------
 
     public static string CurrentMachineId()
     {
@@ -159,42 +140,63 @@ public static class VaultCrypto
         string domain = Environment.UserDomainName;
         string user = Environment.UserName;
         byte[] h = SHA256.HashData(Encoding.UTF8.GetBytes($"{machine}|{domain}|{user}"));
-        return Convert.ToHexString(h, 0, 8); // 16 hex chars
+        return Convert.ToHexString(h, 0, 8);
     }
 
-    public static byte[]? UnsealLocal(VaultFile file, out SealEntry? matched)
+    public static byte[] DeriveTpmKey(byte[] signature, string saltBase64)
     {
-        string id = CurrentMachineId();
-        foreach (var seal in file.Seals)
+        var config = new Argon2Config
         {
-            if (seal.MachineId != id) continue;
-            try
-            {
-                byte[] master = ProtectedData.Unprotect(Convert.FromBase64String(seal.Dpapi), null,
-                                                        DataProtectionScope.CurrentUser);
-                // Sanity: master must open Data.
-                _ = OpenBlob(master, file.Data);
-                matched = seal;
-                return master;
-            }
-            catch (CryptographicException) { }
-            catch (InvalidDataException) { }
-        }
-        matched = null;
-        return null;
+            Type = Argon2Type.HybridAddressing,
+            Version = Argon2Version.Nineteen,
+            MemoryCost = 65536,
+            TimeCost = 2,
+            Lanes = 4,
+            Threads = 4,
+            Password = signature,
+            Salt = Convert.FromBase64String(saltBase64),
+            HashLength = MasterKeyBytes
+        };
+        var argon2 = new Argon2(config);
+        using var hash = argon2.Hash();
+        byte[] key = new byte[MasterKeyBytes];
+        Array.Copy(hash.Buffer, key, MasterKeyBytes);
+        return key;
     }
 
-    public static SealEntry SealLocal(byte[] master)
+    public static SealEntry SealTpm(byte[] master, string keyId, byte[] signature, VaultFile file)
     {
+        byte[] tpmKey = DeriveTpmKey(signature, file.Kdf.Salt);
+        var blob = SealToBlob(tpmKey, master);
+        CryptographicOperations.ZeroMemory(tpmKey);
+
         return new SealEntry
         {
             MachineId = CurrentMachineId(),
-            Dpapi = Convert.ToBase64String(
-                ProtectedData.Protect(master, null, DataProtectionScope.CurrentUser))
+            KeyId = keyId,
+            TpmBlob = $"{blob.Nonce}:{blob.Ct}"
         };
     }
 
-    // ---------- serialization ----------
+    public static byte[]? UnsealTpm(VaultFile file, SealEntry seal, byte[] signature)
+    {
+        byte[] tpmKey = DeriveTpmKey(signature, file.Kdf.Salt);
+        try
+        {
+            string[] parts = seal.TpmBlob.Split(':');
+            if (parts.Length != 2) return null;
+            var blob = new VaultFile.WrappedBlob { Nonce = parts[0], Ct = parts[1] };
+            return OpenBlob(tpmKey, blob);
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(tpmKey);
+        }
+    }
 
     private static byte[] Serialize(VaultPayload p) => JsonSerializer.SerializeToUtf8Bytes(p, JsonOpts);
 

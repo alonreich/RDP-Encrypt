@@ -28,6 +28,21 @@ public static class InstallerService
         System.Threading.Thread.Sleep(500); // Artificial delay so user can read
 
         // 2. Copy Executable
+        log("Checking for running instances...");
+        foreach (var p in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(InstalledExe)))
+        {
+            try
+            {
+                if (p.MainModule != null && p.MainModule.FileName.Equals(InstalledExe, StringComparison.OrdinalIgnoreCase))
+                {
+                    log($"Killing running instance (PID: {p.Id})...");
+                    p.Kill();
+                    p.WaitForExit(3000);
+                }
+            }
+            catch { /* Ignore access denied for other processes */ }
+        }
+
         log($"Copying core executable to: {InstalledExe}");
         File.Copy(currentExe, InstalledExe, true);
         System.Threading.Thread.Sleep(500);

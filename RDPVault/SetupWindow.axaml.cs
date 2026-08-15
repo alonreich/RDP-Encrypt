@@ -13,6 +13,13 @@ public partial class SetupWindow : Window
     public SetupWindow()
     {
         InitializeComponent();
+
+        if (System.IO.File.Exists(InstallerService.InstalledExe))
+        {
+            this.Title = "Upgrade RDP Vault";
+            TxtInstallTitle.Text = "Upgrade Existing App";
+            TxtInstallSubtitle.Text = "Preserves your vault and settings";
+        }
     }
 
     private void BtnPortable_Click(object? sender, RoutedEventArgs e)

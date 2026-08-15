@@ -37,8 +37,8 @@
             <Grid ColumnDefinitions="*,20,*">
                 <Button Grid.Column="0" Name="BtnInstall" Classes="Accent" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="BtnInstall_Click">
                     <StackPanel Spacing="6">
-                        <TextBlock Text="Install to this PC" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center"/>
-                        <TextBlock Text="Registers shortcuts and uninstaller" FontSize="11" Foreground="#A0C0E0" HorizontalAlignment="Center"/>
+                        <TextBlock Name="TxtInstallTitle" Text="Install to this PC" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center"/>
+                        <TextBlock Name="TxtInstallSubtitle" Text="Registers shortcuts and uninstaller" FontSize="11" Foreground="#A0C0E0" HorizontalAlignment="Center"/>
                     </StackPanel>
                 </Button>
                 

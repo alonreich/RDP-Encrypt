@@ -17,18 +17,23 @@ public static class InstallerService
         return currentExe.Equals(InstalledExe, StringComparison.OrdinalIgnoreCase);
     }
 
-    public static void Install()
+    public static void InstallWithProgress(Action<string> log)
     {
         string currentExe = Process.GetCurrentProcess().MainModule?.FileName ?? "";
-        if (string.IsNullOrEmpty(currentExe)) return;
+        if (string.IsNullOrEmpty(currentExe)) throw new Exception("Could not resolve current executable path.");
 
         // 1. Create Directory
+        log($"Ensuring installation directory exists: {InstallDir}");
         if (!Directory.Exists(InstallDir)) Directory.CreateDirectory(InstallDir);
+        System.Threading.Thread.Sleep(500); // Artificial delay so user can read
 
         // 2. Copy Executable
+        log($"Copying core executable to: {InstalledExe}");
         File.Copy(currentExe, InstalledExe, true);
+        System.Threading.Thread.Sleep(500);
 
         // 3. Register in Appwiz.cpl
+        log("Writing Windows Registry uninstallation keys...");
         string uninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\RDPVault";
         using (RegistryKey key = Registry.CurrentUser.CreateSubKey(uninstallKey))
         {
@@ -42,19 +47,30 @@ public static class InstallerService
             key.SetValue("NoModify", 1, RegistryValueKind.DWord);
             key.SetValue("NoRepair", 1, RegistryValueKind.DWord);
         }
+        System.Threading.Thread.Sleep(500);
 
         // 4. Create Desktop & Start Menu Shortcuts via WScript.Shell COM object
+        log("Generating WScript.Shell COM object...");
+        log("Creating Desktop shortcut...");
         CreateShortcut(
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "RDP Vault.lnk"),
             InstalledExe, "Encrypted RDP Connection Manager");
 
+        log("Creating Start Menu shortcut...");
         string startMenuDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "RDP Vault");
         if (!Directory.Exists(startMenuDir)) Directory.CreateDirectory(startMenuDir);
         CreateShortcut(
             Path.Combine(startMenuDir, "RDP Vault.lnk"),
             InstalledExe, "Encrypted RDP Connection Manager");
+            
+        System.Threading.Thread.Sleep(500);
+        log("Validating deployment integrity...");
+        if (!File.Exists(InstalledExe)) throw new Exception("Post-install validation failed. Executable missing.");
+        log("Finalizing Setup...");
+    }
 
-        // 5. Launch the installed executable and exit current
+    public static void LaunchInstalledAndExit()
+    {
         Process.Start(new ProcessStartInfo
         {
             FileName = InstalledExe,

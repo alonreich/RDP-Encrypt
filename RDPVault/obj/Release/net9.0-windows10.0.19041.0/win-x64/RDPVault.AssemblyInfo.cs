@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("RDPVault")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+7674e8d0bf8be5af24249399d8fa6429fce1a229")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+16d2bb7c366b2a537551cefb454c4e8dbc73a1ee")]
 [assembly: System.Reflection.AssemblyProductAttribute("RDPVault")]
 [assembly: System.Reflection.AssemblyTitleAttribute("RDPVault")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

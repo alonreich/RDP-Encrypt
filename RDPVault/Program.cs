@@ -18,7 +18,15 @@ class Program
             return;
         }
 
-        BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+        string vaultPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "vault.dat");
+        if (!System.IO.File.Exists(vaultPath) && !InstallerService.IsInstalledLocation())
+        {
+            BuildAvaloniaApp().StartWithClassicDesktopLifetime(args, Avalonia.Controls.ShutdownMode.OnMainWindowClose);
+        }
+        else
+        {
+            BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+        }
     }
 
     // Avalonia configuration, don't remove; also used by visual designer.

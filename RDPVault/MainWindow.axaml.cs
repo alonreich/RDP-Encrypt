@@ -32,7 +32,6 @@ public partial class MainWindow : Window
             TxtLockError.IsVisible = false;
             TxtLockStatus.IsVisible = false;
             BtnHello.IsVisible = SessionManager.Current.HelloSealAvailable();
-            BtnInstall.IsVisible = !InstallerService.IsInstalledLocation();
             TxtPassword.Focus();
         }
         else
@@ -149,19 +148,6 @@ public partial class MainWindow : Window
             BtnHello.IsEnabled = true;
             TxtPassword.Text = "";
             TxtPassword.Focus();
-        }
-    }
-
-    private void BtnInstall_Click(object? sender, RoutedEventArgs e)
-    {
-        try
-        {
-            InstallerService.Install();
-        }
-        catch (Exception ex)
-        {
-            TxtLockError.Text = "Failed to install: " + ex.Message;
-            TxtLockError.IsVisible = true;
         }
     }
 

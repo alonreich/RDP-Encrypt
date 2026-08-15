@@ -85,8 +85,8 @@ public sealed class SessionManager : IDisposable
     }
 
     public void LoadFile()
-        => File = System.Text.Json.JsonSerializer.Deserialize<VaultFile>(
-               System.IO.File.ReadAllText(VaultPath), VaultCrypto.JsonOpts)
+        => File = System.Text.Json.JsonSerializer.Deserialize(
+               System.IO.File.ReadAllText(VaultPath), VaultJsonContext.Default.VaultFile)
                ?? throw new InvalidDataException("Vault file is empty.");
 
     public void CreateNew(string password, VaultPayload payload)

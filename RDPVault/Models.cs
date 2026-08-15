@@ -75,3 +75,11 @@ public class VaultFile
         public string Ct { get; set; } = "";
     }
 }
+
+[JsonSourceGenerationOptions(WriteIndented = false, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
+[JsonSerializable(typeof(VaultFile))]
+[JsonSerializable(typeof(VaultPayload))]
+[JsonSerializable(typeof(SecurityEnforcer.FailState))]
+public partial class VaultJsonContext : JsonSerializerContext
+{
+}

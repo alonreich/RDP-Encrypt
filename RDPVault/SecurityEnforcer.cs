@@ -18,7 +18,7 @@ public static class SecurityEnforcer
         var state = new FailState();
         if (File.Exists(FailsFile))
         {
-            try { state = JsonSerializer.Deserialize<FailState>(File.ReadAllText(FailsFile)) ?? new FailState(); } catch { }
+            try { state = JsonSerializer.Deserialize(File.ReadAllText(FailsFile), VaultJsonContext.Default.FailState) ?? new FailState(); } catch { }
         }
         
         if ((DateTime.UtcNow - state.FirstFail).TotalMinutes > windowMinutes)
@@ -31,7 +31,7 @@ public static class SecurityEnforcer
             state.Count++;
         }
         
-        File.WriteAllText(FailsFile, JsonSerializer.Serialize(state));
+        File.WriteAllText(FailsFile, JsonSerializer.Serialize(state, VaultJsonContext.Default.FailState));
         
         if (state.Count >= maxAttempts)
         {

@@ -14,12 +14,6 @@ public static class VaultCrypto
     private const int MasterKeyBytes = 32;
     private const int NonceBytes = 12;
 
-    public static readonly JsonSerializerOptions JsonOpts = new()
-    {
-        WriteIndented = false,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-    };
-
     public static byte[] DerivePasswordKey(string password, VaultFile.KdfParams kdf)
     {
         byte[] salt = Convert.FromBase64String(kdf.Salt);
@@ -79,7 +73,7 @@ public static class VaultCrypto
             byte[] master = RandomNumberGenerator.GetBytes(MasterKeyBytes);
             file.Wrap = SealToBlob(passwordKey, master);
             file.Data = SealToBlob(master, Serialize(payload));
-            File.WriteAllText(vaultPath, JsonSerializer.Serialize(file, JsonOpts));
+            File.WriteAllText(vaultPath, JsonSerializer.Serialize(file, VaultJsonContext.Default.VaultFile));
             return file;
         }
         finally
@@ -126,7 +120,7 @@ public static class VaultCrypto
         file.Data = SealToBlob(master, Serialize(payload));
 
         string tmp = vaultPath + ".tmp";
-        File.WriteAllText(tmp, JsonSerializer.Serialize(file, JsonOpts));
+        File.WriteAllText(tmp, JsonSerializer.Serialize(file, VaultJsonContext.Default.VaultFile));
         if (File.Exists(vaultPath)) File.Replace(tmp, vaultPath, null);
         else File.Move(tmp, vaultPath);
     }
@@ -198,8 +192,8 @@ public static class VaultCrypto
         }
     }
 
-    private static byte[] Serialize(VaultPayload p) => JsonSerializer.SerializeToUtf8Bytes(p, JsonOpts);
+    private static byte[] Serialize(VaultPayload p) => JsonSerializer.SerializeToUtf8Bytes(p, VaultJsonContext.Default.VaultPayload);
 
     private static VaultPayload Deserialize(byte[] json) =>
-        JsonSerializer.Deserialize<VaultPayload>(json) ?? new VaultPayload();
+        JsonSerializer.Deserialize(json, VaultJsonContext.Default.VaultPayload) ?? new VaultPayload();
 }

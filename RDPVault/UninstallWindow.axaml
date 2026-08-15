@@ -31,13 +31,13 @@
     <Grid Margin="30">
         <!-- PROGRESS PANEL -->
         <StackPanel Name="PnlProgress" Spacing="16" VerticalAlignment="Center">
-            <TextBlock Text="UNINSTALLING RDP VAULT" FontSize="18" FontWeight="Bold" HorizontalAlignment="Center" LetterSpacing="1" Foreground="#IndianRed"/>
+            <TextBlock Text="UNINSTALLING RDP VAULT" FontSize="18" FontWeight="Bold" HorizontalAlignment="Center" LetterSpacing="1" Foreground="IndianRed"/>
             <Border Background="#121215" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="4" Height="200" Padding="10">
                 <ScrollViewer Name="ScrollLog">
                     <TextBlock Name="TxtLog" FontSize="12" FontFamily="Consolas" Foreground="#8A8A93" TextWrapping="Wrap"/>
                 </ScrollViewer>
             </Border>
-            <ProgressBar Name="ProgInstall" IsIndeterminate="True" Height="4" Margin="0,10,0,0" Foreground="#IndianRed"/>
+            <ProgressBar Name="ProgInstall" IsIndeterminate="True" Height="4" Margin="0,10,0,0" Foreground="IndianRed"/>
         </StackPanel>
     </Grid>
 </Window>

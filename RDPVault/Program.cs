@@ -9,17 +9,27 @@ class Program
     // Initialization code. Don't use any Avalonia, third-party APIs or any
     // SynchronizationContext-reliant code before AppMain is called: things aren't initialized
     // yet and stuff might break.
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern int MessageBoxW(IntPtr hWnd, string text, string caption, uint type);
+
     [STAThread]
     public static void Main(string[] args)
     {
-        string vaultPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "vault.dat");
-        if (!System.IO.File.Exists(vaultPath) && !InstallerService.IsInstalledLocation())
+        try
         {
-            BuildAvaloniaApp().StartWithClassicDesktopLifetime(args, Avalonia.Controls.ShutdownMode.OnMainWindowClose);
+            string vaultPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "vault.dat");
+            if (!System.IO.File.Exists(vaultPath) && !InstallerService.IsInstalledLocation())
+            {
+                BuildAvaloniaApp().StartWithClassicDesktopLifetime(args, Avalonia.Controls.ShutdownMode.OnMainWindowClose);
+            }
+            else
+            {
+                BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+            }
         }
-        else
+        catch (Exception ex)
         {
-            BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+            MessageBoxW(IntPtr.Zero, "A fatal error occurred and the application must close:\n\n" + ex.ToString(), "RDP Vault - Fatal Error", 0x10);
         }
     }
 

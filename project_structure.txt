@@ -1,0 +1,508 @@
+================================================================================
+PROJECT_STRUCTURE.TXT  —  RDP VAULT
+SOURCE OF TRUTH & GUIDANCE FOR ANY AI AGENT (OR HUMAN) WORKING ON THIS PROJECT
+================================================================================
+Last updated : 2026-08-15
+Version      : 1.0.0
+Status       : Compiles clean (0 warnings / 0 errors), published, smoke-tested.
+
+--------------------------------------------------------------------------------
+SECTION 0 — TL;DR (READ THIS FIRST)
+--------------------------------------------------------------------------------
+RDP Vault is a single portable Windows EXE intended to live on a USB stick.
+It stores the user's RDP connection profiles (hosts, ports, usernames, optional
+passwords) inside ONE encrypted file ("vault.rdpv") that sits NEXT TO the exe.
+It launches connections through Windows' own mstsc.exe, and after each RDP
+window closes it aggressively deletes every local trace mstsc normally leaves
+(registry history, Default.rdp, jump lists, recents, UserAssist, prefetch,
+TERMSRV credentials). It auto-relocks after idle time (default 60 min) while
+keeping live RDP sessions alive, supports per-PC Windows Hello quick unlock,
+and locks + exits the moment the USB/app folder disappears.
+
+If you are an AI agent asked to modify this project: read Sections 3, 4, 5, 8
+and 12 before touching anything. Do not weaken the crypto. Do not write any
+secret to disk. Keep the "no trace" guarantees.
+
+--------------------------------------------------------------------------------
+SECTION 1 — WHO USES THIS AND WHY (PRODUCT CONTEXT)
+--------------------------------------------------------------------------------
+Target user : A person who connects via RDP (Remote Desktop) to their own or
+              company computers and wants:
+              (a) NO residue on the host PC they launch from — so a later user
+                  of that PC cannot see which IP/host was contacted (mstsc
+                  normally leaks this via registry MRU + Default.rdp) and
+                  cannot attempt brute-force against the last-known target.
+              (b) One easy double-click to connect to a predetermined
+                  host:port, with credentials optionally saved (user's choice).
+              (c) After 1 hour of not using the app, everything re-locks —
+                  but WITHOUT killing running RDP sessions (no interruption).
+              (d) On the user's OWN trusted PCs, unlock with Windows Hello
+                  fingerprint/face/PIN instead of typing the password. Hello is
+                  per-PC/per-account by nature, so on foreign PCs the master
+                  password is always required.
+              (e) High security end-to-end (see security model, Section 9).
+
+Usage model : Portable app. Copy RDPVault.exe to a USB stick, run it there.
+              vault.rdpv is created beside it on first run. Single instance
+              per machine is enforced. Pulling the USB = instant lock + exit
+              (optionally also killing launched RDP sessions).
+
+--------------------------------------------------------------------------------
+SECTION 2 — TECHNOLOGY STACK (EXACT)
+--------------------------------------------------------------------------------
+Language        : C# (C# 12 feature level), nullable reference types ENABLED,
+                  implicit usings ENABLED.
+Platform        : .NET 9, target framework moniker:
+                  net9.0-windows10.0.19041.0  (Windows 10 2004-era WinRT
+                  projections needed for Windows Hello APIs).
+UI framework    : WPF (XAML + code-behind, no MVVM framework, no external UI
+                  libraries — intentionally dependency-light).
+Output type     : WinExe (windowed, no console).
+                  Published as ONE file (PublishSingleFile=true), framework-
+                  dependent (requires .NET 9 Desktop Runtime on target PC),
+                  win-x64. Result: publish\RDPVault.exe (~25.7 MB).
+
+NuGet packages (ONLY TWO — keep it this way unless justified):
+  1. Isopoh.Cryptography.Argon2            2.0.0
+     → Argon2id password hashing / KDF (managed implementation).
+  2. System.Security.Cryptography.ProtectedData 9.0.0
+     → DPAPI (Windows Data Protection API) for quick-unlock seals.
+
+Windows-only APIs used (no extra packages):
+  - AES-GCM via System.Security.Cryptography.AesGcm (.NET BCL)
+  - Windows.Security.Credentials.KeyCredentialManager  (WinRT, Hello keys)
+  - Windows.Security.Cryptography / .Core              (WinRT buffers)
+  - advapi32.dll P/Invoke: CredWriteW, CredDeleteW, CredEnumerateW, CredFree
+    (Windows Credential Manager — session credential injection + deep sweep)
+  - Microsoft.Win32.Registry (HKCU mstsc history + UserAssist scrub)
+  - System.IO.Pipes (single-instance "show window" pipe)
+  - Named mutex Local\RDPVault_SingleInstance (single instance guard)
+
+Build command (canonical):
+  dotnet publish RDPVault\RDPVault.csproj -c Release -r win-x64 ^
+      -p:PublishSingleFile=true -o publish
+Dev machine needs: .NET 9 SDK (9.0.3xx or later). Target machines need:
+  Windows 10/11 + .NET 9 Desktop Runtime.
+
+--------------------------------------------------------------------------------
+SECTION 3 — REPOSITORY / FILE MAP (WHAT LIVES WHERE)
+--------------------------------------------------------------------------------
+RDP_Encrypt\                       (repo root, c:\Full_Control\RDP_Encrypt)
+├── project_structure.txt          ← THIS FILE. Update it when reality changes.
+├── README.md                      ← end-user manual (simple language).
+├── publish\
+│   └── RDPVault.exe               ← the shippable single-file build.
+└── RDPVault\                      ← the source project.
+    ├── RDPVault.csproj            project definition (TFM, packages, WPF).
+    │                              NOTE: DebugType=embedded, SatelliteResource
+    │                              Languages=en to keep output small.
+    ├── Models.cs                  data model: RdpProfile, VaultSettings,
+    │                              VaultPayload, SealEntry, VaultFile(+KdfParams,
+    │                              +WrappedBlob). This is the vault schema.
+    ├── Crypto.cs                  VaultCrypto static class: Argon2id KDF,
+    │                              AES-256-GCM seal/open, create/open/save,
+    │                              DPAPI seals, MachineId, serialization.
+    ├── WindowsHello.cs            Hello enrollment + verification (TPM key).
+    ├── TraceCleaner.cs            ALL residue deletion logic (registry/files/
+    │                              credentials). See Section 6.
+    ├── RdpLauncher.cs             .rdp file generation, CredWrite session
+    │                              credential, mstsc launch + exit watcher,
+    │                              KillAll/AnyLive for launched sessions.
+    ├── SessionManager.cs          in-memory session state (master key), auto-
+    │                              lock timer, USB watcher, single-instance
+    │                              mutex+pipe, Hello seal management, password
+    │                              change, Save orchestration.
+    ├── App.xaml / App.xaml.cs     application entry, dark theme resources,
+    │                              startup flow (setup → main → Hello attempt),
+    │                              exit sweep.
+    ├── MainWindow.xaml / .cs      main window: locked panel (password + Hello
+    │                              button) / unlocked profile list, connect,
+    │                              lock, settings entry point.
+    ├── SetupWindow.xaml / .cs     first-run: create master password (min 8,
+    │                              strength meter, confirmation).
+    ├── ProfileEditorWindow.xaml / .cs  add/edit one computer (host/port/user/
+    │                              password/size/redirections toggles).
+    └── SettingsWindow.xaml / .cs  auto-lock minutes, Hello on/off, password
+                                   change, DeepSweep + KillOnUsb toggles.
+
+There is NO test project yet (see Section 11). There is no .sln committed
+dependency — build/publish the .csproj directly.
+
+--------------------------------------------------------------------------------
+SECTION 4 — CRYPTOGRAPHY SPEC (EXACT PARAMETERS — DO NOT WEAKEN)
+--------------------------------------------------------------------------------
+KDF (password → key):
+  Algorithm   : Argon2id  (Isopoh enum: Argon2Type.HybridAddressing — the enum
+              is named for the ADDRESSING mode; HybridAddressing == Argon2id.
+              Argon2Version.Nineteen = v1.3.)
+  Salt        : 16 random bytes (RandomNumberGenerator), base64 in vault file.
+              RE-SALTED on every password change.
+  Memory      : 65536 KiB (64 MiB) — memory-hard vs GPU brute force.
+  Iterations  : 3.   Lanes: 4.   Threads: 4 (== lanes).
+  Output      : 32 bytes (256-bit) password key. Zeroed after use
+              (CryptographicOperations.ZeroMemory) — ALWAYS keep this pattern.
+
+Cipher (everything sealed with):
+  AES-256-GCM (AesGcm, key 32 bytes, nonce 12 bytes random per encryption,
+  tag 16 bytes appended to ciphertext). Nonce is random per seal — safe
+  because each blob is encrypted at most once per Save (payload changes each
+  time, key rotation not required; standard practice for this file format).
+
+Key hierarchy:
+  masterPassword ──Argon2id(Kdf params)──▶ passwordKey (ephemeral)
+  random masterKey (32B) ──AES-GCM(passwordKey)──▶ file.Wrap      ("wrapped")
+  payload JSON   ──AES-GCM(masterKey)─────▶ file.Data
+  masterKey (on enabled PCs) ──DPAPI(CurrentUser)──▶ Seals[i].Dpapi
+
+Quick-unlock seal binding (per PC):
+  MachineId = first 8 bytes (16 hex chars) of SHA-256(
+      "{MachineName}|{UserDomainName}|{UserName}" )  (UTF-8 input)
+  Seals ride INSIDE the encrypted vault file, so they travel with the USB but
+  can only be DPAPI-unprotected on the exact machine+account that created them.
+  KeyId = hex SHA-256 of the Hello key's public key blob
+      (CryptographicPublicKeyBlobType.BCryptPublicKey). At unlock we recompute
+      the fingerprint and REQUIRE an exact match with the enrolled KeyId before
+      accepting the Hello proof (prevents substituting a different key).
+  Hello proof = KeyCredential.RequestSignAsync over challenge
+      "RDPVault::QuickUnlock::v1::<MachineId>" (UTF-8). Success status means
+      Windows actually verified finger/face/PIN.
+
+In-memory hygiene: masterKey + payload live only while unlocked; Lock() zeroes
+the masterKey. Password-derived keys are zeroed in finally blocks. NO secret
+is ever written to disk outside vault.rdpv (except the session credential in
+Credential Manager, which exists only during an RDP session and is deleted on
+window close — see Section 7).
+
+Vault file format (vault.rdpv = UTF-8 JSON, minified):
+{
+  "V": 1,
+  "Kdf":   { "Salt": "<b64>", "Mem": 65536, "Iter": 3, "Lanes": 4 },
+  "Wrap":  { "Nonce": "<b64 12B>", "Ct": "<b64 ct||tag>" },   // masterKey under passwordKey
+  "Seals": [ { "MachineId": "<16 hex>", "Dpapi": "<b64>", "KeyId": "<64 hex>" } ],
+  "Data":  { "Nonce": "<b64>",     "Ct": "<b64>" }            // payload under masterKey
+}
+Payload (decrypted Data) JSON:
+{ "Profiles": [ RdpProfile... ], "Settings": VaultSettings }
+RdpProfile fields: Id (GUID "N"), Name, Host, Port (default 3389), Username,
+  Password ("" = ask at connect), GatewayHost, FullScreen, Width, Height,
+  AllowClipboard, AllowDrives, AllowPrinters, AllowSmartCards, Notes.
+VaultSettings fields: LockMinutes (default 60), DeepSweep (default true),
+  KillSessionsOnUsbRemoval (default true).
+
+Wrong password detection: AES-GCM tag failure on Wrap → InvalidDataException
+("Wrong password."). Data tag failure → "Vault data is corrupted."
+
+Atomic save: write vaultPath + ".tmp", then File.Replace (or Move if first
+create). A crash mid-save can never corrupt the existing vault.
+
+IMPORTANT for agents: Password change re-salts KDF AND wipes ALL seals
+(newSeals = empty list) — changing password is treated as possible compromise,
+so every PC must re-enroll Hello. Preserve this behavior.
+
+--------------------------------------------------------------------------------
+SECTION 5 — RUNTIME MECHANICS (END-TO-END FLOWS)
+--------------------------------------------------------------------------------
+5.1 STARTUP
+  App.OnStartup → SessionManager.Current ctor (see 5.6 for single-instance) →
+  if vault.rdpv missing → SetupWindow dialog (create master password, min 8
+  chars + confirmation; creates vault via VaultCrypto.CreateVault then
+  unlocks it). Then MainWindow shows and TryHelloUnlock(silent:true) runs —
+  if this PC has a valid seal, a Hello prompt appears immediately; silent
+  failure just leaves the locked panel.
+
+5.2 UNLOCK (password path)
+  MainWindow.DoPasswordUnlock → SessionManager.UnlockWithPassword →
+  VaultCrypto.Open (Argon2id 64MiB — takes ~0.3–1s, UI thread blocks briefly
+  by design) → AfterUnlock(): reset idle timer, hygiene TraceCleaner.Sweep()
+  (clears residue a previous crashed run may have left), start timers.
+
+5.3 UNLOCK (Hello path)
+  MainWindow.TryHelloUnlock → SessionManager.UnlockWithHelloAsync →
+  find seal where MachineId == current machine AND KeyId non-empty →
+  WindowsHello.VerifyAsync(KeyId):
+      KeyCredentialManager.OpenAsync("RDPVaultQuickUnlock") must succeed,
+      recomputed public-key fingerprint MUST equal KeyId,
+      RequestSignAsync(challenge) must return Success (this is the actual
+      fingerprint/face/PIN prompt) →
+  VaultCrypto.UnsealLocal (DPAPI CurrentUser unprotect + sanity: key must
+  open Data) → OpenPayload → AfterUnlock.
+
+5.4 CONNECT (the core feature)
+  MainWindow.Connect(profile) → RdpLauncher.Launch(profile):
+   1. Write %TEMP%\rdpv_{profile.Id}.rdp (generated .rdp settings — see
+      Section 7 for exact keys).
+   2. If profile has password AND username: CredWriteW a GENERIC credential
+      target "TERMSRV/{Host}" with CRED_PERSIST_SESSION (exists only until
+      logoff; we delete it sooner). Password is NEVER written in the .rdp
+      file. If CredWrite fails → fall back to mstsc prompting the user.
+   3. Process.Start(System32\mstsc.exe, "\"<temprdp>\"").
+   4. Background task waits for process exit (with a 3s grace branch for
+      relaunching mstsc variants), then: delete temp .rdp, CredDeleteW the
+      TERMSRV credential, TraceCleaner.Sweep() immediately, raise
+      SessionEnded event (UI shows "traces cleaned").
+   5. Process handle kept in LiveSessions for KillAll/USB handling.
+  Idle timer is Touched before and after (connecting counts as activity).
+
+5.5 AUTO-RELOCK (requirement c)
+  DispatcherTimer ticks every 1s; if unlocked and
+  (UtcNow - lastActivity) >= LockMinutes → Lock(killSessions:false).
+  LOCK DOES NOT KILL RDP WINDOWS (explicit requirement: running sessions stay
+   usable). Lock(): zero masterKey, drop payload, fire Locked event (UI swaps
+   to the locked panel), hygiene Sweep. lastActivity is refreshed ONLY by:
+   unlock (AfterUnlock), connect (Touch before+after launch), and the Show
+   pipe message. NOTE: MainWindow's InputManager.PreProcessInput hook updates
+   a local field (_lastUiActivity) that is never read — plain UI input does
+   NOT postpone the relock countdown.
+
+5.6 SINGLE INSTANCE + SHOW
+  Mutex "Local\RDPVault_SingleInstance". Second instance sends "SHOW" over
+  NamedPipe "RDPVault_Show" and exits; first instance's background PipeLoop
+  receives it, Touch()es, and raises ShowRequested → App surfaces MainWindow.
+
+5.7 USB REMOVAL (requirement d/extra)
+  DispatcherTimer every 2s: if AppContext.BaseDirectory no longer exists OR
+  the exe file is gone → UsbRemoved event → Lock(kill per
+  KillSessionsOnUsbRemoval setting) → if killing: TraceCleaner.DeepSweep() →
+  Environment.Exit(0). (Detects the yank-the-stick case within ~2s.)
+
+5.8 SAVE / EDIT / PASSWORD CHANGE
+   Profile add/edit → mutate Session.Payload → Save() → VaultCrypto.Save
+   (atomic). Editing keeps an existing saved password when the password box is
+   left empty (ProfileEditor _copyMode logic — the editor always edits a COPY;
+   Edit passes copy:true which gives the saved profile a NEW Id (Guid); Add
+   uses copy:false and keeps the Id of the fresh RdpProfile() created in
+   Add_Click. Consequence: the temp .rdp name rdpv_{Id}.rdp is NOT stable
+   across edits — stale pre-edit launcher files are still swept by
+   TraceCleaner.TempLaunchers()).
+  Settings → update VaultSettings + Save. Password change → Section 4 note.
+
+5.9 EXIT
+  App.OnExit → SessionManager.Dispose (stop timers, release mutex) →
+  final TraceCleaner.Sweep(). Unsaved payload changes are lost (Save is
+  explicit after every mutation, so this is safe).
+
+--------------------------------------------------------------------------------
+SECTION 6 — TRACE CLEANING SPEC (THE "NO TRACE" PROMISE)
+--------------------------------------------------------------------------------
+All in TraceCleaner.cs. EVERY cleanup is wrapped in try/catch (TryRun or inner
+try) — cleanup must NEVER crash or block the app. Sweep() runs: after each
+RDP window closes, on unlock (hygiene), on lock, on app exit. DeepSweep() =
+Sweep() + credential wipe; runs on USB-removal-with-kill. (A per-connection
+TERMSRV credential written by RdpLauncher is ALWAYS deleted by the launcher
+itself regardless of DeepSweep.)
+
+Sweep() components, in order:
+ 1. RegistryHistory — HKCU\Software\Microsoft\Terminal Server Client
+      delete every value whose name starts with "MRU" (legacy MRU0..MRU9 =
+      the address-box history someone could brute-force — the user's core
+      concern), delete subkey tree "Servers" (per-host HintUserName etc. on
+      modern mstsc), delete subkey tree "Default".
+ 2. DefaultRdpFile — delete Documents\Default.rdp (mstsc writes it silently,
+      contains last host/settings) + fallback UserProfile\Documents\Default.rdp.
+ 3. JumpLists — %APPDATA%\Microsoft\Windows\Recent\AutomaticDestinations\*
+      .automaticDestinations-ms files whose bytes contain UTF-16LE "mstsc"
+      (Start/taskbar jumplist entries). Locked files are skipped silently.
+ 4. RecentItems — %APPDATA%\Microsoft\Windows\Recent\*.rdp* (shortcuts).
+ 5. TempLaunchers — %TEMP%\rdpv_*.rdp (our own launchers; belt-and-braces —
+      RdpLauncher already deletes per-session).
+ 6. UserAssist — HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\
+      UserAssist\{guid}\Count: value names are ROT13-encoded; delete values
+      whose Rot13(name) contains "mstsc" (execution counters).
+ 7. Prefetch — C:\Windows\Prefetch\MSTSC.EXE-*.pf (usually needs admin;
+      failures swallowed).
+ 8. DeleteSavedRdpCredentials (DeepSweep only) — CredEnumerateW(all), delete
+      every credential whose target starts with "TERMSRV/" (case-insensitive)
+      via CredDeleteW, CredFree the enumeration.
+
+DELIBERATELY NOT touched: Windows Event Logs (needs admin + the act of
+clearing is itself conspicuous), RDP server-side logs, anything outside the
+current user's profile. Document this honestly to users (README does).
+
+CREDENTIAL P/INVOKES (TraceCleaner + RdpLauncher duplicate the CREDENTIAL
+struct deliberately — keep both self-contained):
+  CredEnumerateW(filter, 0, out count, out IntPtr) / CredFree / CredDeleteW /
+  CredWriteW. CREDENTIAL struct is LayoutKind.Sequential CharSet.Unicode with
+  FILETIME from System.Runtime.InteropServices.ComTypes.
+
+--------------------------------------------------------------------------------
+SECTION 7 — GENERATED .RDP FILE (RdpLauncher.BuildRdpFile)
+--------------------------------------------------------------------------------
+UTF-8 (no BOM) file at %TEMP%\rdpv_{Id}.rdp. Key settings written:
+  screen mode id:i:2 (fullscreen) or 1 + desktopwidth/desktopheight
+  use multimon:i:0 · session bpp:i:32 · winposstr derived from W×H
+  full address:s:<host> or <host>:<port> when port ≠ 3389
+  redirectclipboard / redirectprinters / redirectsmartcards ← profile toggles
+  redirectdrives:i + drivestoredirect:s:* ONLY when AllowDrives (opt-in risk)
+  username:s:<username> (plain username line; password NEVER here)
+  gatewayhostname/gatewayusagemethod/gatewayprofileusagemethod ← GatewayHost
+  prompt for credentials:i:0 · negotiate security layer:i:1
+  authentication level:i:2 · autoreconnection enabled:i:1
+  pcb:s: (empty — no connection bookkeeping id)
+Defaults are deny-by-default: clipboard, drives, printers, smartcards are all
+OFF unless the user ticks them in the profile editor.
+
+Session credential (when password saved): CredWriteW Type=1 (GENERIC),
+TargetName "TERMSRV/{Host}", blob = UTF-16LE password, UserName = profile
+username, Persist = CRED_PERSIST_SESSION(1). Deleted via CredDeleteW on
+window close. Generic-with-TERMSRV-name is the well-known mstsc lookup
+convention. If write fails → mstsc will simply prompt (graceful degradation).
+
+mstsc path: Environment.SystemDirectory + "\mstsc.exe" (System32; on 64-bit
+processes this is the native dir — our exe is win-x64 so correct).
+
+--------------------------------------------------------------------------------
+SECTION 8 — UI STRUCTURE & STATE MODEL
+--------------------------------------------------------------------------------
+Theme: dark (App.xaml resources: BgBrush #14161C, PanelBrush #1E2129, Accent
+#3D7EFF, ok #2FBF71, text #E8EAF0, dim #9AA0AE; implicit styles for Button/
+TextBox/PasswordBox/TextBlock). Keep new controls consistent with these.
+
+MainWindow = the ONLY persistent window; it flips between two panels:
+  LockedPanel  : "Vault is locked", PasswordBox (Enter submits), Unlock button,
+                 optional "🙂 Use Windows Hello" button (Visible ONLY when
+                 HelloSealAvailable() == true for this PC), error TextBlock.
+  ListPanel    : ListBox of profiles (card template: name, DisplayHost,
+                 ✏️ Edit button, 🔌 Connect button), status line, footer.
+                 Double-clicking a selected profile card ALSO connects it
+                 (ListBox MouseDoubleClick → Profiles_MouseDoubleClick).
+Header buttons: ＋ Add, ⚙ (icon-only settings button, fixed 34px width),
+                 🔒 Lock (all disabled while locked).
+Refresh() is the single source of UI truth — call it after ANY state change.
+
+State transitions:
+  locked→unlocked : password OK or Hello OK → Refresh()
+  unlocked→locked : manual Lock, idle timer, USB removal → Refresh() via event
+  ShowRequested   : Show + Activate + Refresh
+MainWindow wires: SessionManager.Locked, SessionManager.UsbRemoved (info
+message box — note: on USB removal the app then exits), RdpLauncher.
+SessionEnded (status line text).
+
+SetupWindow      : Pw1/Pw2 with strength meter (●○ heuristic: len≥8, ≥12,
+                   letters+digits, non-alnum), Enter in Pw1 moves focus to
+                   Pw2, min length 8 enforced, calls SessionManager.CreateNew.
+ProfileEditor    : validates Host non-empty, Port 1–65535, window size
+                   640–8192 × 480–8192. Edits a copy; DialogResult=true only
+                   on valid save. Blank password on edit = KEEP existing.
+SettingsWindow   : LockMinutes 1–1440, Hello on/off with live status text,
+                   password change (old + new×2, min 8), DeepSweep and
+                   KillSessionsOnUsbRemoval checkboxes.
+
+XAML GOTCHAS discovered while building (do not re-learn these):
+  - CheckBox has NO TextWrapping property → wrap Content in a <TextBlock>.
+  - After editing XAML, the IDE may show bogus "InitializeComponent/name does
+    not exist" errors until the next successful build — ignore stale ones.
+  - WPF windows here use code-behind handlers referenced by Click= in XAML;
+    renaming a handler requires updating BOTH files.
+
+WINRT/GOTCHAS (cost real debugging time — respect them):
+  - KeyCredentialManager.OpenAsync  (NOT RequestOpenAsync)
+  - KeyCredential.RequestSignAsync  (NOT SignAsync)
+  - KeyCredential.RetrievePublicKey (SYNCHRONOUS; the Async overload does not
+    exist in the .NET projection)
+  - IBuffer lives in Windows.Storage.Streams
+  - CryptographicPublicKeyBlobType lives in Windows.Security.Cryptography.Core
+  - Argon2id enum member is Argon2Type.HybridAddressing
+  - AesGcm ctor requires explicit tag size (we pass 16).
+  - Do NOT call WinRT async .GetAwaiter().GetResult() on the UI thread —
+    either await (we made UnlockWithHelloAsync / EnableHelloSealAsync async)
+    or Task.Run-wrap.
+
+--------------------------------------------------------------------------------
+SECTION 9 — SECURITY MODEL SUMMARY
+--------------------------------------------------------------------------------
+Protects against:
+  - Casual/forensic discovery of RDP TARGETS and usernames on a host PC after
+    use (registry MRU, Default.rdp, jump lists, recents, UserAssist,
+    prefetch, TERMSRV creds) — all wiped per Section 6.
+  - Theft of the USB stick: vault is AES-256-GCM + Argon2id(64MiB); without
+    the master password the file is noise. (Recommend BitLocker To-Go on the
+    stick for defense in depth — README says so.)
+  - Offline brute force: 64 MiB Argon2id makes each guess expensive.
+  - Credential leakage at rest: RDP passwords never touch the .rdp file; the
+    session credential lives minutes and is Persist=SESSION.
+  - Hello substitution: KeyId fingerprint must match; seals are DPAPI-bound
+    to machine+account and vault-resident (other PCs can't use them).
+
+Assumes / does NOT protect against (be honest in any fork):
+  - An attacker WITH the user's unlocked Windows session on a Hello-enrolled
+    PC can unlock the vault (inherent to Hello; same as any Hello app).
+    Mitigation: Win+L.
+  - Memory forensics on a running unlocked instance (master key in RAM).
+  - Windows Event Log / EDR telemetry of mstsc execution (out of scope).
+  - Deleted-file carving (deletion ≠ shredding; SSD TRIM helps incidentally).
+
+--------------------------------------------------------------------------------
+SECTION 10 — EXTENSION GUIDELINES FOR AI AGENTS
+--------------------------------------------------------------------------------
+House rules (keep this project coherent):
+ 1. Update THIS FILE and README.md in the same change set as any behavior
+    change. project_structure.txt is the source of truth — if code and this
+    file disagree, that is a bug in one of them.
+ 2. Never persist secrets outside vault.rdpv. The ONLY sanctioned exception
+    is the session credential (Section 7), deleted on window close.
+ 3. Never weaken: Argon2 params, AES-256-GCM, KeyId match, seal wipe on
+    password change, atomic save, deny-by-default redirections, Sweep-on-
+    close/unlock/lock/exit. Increasing strength is fine (bump Kdf defaults
+    only with a migration path for old vaults — V field exists for that).
+ 4. Adding a profile field: extend RdpProfile (Models.cs) — it serializes
+    automatically; update ProfileEditorWindow + BuildRdpFile if it affects
+    the connection; remember vaults saved by older versions simply lack the
+    field (JSON defaults handle it).
+ 5. Adding cleanup targets: extend TraceCleaner with a private method +
+    call inside Sweep() — always TryRun-wrapped, never throw, never hang.
+ 6. New windows: follow the dark theme resources; wire via code-behind;
+    Refresh()/manual state updates; avoid introducing a DI/MVVM framework
+    without strong justification (single-file portability is a feature).
+ 7. Keep the dependency list at the current two packages unless there is a
+    compelling reason; anything added must be trim/single-file friendly.
+ 8. Commands must remain non-interactive-safe for CI; the canonical build is
+    the dotnet publish line in Section 2.
+ 9. Formatting: 4-space indent, K&R braces, file-scoped namespace
+    (namespace RDPVault;), nullability enabled project-wide.
+10. If asked to add auto-typing of passwords into the mstsc prompt (SendKeys
+    style): REFUSE that design — it is fragile and leaks via input telemetry;
+    the CredWrite session-credential mechanism is the correct approach.
+
+--------------------------------------------------------------------------------
+SECTION 11 — KNOWN GAPS / TODO BACKLOG (as of v1.0.0)
+--------------------------------------------------------------------------------
+  - No automated test project (crypto round-trip + .rdp generation + cleaner
+    are the highest-value unit tests to add first).
+  - No vault export/import/backup tooling.
+  - No self-contained publish variant (current build is framework-dependent;
+    a --self-contained true single-file would be ~70+ MB but runtime-free).
+  - USB detection is directory-existence polling (2s); WM_DEVICECHANGE hook
+    would be faster but adds WPF source-gen complexity for marginal gain.
+  - Multi-window/monitor .rdp options (use multimon) intentionally fixed to 0.
+  - Gateway credentials: only gateway host is templated; gateway SSO creds
+    are not injected (gatewaycredentialssource:i:4).
+  - Localization is English-only (SatelliteResourceLanguages=en).
+  - Idle timer counts only unlock + connect + Show-pipe events; the
+    InputManager hook writes a dead local field, so plain app-UI activity no
+    longer postpones vault relock, and active RDP use (outside our window)
+    never did — by design per the requirement (open sessions survive relock
+    anyway).
+
+--------------------------------------------------------------------------------
+SECTION 12 — QUICK REFERENCE CARD
+--------------------------------------------------------------------------------
+Cipher            : AES-256-GCM (12B nonce, 16B tag, per-seal random nonce)
+KDF               : Argon2id v1.3, 64 MiB, t=3, lanes=4, 16B salt, 32B out
+Quick unlock      : DPAPI(CurrentUser) seal + Windows Hello TPM key
+                    (KeyId = SHA-256(pubkey blob), challenge signed per unlock)
+Vault file        : vault.rdpv (JSON envelope, V=1), atomic tmp+Replace save
+Single instance   : mutex Local\RDPVault_SingleInstance + pipe RDPVault_Show
+Auto-lock         : 60 min default idle (1–1440), sessions survive
+USB removal       : poll 2s → lock → optional KillAll + DeepSweep → exit
+Trace sweep       : on RDP close / unlock / lock / exit; DeepSweep adds
+                    TERMSRV/* credential wipe
+Session cred      : CredWriteW TERMSRV/{host}, Persist=SESSION, deleted on close
+Language          : C# 12 / .NET 9 / WPF / net9.0-windows10.0.19041.0
+Deps              : Isopoh.Cryptography.Argon2 2.0.0,
+                    System.Security.Cryptography.ProtectedData 9.0.0
+Build             : dotnet publish RDPVault\RDPVault.csproj -c Release
+                    -r win-x64 -p:PublishSingleFile=true -o publish
+Output            : publish\RDPVault.exe (~25.7 MB single file)
+
+END OF FILE — keep synchronized with the code.
+================================================================================

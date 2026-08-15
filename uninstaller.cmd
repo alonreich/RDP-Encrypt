@@ -4,21 +4,24 @@ echo =========================================
 echo  UNINSTALLING RDP VAULT
 echo =========================================
 
-taskkill /F /IM RDPVault.exe /T 2>nul
+echo Terminating active Vault instances...
+taskkill /F /IM RDPVault.exe /T >nul 2>&1
+
 set "INSTALL_DIR=%LOCALAPPDATA%\RDPVault"
 set "REG_PATH=HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\RDPVault"
 
-echo Removing from appwiz.cpl...
-reg delete "%REG_PATH%" /f 2>nul
+echo Removing registry hooks...
+reg delete "%REG_PATH%" /f >nul 2>&1
 
-echo Removing shortcuts...
-del /f /q "%USERPROFILE%\Desktop\RDP Vault.lnk" 2>nul
+echo Removing Desktop shortcuts...
+del /f /q "%USERPROFILE%\Desktop\RDP Vault.lnk" >nul 2>&1
 
-echo Removing application files...
-del /f /q "%INSTALL_DIR%\RDPVault.exe" 2>nul
-:: The uninstaller script will be left behind because it is running, but we can schedule its deletion
-start /b cmd /c "timeout /t 2 >nul & rd /s /q "%INSTALL_DIR%""
+echo Scrubbing temporary RDP configuration traces...
+del /f /q "%TEMP%\rdpv_*.rdp" >nul 2>&1
 
-echo.
-echo SUCCESS: RDP Vault uninstalled.
-pause
+echo SUCCESS: RDP Vault cleanly uninstalled.
+echo Closing window and shredding directory...
+
+ping 127.0.0.1 -n 2 >nul
+cd /d "%USERPROFILE%"
+(goto) 2>nul & rd /s /q "%INSTALL_DIR%"

@@ -9,14 +9,6 @@ namespace RDPVault;
 
 public partial class MainWindow : Window
 {
-    private Border LockedPanel => this.FindControl<Border>("LockedPanel")!;
-    private Grid MainPanel => this.FindControl<Grid>("MainPanel")!;
-    private TextBox TxtPassword => this.FindControl<TextBox>("TxtPassword")!;
-    private Button BtnHello => this.FindControl<Button>("BtnHello")!;
-    private TextBlock TxtLockError => this.FindControl<TextBlock>("TxtLockError")!;
-    private ListBox LstProfiles => this.FindControl<ListBox>("LstProfiles")!;
-    private TextBlock TxtCount => this.FindControl<TextBlock>("TxtCount")!;
-
     public MainWindow()
     {
         InitializeComponent();

@@ -1,0 +1,25 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="RDPVault.SettingsWindow"
+        Title="Settings" Width="500" Height="600"
+        WindowStartupLocation="CenterOwner" CanResize="False" Background="#11151A">
+  <StackPanel Margin="24" Spacing="16">
+    <TextBlock Text="Vault Settings" FontSize="20" FontWeight="Bold" Foreground="White" />
+    <StackPanel Spacing="8">
+      <TextBlock Text="Auto-lock minutes" Foreground="White"/>
+      <TextBox x:Name="TxtLockMinutes" />
+      <CheckBox x:Name="ChkKillSessions" Content="Kill RDP sessions when USB is removed" Foreground="White"/>
+      <CheckBox x:Name="ChkForceMultiMon" Content="Force Multi-Monitor for all connections" Foreground="White"/>
+      <CheckBox x:Name="ChkEnforceBitLocker" Content="Enforce BitLocker on host drive" Foreground="White"/>
+      <CheckBox x:Name="ChkRequireFido2" Content="Require FIDO2 / Security Key" Foreground="White"/>
+      <TextBlock Text="Self-Destruct (Failed Attempts)" Foreground="White" Margin="0,10,0,0"/>
+      <TextBox x:Name="TxtSelfDestructAttempts" />
+      <TextBlock Text="Self-Destruct (Window in Minutes)" Foreground="White"/>
+      <TextBox x:Name="TxtSelfDestructWindow" />
+    </StackPanel>
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,20,0,0">
+      <Button x:Name="BtnCancel" Content="Cancel" Click="BtnCancel_Click"/>
+      <Button x:Name="BtnSave" Content="Save" Click="BtnSave_Click" Background="#26A0DA" Foreground="White"/>
+    </StackPanel>
+  </StackPanel>
+</Window>

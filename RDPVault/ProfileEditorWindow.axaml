@@ -2,6 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="RDPVault.ProfileEditorWindow"
         Title="Edit Profile" Width="420" Height="580"
+        Icon="avares://RDPVault/Assets/icon.ico"
         WindowStartupLocation="CenterOwner" CanResize="False"
         Background="#0E0E10" Foreground="#EDEDED" FontFamily="Inter, Arial">
     <Window.Styles>

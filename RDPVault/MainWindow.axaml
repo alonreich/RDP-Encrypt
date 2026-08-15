@@ -6,6 +6,7 @@
         mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="550"
         x:Class="RDPVault.MainWindow"
         Title="RDP Vault"
+        Icon="avares://RDPVault/Assets/icon.ico"
         Width="800" Height="550"
         WindowStartupLocation="CenterScreen"
         Background="#0E0E10"

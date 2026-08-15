@@ -17,7 +17,13 @@ public partial class MainWindow : Window
         SessionManager.Current.ShowRequested += OnShowRequested;
         
         UpdateUIState();
-        CheckHelloAvailability();
+        
+        this.Loaded += async (s, e) => 
+        {
+            // Yield to ensure Avalonia window renders and foregrounds before spawning OS Hello dialog
+            await System.Threading.Tasks.Task.Delay(300);
+            CheckHelloAvailability();
+        };
     }
 
     private void UpdateUIState()

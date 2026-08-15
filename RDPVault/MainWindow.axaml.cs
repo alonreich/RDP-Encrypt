@@ -22,18 +22,22 @@ public partial class MainWindow : Window
 
     private void UpdateUIState()
     {
-        if (SessionManager.Current.IsUnlocked)
+        bool isLocked = SessionManager.Current.Payload == null;
+        LockedPanel.IsVisible = isLocked;
+        MainPanel.IsVisible = !isLocked;
+
+        if (isLocked)
         {
-            LockedPanel.IsVisible = false;
-            MainPanel.IsVisible = true;
-            RefreshProfiles();
+            TxtPassword.Text = "";
+            TxtLockError.IsVisible = false;
+            TxtLockStatus.IsVisible = false;
+            BtnHello.IsVisible = SessionManager.Current.CanUseHello();
+            BtnInstall.IsVisible = !InstallerService.IsInstalledLocation();
+            TxtPassword.Focus();
         }
         else
         {
-            LockedPanel.IsVisible = true;
-            MainPanel.IsVisible = false;
-            TxtPassword.Text = "";
-            TxtPassword.Focus();
+            RefreshProfiles();
         }
     }
 
@@ -148,7 +152,20 @@ public partial class MainWindow : Window
         }
     }
 
-    private void BtnHello_Click(object? sender, RoutedEventArgs e)
+    private void BtnInstall_Click(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            InstallerService.Install();
+        }
+        catch (Exception ex)
+        {
+            TxtLockError.Text = "Failed to install: " + ex.Message;
+            TxtLockError.IsVisible = true;
+        }
+    }
+
+    private async void BtnHello_Click(object? sender, RoutedEventArgs e)
     {
         TxtLockError.IsVisible = false;
         _ = AttemptHelloUnlockAsync();

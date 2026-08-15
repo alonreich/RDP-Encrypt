@@ -321,7 +321,7 @@ UTF-8 (no BOM) file at %TEMP%\rdpv_{Id}.rdp. Key settings written:
   username:s:<username> (plain username line; password NEVER here)
   gatewayhostname/gatewayusagemethod/gatewayprofileusagemethod ← GatewayHost
   prompt for credentials:i:0 · negotiate security layer:i:1
-  authentication level:i:2 · autoreconnection enabled:i:1
+  authentication level:i:0 · autoreconnection enabled:i:1
   pcb:s: (empty — no connection bookkeeping id)
 Defaults are deny-by-default: clipboard, drives, printers, smartcards are all
 OFF unless the user ticks them in the profile editor.

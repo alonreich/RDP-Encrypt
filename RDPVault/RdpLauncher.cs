@@ -140,7 +140,7 @@ public static class RdpLauncher
         sb.AppendLine("redirectclipboard:i:" + (p.AllowClipboard ? 1 : 0));
         sb.AppendLine("redirectposdevices:i:0");
         sb.AppendLine("autoreconnection enabled:i:1");
-        sb.AppendLine("authentication level:i:2");
+        sb.AppendLine("authentication level:i:0");
         sb.AppendLine("prompt for credentials:i:0");
         sb.AppendLine("negotiate security layer:i:1");
         sb.AppendLine("remoteapplicationmode:i:0");

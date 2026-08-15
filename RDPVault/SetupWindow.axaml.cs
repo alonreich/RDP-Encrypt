@@ -19,6 +19,7 @@ public partial class SetupWindow : Window
             this.Title = "Upgrade RDP Vault";
             TxtInstallTitle.Text = "Upgrade Existing App";
             TxtInstallSubtitle.Text = "Preserves your vault and settings";
+            this.FindControl<Button>("BtnCleanInstall").IsVisible = true;
         }
     }
 
@@ -27,6 +28,17 @@ public partial class SetupWindow : Window
         var main = new MainWindow();
         main.Show();
         this.Close();
+    }
+
+    private void BtnCleanInstall_Click(object? sender, RoutedEventArgs e)
+    {
+        try 
+        {
+            string vaultPath = System.IO.Path.Combine(InstallerService.InstallDir, "vault.dat");
+            if (System.IO.File.Exists(vaultPath)) System.IO.File.Delete(vaultPath);
+        }
+        catch { }
+        BtnInstall_Click(null, null);
     }
 
     private async void BtnInstall_Click(object? sender, RoutedEventArgs e)

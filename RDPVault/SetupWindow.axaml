@@ -49,6 +49,12 @@
                     </StackPanel>
                 </Button>
             </Grid>
+            <Button Name="BtnCleanInstall" IsVisible="False" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="BtnCleanInstall_Click" Margin="0,5,0,0">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="Clean Install (Wipe Existing Data)" FontSize="14" FontWeight="Bold" HorizontalAlignment="Center" Foreground="#IndianRed"/>
+                    <TextBlock Text="Permanently deletes your existing vault.dat and settings" FontSize="11" Foreground="#8A8A93" HorizontalAlignment="Center"/>
+                </StackPanel>
+            </Button>
         </StackPanel>
 
         <!-- PROGRESS PANEL -->

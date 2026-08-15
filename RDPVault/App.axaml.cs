@@ -15,14 +15,21 @@ public partial class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            string vaultPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "vault.dat");
-            if (!System.IO.File.Exists(vaultPath) && !InstallerService.IsInstalledLocation())
+            if (desktop.Args != null && System.Linq.Enumerable.Contains(desktop.Args, "--uninstall"))
             {
-                desktop.MainWindow = new SetupWindow();
+                desktop.MainWindow = new UninstallWindow();
             }
             else
             {
-                desktop.MainWindow = new MainWindow();
+                string vaultPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "vault.dat");
+                if (!System.IO.File.Exists(vaultPath) && !InstallerService.IsInstalledLocation())
+                {
+                    desktop.MainWindow = new SetupWindow();
+                }
+                else
+                {
+                    desktop.MainWindow = new MainWindow();
+                }
             }
         }
 

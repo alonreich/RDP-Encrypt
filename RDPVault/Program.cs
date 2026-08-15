@@ -12,12 +12,6 @@ class Program
     [STAThread]
     public static void Main(string[] args)
     {
-        if (args.Contains("--uninstall"))
-        {
-            InstallerService.Uninstall();
-            return;
-        }
-
         string vaultPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "vault.dat");
         if (!System.IO.File.Exists(vaultPath) && !InstallerService.IsInstalledLocation())
         {

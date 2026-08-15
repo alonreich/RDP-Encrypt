@@ -94,22 +94,34 @@ public static class InstallerService
         Environment.Exit(0);
     }
 
-    public static void Uninstall()
+    public static void UninstallWithProgress(Action<string> log)
     {
         try
         {
             // 1. Unregister Appwiz.cpl
+            log("Removing appwiz.cpl (Programs and Features) registration...");
             Registry.CurrentUser.DeleteSubKeyTree(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\RDPVault", false);
+            System.Threading.Thread.Sleep(500);
 
             // 2. Delete Shortcuts
+            log("Deleting Desktop shortcut...");
             string desktopShortcut = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "RDP Vault.lnk");
             if (File.Exists(desktopShortcut)) File.Delete(desktopShortcut);
+            System.Threading.Thread.Sleep(500);
 
+            log("Deleting Start Menu shortcut...");
             string startMenuDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "RDP Vault");
             if (Directory.Exists(startMenuDir)) Directory.Delete(startMenuDir, true);
+            System.Threading.Thread.Sleep(500);
 
-            // 3. Initiate Self-Destruct CMD script (since we cannot delete the running exe)
+            // 3. Initiate Self-Destruct CMD script
+            log("Preparing self-destruct payload to obliterate installation directory...");
             string currentExe = Process.GetCurrentProcess().MainModule?.FileName ?? "";
+            System.Threading.Thread.Sleep(1000);
+            log("RDP Vault has been successfully uninstalled.");
+            log("The application will now terminate and shred itself from the disk.");
+            System.Threading.Thread.Sleep(2000);
+
             if (File.Exists(currentExe))
             {
                 string cmd = $"/C choice /C Y /N /D Y /T 2 & Del /F /Q \"{currentExe}\" & rmdir /S /Q \"{InstallDir}\"";
@@ -122,7 +134,10 @@ public static class InstallerService
                 });
             }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            log($"ERROR: {ex.Message}");
+        }
         finally
         {
             Environment.Exit(0);

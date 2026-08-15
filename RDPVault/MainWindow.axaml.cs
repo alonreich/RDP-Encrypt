@@ -31,7 +31,7 @@ public partial class MainWindow : Window
             TxtPassword.Text = "";
             TxtLockError.IsVisible = false;
             TxtLockStatus.IsVisible = false;
-            BtnHello.IsVisible = SessionManager.Current.CanUseHello();
+            BtnHello.IsVisible = SessionManager.Current.HelloSealAvailable();
             BtnInstall.IsVisible = !InstallerService.IsInstalledLocation();
             TxtPassword.Focus();
         }

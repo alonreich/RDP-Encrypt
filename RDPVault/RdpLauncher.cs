@@ -148,11 +148,26 @@ public static class RdpLauncher
     {
         bool useMulti = p.UseMultiMon || (SessionManager.Current.Payload?.Settings.ForceMultiMon ?? false);
 
-        // Issue #10: 2 = refuse to connect when the server's identity cannot be
-        // verified. 1 = warn but allow, used only when the user explicitly opts in
-        // for a host with a self-signed certificate. 0 (silently accept anything,
-        // the old hard-coded value) is no longer reachable.
-        int authLevel = p.AllowUnverifiedServer ? 1 : 2;
+        // ISSUE #22 - the certificate prompt on every connect.
+        //
+        // The real mstsc values (I had these inverted in the 1.1.0 rewrite):
+        //     0 = connect and DO NOT warn
+        //     1 = do NOT connect if the server cannot be verified
+        //     2 = warn, and let the user connect or refuse
+        //
+        // 1.1.0 shipped `AllowUnverifiedServer ? 1 : 2`, which meant the default was
+        // 2 (a warning on every single connect) and ticking "connect even if the
+        // identity cannot be verified" produced 1 - refuse to connect - the exact
+        // opposite of the checkbox label.
+        //
+        // Why "don't ask me again" never stuck: mstsc records an accepted
+        // certificate under HKCU\Software\Microsoft\Terminal Server Client\
+        // Servers\<host> (CertHash). TraceCleaner deletes that key by design - it is
+        // one of the traces this app exists to remove. So the approval was erased
+        // after every session and the prompt returned. Remembering the approval and
+        // erasing the history are mutually exclusive; suppressing the prompt in the
+        // .rdp file is the only way to have both.
+        int authLevel = p.AllowUnverifiedServer ? 0 : 2;
 
         var sb = new StringBuilder();
         sb.AppendLine("screen mode id:i:" + (p.FullScreen ? 2 : 1));

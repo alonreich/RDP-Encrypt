@@ -354,14 +354,29 @@ UTF-8 (no BOM) at %TEMP%\rdpv_{Id}.rdp. Notable settings:
   redirectdrives + drivestoredirect:s:*  ONLY when AllowDrives
   username:s:<username>   (password NEVER here)
   gatewayhostname / gatewayusagemethod / gatewayprofileusagemethod
-  authentication level:i:2   <- REQUIRE server verification (default)
-  authentication level:i:1   <- only when the profile opts into
-                                AllowUnverifiedServer (warn, still not silent)
+  authentication level:i:0   <- DEFAULT. Connect with no certificate warning.
+  authentication level:i:2   <- when the profile UNticks "Skip the certificate
+                                warning for this host": warn and let the user
+                                decide.
   enablecredsspsupport:i:1 - negotiate security layer:i:1
   prompt for credentials:i:0 - autoreconnection enabled:i:1 - pcb:s:
 
-  v1.0.0 hard-coded "authentication level:i:0", which silences mstsc's server
-  identity check completely. Never set 0 again.
+  THE ACTUAL mstsc VALUES - get these right, 1.1.0 had them inverted:
+    0 = connect and DO NOT warn
+    1 = do NOT connect if the server cannot be verified
+    2 = warn, and let the user connect or refuse
+  1.1.0 shipped `AllowUnverifiedServer ? 1 : 2`, so the default warned on every
+  connect and the "allow unverified" tick actually made mstsc REFUSE to connect.
+
+  Why the default is 0 and not 2 (issue #22): mstsc stores an accepted
+  certificate under HKCU\Software\Microsoft\Terminal Server Client\Servers\<host>
+  as CertHash. TraceCleaner deletes that key on purpose - it is one of the
+  traces this app exists to erase. So "don't ask me again" is wiped after every
+  session and the warning returns forever. Remembering the approval and erasing
+  the history cannot both be true; suppressing the prompt in the .rdp file is
+  the only way to keep the no-trace promise without training the user to click
+  through security warnings. Per-profile opt-in to 2 remains for hosts with a
+  properly issued certificate.
 
 Defaults are deny-by-default: drives, printers and smart cards off, clipboard on.
 
@@ -555,10 +570,18 @@ The 20 findings closed in 1.1.0, in the order they were ranked:
     ignored and the user had to click the dialog first. Fixed by
     SystemPromptFocus — see SECTION 5.5.
 
+22. The certificate warning appeared on EVERY connect. Two causes: the
+    authentication-level values were inverted (see SECTION 7), and TraceCleaner
+    erases the registry key where Windows remembers an accepted certificate, so
+    "don't ask me again" could never persist. Default is now 0 (no warning),
+    with a per-profile opt-in back to 2.
+
 REGRESSIONS TO NEVER REINTRODUCE
   - Any code path that deletes vault.rdpv without an explicit typed confirmation.
   - Any hard-coded vault file name outside AppPaths.
-  - "authentication level:i:0".
+  - Claiming a warning-level default is "more secure" while also deleting the
+    key that remembers the user's answer - that combination only produces
+    warning fatigue. Decide one or the other and document it.
   - A settings control with no enforcing code behind it.
   - Reading mstsc's temp .rdp back into the stored profile.
   - Creating or starting a DispatcherTimer off the UI thread.

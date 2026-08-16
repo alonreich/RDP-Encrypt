@@ -23,13 +23,22 @@ public class RdpProfile
     public bool AllowSmartCards { get; set; } = false;
 
     /// <summary>
-    /// Issue #10: the generated .rdp used to hard-code "authentication level:i:0",
-    /// which silences mstsc's server-identity check entirely. The default is now 2
-    /// (refuse to connect if the server cannot be verified). Tick this only for a
-    /// host you know uses a self-signed certificate - it downgrades to 1 (warn),
-    /// never back to 0.
+    /// Controls "authentication level" in the generated .rdp.
+    ///
+    /// true  (default) -> 0: connect without any certificate warning.
+    /// false           -> 2: warn on every connect that cannot be verified.
+    ///
+    /// Issue #22: this defaults to true, and profiles saved before the field
+    /// existed also read as true, so nobody gets a prompt they did not ask for.
+    /// Almost every RDP host uses a self-signed certificate, and this app wipes the
+    /// registry key where Windows remembers "don't ask me again" (see RdpLauncher),
+    /// so a warning here is guaranteed to reappear on every single connection -
+    /// which trains people to click through warnings rather than read them.
+    ///
+    /// Untick it per profile for a host with a properly issued certificate, where a
+    /// verification failure is genuinely worth stopping for.
     /// </summary>
-    public bool AllowUnverifiedServer { get; set; } = false;
+    public bool AllowUnverifiedServer { get; set; } = true;
 
     public string Notes { get; set; } = "";
 

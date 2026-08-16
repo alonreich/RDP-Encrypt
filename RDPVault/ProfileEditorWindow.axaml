@@ -90,14 +90,14 @@
             <CheckBox Name="ChkSmartCards" Content="Smart cards" Margin="0,0,15,5"/>
         </WrapPanel>
 
-        <Border Background="#1A1305" BorderBrush="#4A3A12" BorderThickness="1" CornerRadius="4"
+        <Border Background="#121215" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="4"
                 Padding="10" Margin="0,8,0,0">
             <StackPanel Spacing="4">
                 <CheckBox Name="ChkAllowUnverified">
-                    <TextBlock Text="Connect even if the server's identity cannot be verified"
+                    <TextBlock Text="Skip the certificate warning for this host"
                                TextWrapping="Wrap" Foreground="#EDEDED"/>
                 </CheckBox>
-                <TextBlock Text="Leave this off unless this host uses a self-signed certificate. Turning it on makes the connection easier to intercept."
+                <TextBlock Text="On by default. Most RDP hosts use a self-signed certificate, and RDP Vault erases the registry entry where Windows remembers &quot;don't ask me again&quot; - so leaving this off means a warning on every single connection. Untick it only for a host with a properly issued certificate, where you want the connection stopped if its identity ever fails to check out."
                            FontSize="11" Foreground="#8A8A93" TextWrapping="Wrap"/>
             </StackPanel>
         </Border>

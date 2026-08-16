@@ -1,7 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="RDPVault.ProfileEditorWindow"
-        Title="Edit Profile" Width="420" Height="580"
+        Title="Edit Profile" Width="460" Height="720"
         Icon="avares://RDPVault/Assets/icon.ico"
         WindowStartupLocation="CenterOwner" CanResize="False"
         Background="#0E0E10" Foreground="#EDEDED" FontFamily="Inter, Arial">
@@ -34,17 +34,21 @@
         <Style Selector="Button.Accent:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="#006CD0"/>
         </Style>
+        <Style Selector="CheckBox">
+            <Setter Property="Foreground" Value="#EDEDED"/>
+        </Style>
     </Window.Styles>
-    
-    <StackPanel Margin="24" Spacing="12">
-        <TextBlock Text="PROFILE SETTINGS" FontSize="18" FontWeight="Bold" LetterSpacing="1" Margin="0,0,0,10"/>
-        
-        <TextBlock Text="Display Name" FontSize="13" Foreground="#8A8A93"/>
+
+    <ScrollViewer>
+    <StackPanel Margin="24" Spacing="10">
+        <TextBlock Text="PROFILE SETTINGS" FontSize="18" FontWeight="Bold" LetterSpacing="1" Margin="0,0,0,6"/>
+
+        <TextBlock Text="Display name" FontSize="13" Foreground="#8A8A93"/>
         <TextBox Name="TxtName" Watermark="e.g. Production Server"/>
-        
-        <Grid ColumnDefinitions="*,10,100">
+
+        <Grid ColumnDefinitions="*,10,110">
             <StackPanel Grid.Column="0" Spacing="4">
-                <TextBlock Text="Host / IP Address" FontSize="13" Foreground="#8A8A93"/>
+                <TextBlock Text="Host / IP address" FontSize="13" Foreground="#8A8A93"/>
                 <TextBox Name="TxtHost" Watermark="e.g. 192.168.1.100"/>
             </StackPanel>
             <StackPanel Grid.Column="2" Spacing="4">
@@ -52,17 +56,22 @@
                 <TextBox Name="TxtPort" Watermark="3389"/>
             </StackPanel>
         </Grid>
-        
+
         <TextBlock Text="Username" FontSize="13" Foreground="#8A8A93"/>
         <TextBox Name="TxtUsername" Watermark="Administrator"/>
-        
-        <TextBlock Text="Password" FontSize="13" Foreground="#8A8A93"/>
-        <TextBox Name="TxtPassword" PasswordChar="•" Watermark="Secret Password"/>
-        
-        <TextBlock Text="Display Resolution" FontSize="13" Foreground="#8A8A93" Margin="0,5,0,0"/>
-        <ComboBox Name="CmbResolution" HorizontalAlignment="Stretch" Background="#141417" BorderBrush="#2E2E35" Foreground="#EDEDED">
-            <ComboBoxItem Content="Full Screen"/>
-            <ComboBoxItem Content="Use All Monitors (Multi-Mon)"/>
+
+        <TextBlock Text="Password (leave empty to be asked at connect time)" FontSize="13" Foreground="#8A8A93"/>
+        <TextBox Name="TxtPassword" PasswordChar="•" Watermark="Password"/>
+        <CheckBox Name="ChkShowPassword" Content="Show password" FontSize="12" Click="ChkShowPassword_Click"/>
+
+        <TextBlock Text="RD Gateway host (optional)" FontSize="13" Foreground="#8A8A93" Margin="0,6,0,0"/>
+        <TextBox Name="TxtGateway" Watermark="gateway.example.com"/>
+
+        <TextBlock Text="Display resolution" FontSize="13" Foreground="#8A8A93" Margin="0,6,0,0"/>
+        <ComboBox Name="CmbResolution" HorizontalAlignment="Stretch" Background="#141417"
+                  BorderBrush="#2E2E35" Foreground="#EDEDED">
+            <ComboBoxItem Content="Full screen"/>
+            <ComboBoxItem Content="Use all monitors (multi-monitor)"/>
             <ComboBoxItem Content="1920 x 1080"/>
             <ComboBoxItem Content="1600 x 900"/>
             <ComboBoxItem Content="1366 x 768"/>
@@ -72,17 +81,33 @@
             <ComboBoxItem Content="800 x 600"/>
         </ComboBox>
 
-        <TextBlock Text="Local Resources &amp; Redirection" FontSize="13" FontWeight="Bold" Foreground="#8A8A93" Margin="0,10,0,0"/>
-        <WrapPanel Orientation="Horizontal" Margin="0,5,0,0">
-            <CheckBox Name="ChkClipboard" Content="Clipboard" Margin="0,0,15,5" Foreground="#EDEDED"/>
-            <CheckBox Name="ChkDrives" Content="Drives" Margin="0,0,15,5" Foreground="#EDEDED"/>
-            <CheckBox Name="ChkPrinters" Content="Printers" Margin="0,0,15,5" Foreground="#EDEDED"/>
-            <CheckBox Name="ChkSmartCards" Content="SmartCards" Margin="0,0,15,5" Foreground="#EDEDED"/>
+        <TextBlock Text="Local resources to share with the remote PC" FontSize="13" FontWeight="Bold"
+                   Foreground="#8A8A93" Margin="0,10,0,0"/>
+        <WrapPanel Orientation="Horizontal" Margin="0,4,0,0">
+            <CheckBox Name="ChkClipboard" Content="Clipboard" Margin="0,0,15,5"/>
+            <CheckBox Name="ChkDrives" Content="Drives" Margin="0,0,15,5"/>
+            <CheckBox Name="ChkPrinters" Content="Printers" Margin="0,0,15,5"/>
+            <CheckBox Name="ChkSmartCards" Content="Smart cards" Margin="0,0,15,5"/>
         </WrapPanel>
-        
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10" Margin="0,20,0,0">
+
+        <Border Background="#1A1305" BorderBrush="#4A3A12" BorderThickness="1" CornerRadius="4"
+                Padding="10" Margin="0,8,0,0">
+            <StackPanel Spacing="4">
+                <CheckBox Name="ChkAllowUnverified">
+                    <TextBlock Text="Connect even if the server's identity cannot be verified"
+                               TextWrapping="Wrap" Foreground="#EDEDED"/>
+                </CheckBox>
+                <TextBlock Text="Leave this off unless this host uses a self-signed certificate. Turning it on makes the connection easier to intercept."
+                           FontSize="11" Foreground="#8A8A93" TextWrapping="Wrap"/>
+            </StackPanel>
+        </Border>
+
+        <TextBlock Name="TxtError" Foreground="#E83030" FontSize="12" IsVisible="False" TextWrapping="Wrap"/>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10" Margin="0,14,0,0">
             <Button Name="BtnCancel" Content="Cancel" Click="BtnCancel_Click"/>
             <Button Name="BtnSave" Content="Save Profile" Classes="Accent" Click="BtnSave_Click"/>
         </StackPanel>
     </StackPanel>
+    </ScrollViewer>
 </Window>

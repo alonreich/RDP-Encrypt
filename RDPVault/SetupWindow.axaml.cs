@@ -2,6 +2,7 @@ using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
 using System;
+using System.IO;
 using System.Threading.Tasks;
 
 namespace RDPVault;
@@ -14,12 +15,13 @@ public partial class SetupWindow : Window
     {
         InitializeComponent();
 
-        if (System.IO.File.Exists(InstallerService.InstalledExe))
+        if (File.Exists(InstallerService.InstalledExe))
         {
-            this.Title = "Upgrade RDP Vault";
-            TxtInstallTitle.Text = "Upgrade Existing App";
-            TxtInstallSubtitle.Text = "Preserves your vault and settings";
-            this.FindControl<Button>("BtnCleanInstall").IsVisible = true;
+            Title = "Upgrade RDP Vault";
+            TxtInstallTitle.Text = "Upgrade the installed copy";
+            TxtInstallSubtitle.Text = "Keeps your vault and settings";
+            // Only offer the destructive option when there is actually something to destroy.
+            BtnCleanInstall.IsVisible = InstallerService.InstalledVaultExists();
         }
     }
 
@@ -27,43 +29,69 @@ public partial class SetupWindow : Window
     {
         var main = new MainWindow();
         main.Show();
-        this.Close();
+        Close();
     }
 
-    private void BtnCleanInstall_Click(object? sender, RoutedEventArgs e)
+    /// <summary>
+    /// ISSUE #5 (and #12).
+    /// This button promised to delete "your existing vault", but it deleted
+    /// InstallDir\vault.dat - a file this app has never created. The real vault is
+    /// vault.rdpv, so nothing was erased: users pressed "Clean install", expected a
+    /// fresh start, and were then asked for the old master password by the old vault.
+    /// It also fired instantly with no confirmation.
+    /// </summary>
+    private async void BtnCleanInstall_Click(object? sender, RoutedEventArgs e)
     {
-        try 
+        bool go = await Dialogs.ConfirmAsync(this, "Erase the installed vault?",
+            $"Every profile and saved password in {AppPaths.InstalledVaultPath} will be permanently deleted, " +
+            "including its automatic backup copy. Type ERASE to confirm.",
+            confirmText: "Erase and install", danger: true, typeToConfirm: "ERASE");
+        if (!go) return;
+
+        try
         {
-            string vaultPath = System.IO.Path.Combine(InstallerService.InstallDir, "vault.dat");
-            if (System.IO.File.Exists(vaultPath)) System.IO.File.Delete(vaultPath);
+            foreach (string path in new[]
+                     {
+                         AppPaths.InstalledVaultPath,
+                         AppPaths.InstalledVaultPath + AppPaths.BackupSuffix,
+                         AppPaths.InstalledVaultPath + AppPaths.TempSuffix
+                     })
+            {
+                if (File.Exists(path)) File.Delete(path);
+            }
         }
-        catch { }
-        BtnInstall_Click(null, null);
+        catch (Exception ex)
+        {
+            await Dialogs.MessageAsync(this, "Could not erase the vault", ex.Message, isError: true);
+            return;
+        }
+
+        StartInstall();
     }
 
-    private async void BtnInstall_Click(object? sender, RoutedEventArgs e)
+    private void BtnInstall_Click(object? sender, RoutedEventArgs e) => StartInstall();
+
+    private void StartInstall()
     {
         PnlSelection.IsVisible = false;
         PnlProgress.IsVisible = true;
-        
-        await Task.Run(async () =>
+
+        _ = Task.Run(() =>
         {
             try
             {
-                // Hook into the InstallerService using a custom logging delegate
                 InstallerService.InstallWithProgress(Log);
-                
-                Dispatcher.UIThread.InvokeAsync(() =>
+                Dispatcher.UIThread.Post(() =>
                 {
                     ProgInstall.IsIndeterminate = false;
                     ProgInstall.Value = 100;
                     BtnFinish.IsVisible = true;
-                    Log("SUCCESS: Installation completed successfully.");
+                    Log("Installation completed successfully.");
                 });
             }
             catch (Exception ex)
             {
-                Dispatcher.UIThread.InvokeAsync(() =>
+                Dispatcher.UIThread.Post(() =>
                 {
                     ProgInstall.IsIndeterminate = false;
                     ProgInstall.Foreground = Avalonia.Media.Brushes.Red;
@@ -73,18 +101,12 @@ public partial class SetupWindow : Window
         });
     }
 
-    private void BtnFinish_Click(object? sender, RoutedEventArgs e)
-    {
-        InstallerService.LaunchInstalledAndExit();
-    }
+    private void BtnFinish_Click(object? sender, RoutedEventArgs e) => InstallerService.LaunchInstalledAndExit();
 
-    private void Log(string message)
+    private void Log(string message) => Dispatcher.UIThread.Post(() =>
     {
-        Dispatcher.UIThread.InvokeAsync(() =>
-        {
-            _logText += $"[{DateTime.Now:HH:mm:ss}] {message}\n";
-            TxtLog.Text = _logText;
-            ScrollLog.ScrollToEnd();
-        });
-    }
+        _logText += $"[{DateTime.Now:HH:mm:ss}] {message}\n";
+        TxtLog.Text = _logText;
+        ScrollLog.ScrollToEnd();
+    });
 }

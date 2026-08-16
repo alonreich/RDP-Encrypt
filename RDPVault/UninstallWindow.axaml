@@ -1,7 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="RDPVault.UninstallWindow"
-        Title="RDP Vault Uninstaller" Width="550" Height="400"
+        Title="RDP Vault Uninstaller" Width="600" Height="440"
         Icon="avares://RDPVault/Assets/icon.ico"
         WindowStartupLocation="CenterScreen" CanResize="False"
         Background="#0E0E10" Foreground="#EDEDED" FontFamily="Inter, Arial"
@@ -23,21 +23,57 @@
             <Setter Property="Background" Value="#005FB8"/>
             <Setter Property="BorderBrush" Value="#006CD0"/>
         </Style>
-        <Style Selector="Button.Accent:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="#006CD0"/>
+        <Style Selector="Button.Danger">
+            <Setter Property="Background" Value="#B80000"/>
+            <Setter Property="BorderBrush" Value="#D00000"/>
         </Style>
     </Window.Styles>
 
     <Grid Margin="30">
+        <!-- CHOICE PANEL - issue #1 / #12 -->
+        <StackPanel Name="PnlChoice" Spacing="14" VerticalAlignment="Center">
+            <TextBlock Text="UNINSTALL RDP VAULT" FontSize="20" FontWeight="Bold"
+                       HorizontalAlignment="Center" LetterSpacing="1"/>
+            <TextBlock Name="TxtVaultNotice" FontSize="13" Foreground="#8A8A93" TextWrapping="Wrap"
+                       TextAlignment="Center"/>
+
+            <Button Name="BtnKeep" Classes="Accent" HorizontalAlignment="Stretch"
+                    HorizontalContentAlignment="Center" Click="BtnKeep_Click">
+                <StackPanel Spacing="4">
+                    <TextBlock Text="Uninstall and keep my vault" FontSize="15" FontWeight="Bold"
+                               HorizontalAlignment="Center"/>
+                    <TextBlock Name="TxtKeepHint" FontSize="11" Foreground="#C8DCF5"
+                               HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center"/>
+                </StackPanel>
+            </Button>
+
+            <Button Name="BtnErase" Classes="Danger" HorizontalAlignment="Stretch"
+                    HorizontalContentAlignment="Center" Click="BtnErase_Click">
+                <StackPanel Spacing="4">
+                    <TextBlock Text="Uninstall and erase my vault" FontSize="15" FontWeight="Bold"
+                               HorizontalAlignment="Center"/>
+                    <TextBlock Text="Every saved profile and password is destroyed and cannot be recovered"
+                               FontSize="11" Foreground="#F0C0C0" HorizontalAlignment="Center"
+                               TextWrapping="Wrap" TextAlignment="Center"/>
+                </StackPanel>
+            </Button>
+
+            <Button Name="BtnCancel" Content="Cancel" HorizontalAlignment="Center" Click="BtnCancel_Click"/>
+        </StackPanel>
+
         <!-- PROGRESS PANEL -->
-        <StackPanel Name="PnlProgress" Spacing="16" VerticalAlignment="Center">
-            <TextBlock Text="UNINSTALLING RDP VAULT" FontSize="18" FontWeight="Bold" HorizontalAlignment="Center" LetterSpacing="1" Foreground="IndianRed"/>
-            <Border Background="#121215" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="4" Height="200" Padding="10">
+        <StackPanel Name="PnlProgress" Spacing="16" VerticalAlignment="Center" IsVisible="False">
+            <TextBlock Text="UNINSTALLING RDP VAULT" FontSize="18" FontWeight="Bold"
+                       HorizontalAlignment="Center" LetterSpacing="1" Foreground="IndianRed"/>
+            <Border Background="#121215" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="4"
+                    Height="210" Padding="10">
                 <ScrollViewer Name="ScrollLog">
                     <TextBlock Name="TxtLog" FontSize="12" FontFamily="Consolas" Foreground="#8A8A93" TextWrapping="Wrap"/>
                 </ScrollViewer>
             </Border>
-            <ProgressBar Name="ProgInstall" IsIndeterminate="True" Height="4" Margin="0,10,0,0" Foreground="IndianRed"/>
+            <ProgressBar Name="ProgInstall" IsIndeterminate="True" Height="4" Margin="0,6,0,0" Foreground="IndianRed"/>
+            <Button Name="BtnClose" Content="Close" Classes="Accent" HorizontalAlignment="Center"
+                    IsVisible="False" Click="BtnClose_Click"/>
         </StackPanel>
     </Grid>
 </Window>

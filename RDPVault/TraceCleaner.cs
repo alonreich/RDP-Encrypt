@@ -1,4 +1,7 @@
+using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Win32;
@@ -6,20 +9,62 @@ using Microsoft.Win32;
 namespace RDPVault;
 
 /// <summary>
-/// Removes every local trace mstsc.exe leaves behind:
-/// - Registry "Terminal Server Client" history (servers, usernames, MRU)
-/// - Documents\Default.rdp
-/// - Taskbar / Start jump list entries mentioning mstsc
-/// - Recent items (*.rdp, *.rdp.lnk)
-/// - Explorer UserAssist execution counters (ROT13-encoded "mstsc.exe")
-/// - Prefetch files (if permission allows)
-/// - Saved RDP credentials TERMSRV/* in Windows Credential Manager ("deep sweep")
+/// Removes the local traces mstsc.exe leaves behind.
+///
+/// ISSUE #20 - SCOPING.
+/// The old cleaner ran unconditionally on every unlock, lock and exit and deleted
+/// the machine's ENTIRE Terminal Server Client history, every *.rdp* shortcut in
+/// Recent, and the mstsc UserAssist/prefetch records - including connections the
+/// user made outside this app, from their own saved .rdp files. That is silent,
+/// irreversible collateral damage.
+///
+/// The cleaner now defaults to SweepScope.OwnHostsOnly: it only removes entries it
+/// can positively tie to a host stored in this vault, plus its own temp launchers.
+/// SweepScope.Everything restores the original scorched-earth behaviour for users
+/// who want it, and the Settings screen spells out what that means.
+///
+/// Every step is wrapped so cleanup can never crash or block the app.
 /// </summary>
 public static class TraceCleaner
 {
+    private static readonly object Gate = new();
+    private static SweepScope _scope = SweepScope.OwnHostsOnly;
+    private static string[] _hosts = Array.Empty<string>();
+
+    public static void Configure(SweepScope scope, IEnumerable<string> hosts)
+    {
+        lock (Gate)
+        {
+            _scope = scope;
+            _hosts = hosts.Where(h => !string.IsNullOrWhiteSpace(h))
+                          .Select(h => h.Trim())
+                          .Distinct(StringComparer.OrdinalIgnoreCase)
+                          .ToArray();
+        }
+    }
+
+    /// <summary>Called on lock/exit so host names are not retained in memory (issue #20).</summary>
+    public static void ForgetHosts()
+    {
+        lock (Gate) _hosts = Array.Empty<string>();
+    }
+
+    private static (SweepScope scope, string[] hosts) Snapshot()
+    {
+        lock (Gate) return (_scope, _hosts);
+    }
+
+    private static bool Everything => Snapshot().scope == SweepScope.Everything;
+
+    private static bool MentionsOurHost(string text)
+    {
+        var (_, hosts) = Snapshot();
+        return hosts.Any(h => text.Contains(h, StringComparison.OrdinalIgnoreCase));
+    }
+
     // ---------------- public entry points ----------------
 
-    /// <summary>Standard sweep: everything except other TERMSRV credentials.</summary>
+    /// <summary>Standard sweep: everything except other saved TERMSRV credentials.</summary>
     public static void Sweep()
     {
         RegistryHistory();
@@ -27,11 +72,10 @@ public static class TraceCleaner
         JumpLists();
         RecentItems();
         TempLaunchers();
-        UserAssist();
-        Prefetch();
+        if (Everything) { UserAssist(); Prefetch(); }
     }
 
-    /// <summary>Standard sweep + delete every saved RDP credential on this PC.</summary>
+    /// <summary>Sweep + delete every saved RDP credential on this PC.</summary>
     public static void DeepSweep()
     {
         Sweep();
@@ -48,14 +92,42 @@ public static class TraceCleaner
                 @"Software\Microsoft\Terminal Server Client", writable: true);
             if (key == null) return;
 
-            // Old mstsc versions: MRU0..MRU9 values directly under the key
-            foreach (var name in key.GetValueNames())
-                if (name.StartsWith("MRU", StringComparison.OrdinalIgnoreCase))
-                    key.DeleteValue(name, throwOnMissingValue: false);
+            if (Everything)
+            {
+                foreach (var name in key.GetValueNames())
+                    if (name.StartsWith("MRU", StringComparison.OrdinalIgnoreCase))
+                        key.DeleteValue(name, throwOnMissingValue: false);
 
-            // Modern versions: "Servers" subkey with one child per host
-            key.DeleteSubKeyTree("Servers", throwOnMissingSubKey: false);
-            key.DeleteSubKeyTree("Default", throwOnMissingSubKey: false);
+                key.DeleteSubKeyTree("Servers", throwOnMissingSubKey: false);
+                key.DeleteSubKeyTree("Default", throwOnMissingSubKey: false);
+                return;
+            }
+
+            // Scoped: legacy MRU values are keyed by name but hold the host as data.
+            foreach (var name in key.GetValueNames())
+            {
+                if (!name.StartsWith("MRU", StringComparison.OrdinalIgnoreCase)) continue;
+                if (MentionsOurHost(key.GetValue(name)?.ToString() ?? ""))
+                    key.DeleteValue(name, throwOnMissingValue: false);
+            }
+
+            // Modern mstsc: address-box history lives under "Default" as MRU0..MRUn.
+            using (var def = key.OpenSubKey("Default", writable: true))
+            {
+                if (def != null)
+                    foreach (var name in def.GetValueNames())
+                        if (MentionsOurHost(def.GetValue(name)?.ToString() ?? ""))
+                            def.DeleteValue(name, throwOnMissingValue: false);
+            }
+
+            // Modern mstsc: one subkey per host, holding UsernameHint etc.
+            using (var servers = key.OpenSubKey("Servers", writable: true))
+            {
+                if (servers != null)
+                    foreach (string sub in servers.GetSubKeyNames())
+                        if (MentionsOurHost(sub))
+                            servers.DeleteSubKeyTree(sub, throwOnMissingSubKey: false);
+            }
         });
     }
 
@@ -65,13 +137,22 @@ public static class TraceCleaner
     {
         TryRun(() =>
         {
-            string docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-            string path = Path.Combine(docs, "Default.rdp");
-            if (File.Exists(path)) File.Delete(path);
-            // Fallback for machines where MyDocuments is redirected oddly.
-            string alt = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Documents", "Default.rdp");
-            if (File.Exists(alt)) File.Delete(alt);
+            foreach (string path in new[]
+                     {
+                         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Default.rdp"),
+                         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Documents", "Default.rdp")
+                     })
+            {
+                try
+                {
+                    if (!File.Exists(path)) continue;
+                    // Scoped: Default.rdp records the LAST host used. Only remove it
+                    // when that host is one of ours.
+                    if (!Everything && !MentionsOurHost(File.ReadAllText(path))) continue;
+                    File.Delete(path);
+                }
+                catch { }
+            }
         });
     }
 
@@ -89,9 +170,16 @@ public static class TraceCleaner
                 try
                 {
                     byte[] data = File.ReadAllBytes(file);
-                    if (IndexOf(data, probe) >= 0) File.Delete(file);
+                    if (IndexOf(data, probe) < 0) continue;
+
+                    if (!Everything)
+                    {
+                        string asText = Encoding.Unicode.GetString(data);
+                        if (!MentionsOurHost(asText)) continue;
+                    }
+                    File.Delete(file);
                 }
-                catch { /* file locked by Explorer - skipped this round */ }
+                catch { /* locked by Explorer - skipped this round */ }
             }
         });
     }
@@ -103,27 +191,36 @@ public static class TraceCleaner
             string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                                       "Microsoft", "Windows", "Recent");
             if (!Directory.Exists(dir)) return;
+
             foreach (string file in Directory.GetFiles(dir, "*.rdp*"))
             {
-                try { File.Delete(file); } catch { }
+                try
+                {
+                    string name = Path.GetFileName(file);
+                    bool ours = name.StartsWith("rdpv_", StringComparison.OrdinalIgnoreCase) || MentionsOurHost(name);
+                    if (!Everything && !ours) continue;
+                    File.Delete(file);
+                }
+                catch { }
             }
         });
     }
 
-    /// <summary>Our own temporary launcher files (%TEMP%\rdpv_*.rdp).</summary>
+    /// <summary>Our own temporary launcher files (%TEMP%\rdpv_*.rdp). Always removed.</summary>
     public static void TempLaunchers()
     {
         TryRun(() =>
         {
-            string dir = Path.GetTempPath();
-            foreach (string file in Directory.GetFiles(dir, "rdpv_*.rdp"))
+            foreach (string file in Directory.GetFiles(Path.GetTempPath(), "rdpv_*.rdp"))
             {
                 try { File.Delete(file); } catch { }
             }
         });
     }
 
-    // ---------------- UserAssist (execution counters) ----------------
+    // ---------------- UserAssist / prefetch (SweepScope.Everything only) ----------------
+    // These record only THAT mstsc ran, never which host was contacted, and they are
+    // shared with the user's non-vault usage. Scoped mode deliberately leaves them.
 
     private static void UserAssist()
     {
@@ -135,13 +232,11 @@ public static class TraceCleaner
 
             foreach (string guid in ua.GetSubKeyNames())
             {
-                using var count = ua.OpenSubKey(Path.Combine(guid, "Count"), writable: true);
+                using var count = ua.OpenSubKey(guid + @"\Count", writable: true);
                 if (count == null) continue;
                 foreach (string value in count.GetValueNames())
-                {
                     if (Rot13(value).Contains("mstsc", StringComparison.OrdinalIgnoreCase))
                         count.DeleteValue(value, throwOnMissingValue: false);
-                }
             }
         });
     }
@@ -150,7 +245,10 @@ public static class TraceCleaner
     {
         TryRun(() =>
         {
-            foreach (string file in Directory.GetFiles(@"C:\Windows\Prefetch", "MSTSC.EXE-*.pf"))
+            string prefetch = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Prefetch");
+            if (!Directory.Exists(prefetch)) return;
+            foreach (string file in Directory.GetFiles(prefetch, "MSTSC.EXE-*.pf"))
             {
                 try { File.Delete(file); } catch { } // needs admin; ignore silently
             }
@@ -173,11 +271,10 @@ public static class TraceCleaner
                 {
                     var c = Marshal.PtrToStructure<CREDENTIAL>(p);
                     string? target = Marshal.PtrToStringUni(c.TargetName);
-                    if (target != null &&
-                        target.StartsWith("TERMSRV/", StringComparison.OrdinalIgnoreCase))
-                    {
-                        _ = CredDeleteW(target, c.Type, 0);
-                    }
+                    if (target == null) continue;
+                    if (!target.StartsWith("TERMSRV/", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!Everything && !MentionsOurHost(target)) continue;
+                    _ = CredDeleteW(target, c.Type, 0);
                 }
             }
             finally { CredFree(pCreds); }

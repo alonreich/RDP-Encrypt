@@ -1,7 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="RDPVault.SettingsWindow"
-        Title="Settings" Width="500" Height="650"
+        Title="Settings" Width="560" Height="760"
         Icon="avares://RDPVault/Assets/icon.ico"
         WindowStartupLocation="CenterOwner" CanResize="False"
         Background="#0E0E10" Foreground="#EDEDED" FontFamily="Inter, Arial">
@@ -21,7 +21,7 @@
             <Setter Property="Foreground" Value="#EDEDED"/>
             <Setter Property="BorderBrush" Value="#2E2E35"/>
             <Setter Property="CornerRadius" Value="4"/>
-            <Setter Property="Padding" Value="16,8"/>
+            <Setter Property="Padding" Value="14,8"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
         </Style>
         <Style Selector="Button:pointerover /template/ ContentPresenter">
@@ -35,47 +35,134 @@
             <Setter Property="Background" Value="#006CD0"/>
         </Style>
         <Style Selector="CheckBox">
-            <Setter Property="Margin" Value="0,8,0,0"/>
+            <Setter Property="Foreground" Value="#EDEDED"/>
+        </Style>
+        <Style Selector="TextBlock.h">
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Foreground" Value="#EDEDED"/>
+        </Style>
+        <Style Selector="TextBlock.hint">
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="Foreground" Value="#8A8A93"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
         </Style>
     </Window.Styles>
-    
-    <StackPanel Margin="24" Spacing="16">
-        <TextBlock Text="VAULT SETTINGS" FontSize="18" FontWeight="Bold" LetterSpacing="1" Margin="0,0,0,10"/>
-        
-        <StackPanel Spacing="6">
-            <TextBlock Text="Auto-lock Timer (Minutes)" FontSize="13" Foreground="#8A8A93"/>
-            <TextBox Name="TxtLockMinutes" Watermark="e.g. 15"/>
-            
-            <TextBlock Text="Self-Destruct Trigger (Failed Attempts)" FontSize="13" Foreground="#8A8A93" Margin="0,10,0,0"/>
-            <TextBox Name="TxtSelfDestructAttempts" Watermark="e.g. 10"/>
-            
-            <TextBlock Text="Self-Destruct Rolling Window (Minutes)" FontSize="13" Foreground="#8A8A93" Margin="0,10,0,0"/>
-            <TextBox Name="TxtSelfDestructWindow" Watermark="e.g. 60"/>
-        </StackPanel>
 
-        <Border Height="1" Background="#1A1A1E" Margin="0,10"/>
-        
-        <StackPanel Spacing="4">
-            <CheckBox Name="ChkKillSessions" Content="Kill Active RDP sessions when USB is physically removed"/>
-            <CheckBox Name="ChkForceMultiMon" Content="Globally force Multi-Monitor for all profiles"/>
-            <CheckBox Name="ChkEnforceBitLocker" Content="Enforce BitLocker validation on host machine (Anti-DPAPI)"/>
-            <CheckBox Name="ChkRequireFido2" Content="Require FIDO2 Hardware Key presence"/>
-        </StackPanel>
+    <Grid RowDefinitions="*,Auto">
+        <ScrollViewer Grid.Row="0">
+            <StackPanel Margin="24" Spacing="14">
+                <TextBlock Text="VAULT SETTINGS" FontSize="18" FontWeight="Bold" LetterSpacing="1"/>
 
-        <Border Height="1" Background="#1A1A1E" Margin="0,10"/>
+                <!-- ============ auto lock ============ -->
+                <StackPanel Spacing="6">
+                    <TextBlock Classes="h" Text="Auto-lock"/>
+                    <TextBlock Classes="hint" Text="Minutes of inactivity before the vault locks itself (1-1440). Open Remote Desktop windows are never closed by this."/>
+                    <TextBox Name="TxtLockMinutes" Width="120" HorizontalAlignment="Left" Watermark="60"/>
+                </StackPanel>
 
-        <StackPanel Spacing="6">
-            <TextBlock Text="HARDWARE TPM UNLOCK" FontSize="14" FontWeight="Bold" Foreground="#EDEDED"/>
-            <TextBlock Text="Bind this specific machine to allow passwordless unlock using physical TPM verification and Windows Hello biometrics." FontSize="11" Foreground="#8A8A93" TextWrapping="Wrap"/>
-            <Grid ColumnDefinitions="Auto,*" Margin="0,5,0,0">
-                <Button Grid.Column="0" Name="BtnToggleHello" Content="Enable TPM Unlock" Click="BtnToggleHello_Click"/>
-                <TextBlock Grid.Column="1" Name="TxtHelloStatus" VerticalAlignment="Center" Margin="10,0,0,0" Foreground="#26A0DA" FontSize="12"/>
-            </Grid>
-        </StackPanel>
+                <Border Height="1" Background="#1A1A1E"/>
 
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10" Margin="0,20,0,0">
-            <Button Name="BtnCancel" Content="Cancel" Click="BtnCancel_Click"/>
-            <Button Name="BtnSave" Content="Save Settings" Classes="Accent" Click="BtnSave_Click"/>
-        </StackPanel>
-    </StackPanel>
+                <!-- ============ master password / recovery ============ -->
+                <StackPanel Spacing="8">
+                    <TextBlock Classes="h" Text="Master password and recovery"/>
+                    <TextBlock Name="TxtRecoveryStatus" Classes="hint" Text=""/>
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <Button Name="BtnChangePassword" Content="Change master password" Click="BtnChangePassword_Click"/>
+                        <Button Name="BtnRecoveryCode" Content="Create Recovery Code" Click="BtnRecoveryCode_Click"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <Border Height="1" Background="#1A1A1E"/>
+
+                <!-- ============ windows hello ============ -->
+                <StackPanel Spacing="6">
+                    <TextBlock Classes="h" Text="Windows Hello quick unlock"/>
+                    <TextBlock Classes="hint" Text="Binds this PC so you can unlock with fingerprint, face or PIN instead of typing the master password. The key never leaves this machine's TPM."/>
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <Button Name="BtnToggleHello" Content="Enable quick unlock" Click="BtnToggleHello_Click"/>
+                        <TextBlock Name="TxtHelloStatus" VerticalAlignment="Center" FontSize="12" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <Border Height="1" Background="#1A1A1E"/>
+
+                <!-- ============ trace cleaning ============ -->
+                <StackPanel Spacing="6">
+                    <TextBlock Classes="h" Text="Trace cleaning"/>
+                    <TextBlock Classes="hint" Text="What gets erased after every Remote Desktop session, and when the vault locks."/>
+                    <ComboBox Name="CmbSweepScope" HorizontalAlignment="Stretch" Background="#141417"
+                              BorderBrush="#2E2E35" Foreground="#EDEDED">
+                        <ComboBoxItem Content="Only traces of hosts stored in this vault (recommended)"/>
+                        <ComboBoxItem Content="Every Remote Desktop trace on this PC"/>
+                    </ComboBox>
+                    <TextBlock Name="TxtScopeHint" Classes="hint" Text=""/>
+                    <CheckBox Name="ChkDeepSweep">
+                        <TextBlock Text="Also delete saved Remote Desktop passwords from Windows Credential Manager when locking"
+                                   TextWrapping="Wrap" Foreground="#EDEDED"/>
+                    </CheckBox>
+                    <CheckBox Name="ChkKillSessions">
+                        <TextBlock Text="Close open Remote Desktop windows if the drive holding RDP Vault is removed"
+                                   TextWrapping="Wrap" Foreground="#EDEDED"/>
+                    </CheckBox>
+                </StackPanel>
+
+                <Border Height="1" Background="#1A1A1E"/>
+
+                <!-- ============ display ============ -->
+                <StackPanel Spacing="6">
+                    <TextBlock Classes="h" Text="Display"/>
+                    <CheckBox Name="ChkForceMultiMon">
+                        <TextBlock Text="Use all monitors for every profile" Foreground="#EDEDED"/>
+                    </CheckBox>
+                </StackPanel>
+
+                <Border Height="1" Background="#1A1A1E"/>
+
+                <!-- ============ disk encryption ============ -->
+                <StackPanel Spacing="6">
+                    <TextBlock Classes="h" Text="Disk encryption check"/>
+                    <CheckBox Name="ChkWarnBitLocker">
+                        <TextBlock Text="Warn me when the drive holding the vault is not encrypted"
+                                   TextWrapping="Wrap" Foreground="#EDEDED"/>
+                    </CheckBox>
+                    <TextBlock Name="TxtBitLockerStatus" Classes="hint" Text="Checking..."/>
+                </StackPanel>
+
+                <Border Height="1" Background="#1A1A1E"/>
+
+                <!-- ============ self destruct ============ -->
+                <Border Background="#1A0A0A" BorderBrush="#4A1A1A" BorderThickness="1" CornerRadius="4" Padding="14">
+                    <StackPanel Spacing="8">
+                        <TextBlock Classes="h" Text="Self-destruct (dangerous)" Foreground="#E86060"/>
+                        <TextBlock Classes="hint"
+                                   Text="Wrong-password attempts are always slowed down automatically. Self-destruct goes further: after the limit is reached the vault file is erased and cannot be recovered without a backup. Leave this off unless you truly need it."/>
+                        <CheckBox Name="ChkSelfDestruct" Click="ChkSelfDestruct_Click">
+                            <TextBlock Text="Erase the vault after too many wrong attempts" TextWrapping="Wrap" Foreground="#EDEDED"/>
+                        </CheckBox>
+                        <Grid ColumnDefinitions="*,12,*">
+                            <StackPanel Grid.Column="0" Spacing="4">
+                                <TextBlock Classes="hint" Text="Attempts allowed (5-500)"/>
+                                <TextBox Name="TxtSelfDestructAttempts" Watermark="25"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="2" Spacing="4">
+                                <TextBlock Classes="hint" Text="Counting window in minutes"/>
+                                <TextBox Name="TxtSelfDestructWindow" Watermark="60"/>
+                            </StackPanel>
+                        </Grid>
+                        <TextBlock Name="TxtSelfDestructNote" Classes="hint" Text=""/>
+                    </StackPanel>
+                </Border>
+
+                <TextBlock Name="TxtError" Foreground="#E83030" FontSize="12" IsVisible="False" TextWrapping="Wrap"/>
+            </StackPanel>
+        </ScrollViewer>
+
+        <Border Grid.Row="1" Background="#0B0B0D" BorderBrush="#1A1A1E" BorderThickness="0,1,0,0" Padding="24,14">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10">
+                <Button Name="BtnCancel" Content="Cancel" Click="BtnCancel_Click"/>
+                <Button Name="BtnSave" Content="Save settings" Classes="Accent" Click="BtnSave_Click"/>
+            </StackPanel>
+        </Border>
+    </Grid>
 </Window>

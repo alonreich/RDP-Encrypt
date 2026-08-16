@@ -1,2 +1,0 @@
-C:\Full_Control\RDP_Encrypt\obj\NativeAot_final\RDPVault.pdb
-C:\Full_Control\RDP_Encrypt\obj\NativeAot_final\RDPVault.exe

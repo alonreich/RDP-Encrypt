@@ -1,30 +1,72 @@
 # RDP Vault
 
-RDP Vault is a zero-trace, mathematically uncrackable, pure NativeAOT executable that stores and launches your Remote Desktop profiles with military-grade precision.
+RDP Vault stores your Remote Desktop connections in a single encrypted file, launches them through Windows' own `mstsc.exe`, and cleans up the traces Windows leaves behind afterwards.
 
-It completely bypasses standard Windows Credential Manager limitations, scrubs all connection history from the operating system, and provides absolute security over your hosts.
+It is one self-contained `.exe`. Nothing to install first, no .NET runtime required.
 
-## Core Architecture
+## Download
 
-- **NativeAOT Silicon**: Compiled natively ahead-of-time. No .NET runtime required. A single standalone `.exe` handles everything.
-- **TPM Hardware Signatures**: Windows DPAPI has been ripped out. Quick Unlocks use raw physical cryptography from your motherboard's Trusted Platform Module (TPM). Without your physical biometric (Windows Hello), the TPM locks down and Mimikatz RAM-scraping is mathematically impossible.
-- **Paper Recovery Keys**: When a vault is created, a 24-word offline cryptographic seed phrase is generated for catastrophic cross-machine recovery.
-- **Vault Self-Destruct**: Exceed the configurable failed-attempt limit, and the vault structurally obliterates itself.
-- **Direct Shortcuts**: Generate `.rdpvlink` shortcut files. Map them to StreamDeck or double-click them to instantly pipeline into your remote machine via background IPC—bypassing all UI elements.
-- **BitLocker Enforcement**: The application refuses to execute if the host drive is not encrypted.
+**[Download RDP Vault (RDPVault.exe)](https://github.com/alonreich/RDP-Encrypt/releases/latest/download/RDPVault.exe)**
 
-## Installation & Deployment
+That link always resolves to the newest release. There is exactly one download — the same `.exe` is the installer, the portable app and the uninstaller.
 
-1. Download the latest automated NativeAOT binary:
-   [Download RDP Vault](https://github.com/alonreich/RDP-Encrypt/releases/latest/download/RDPVault.exe)
-2. Launch the downloaded `RDPVault.exe`. A Setup Wizard will intercept startup.
-3. Choose **"Install to this PC"** for a full native deployment, or **"Run Portably"** to securely operate out of a USB drive with zero traces on the host machine.
-4. If Installed, the executable natively creates Desktop/Start Menu shortcuts, copies itself to `%LocalAppData%`, and binds to `appwiz.cpl` allowing native "Add/Remove Programs" modifications.
+## What it does
 
-## Uninstallation
+- **One encrypted vault.** Everything lives in `vault.rdpv`: AES-256-GCM, with the key derived from your master password by Argon2id (64 MiB, 3 passes). Without the password the file is noise.
+- **Passwords never touch disk in the clear.** When you connect, the password is handed to Windows Credential Manager as a *session* credential and deleted the moment the Remote Desktop window closes. It is never written into the generated `.rdp` file.
+- **Recovery Code.** When you create a vault you get a 52-character recovery code. Write it down. It is the only other way in if you forget your master password — and it is shown once, because it is not stored anywhere readable.
+- **Windows Hello quick unlock.** Optional, per PC. The key is created and held by that machine's TPM; the vault key is derived from a TPM signature, so it never leaves the hardware. Enrollment verifies the signature is reproducible before trusting it, and refuses rather than silently creating a quick unlock that could never work.
+- **Trace cleaning.** After each session, and on lock, RDP Vault removes the Remote Desktop registry history, `Default.rdp`, jump-list and Recent-items entries, and its own temporary files. By default it only removes entries that mention a host stored in *your vault* — your own separate Remote Desktop history is left alone. Settings has an opt-in "clean everything" mode that also clears UserAssist, Prefetch and every saved `TERMSRV/*` credential.
+- **Auto-lock.** The vault re-locks after a period of inactivity (60 minutes by default). Open Remote Desktop windows are never closed by this.
+- **Removable-drive safety.** If you run it from a USB stick and pull the stick, the vault locks, optionally closes the open sessions, and the app exits.
+- **Desktop shortcuts.** One click per connection. These are ordinary Windows `.lnk` shortcuts pointing at `RDPVault.exe --launch <id>`; they contain no host name.
+- **Optional self-destruct.** Off by default. Repeated wrong passwords are always slowed down with an escalating delay, which is the real protection. If you deliberately arm self-destruct, the vault is erased after the limit you set — you have to save a Recovery Code and type `ERASE` to turn it on.
 
-Uninstall directly via Windows **Programs and Features (`appwiz.cpl`)**. The teardown process:
-1. Triggers the internal `--uninstall` command gracefully.
-2. Unregisters all `.rdpvlink` handlers and deletes Registry footprints.
-3. Completely destroys the `%LocalAppData%\RDPVault` payload directory.
-4. Executes a process-detaching batch deletion command to permanently shred the running executable from your disk silently.
+## Install, portable, uninstall
+
+Run the downloaded `RDPVault.exe`:
+
+- **Install to this PC** — copies itself to `%LocalAppData%\RDPVault`, creates Desktop and Start Menu shortcuts, registers the `.rdpvlink` file type, and adds an entry to Programs and Features.
+- **Run portably** — keep the `.exe` and its `vault.rdpv` side by side on a USB stick. Nothing is written to the host PC outside the temporary files it cleans up itself.
+
+If a `vault.rdpv` already sits next to the `.exe`, it opens straight into that vault instead of offering to install.
+
+**Uninstalling keeps your vault.** Removing RDP Vault through Programs and Features copies `vault.rdpv` (and its automatic backup) to `Documents\RDP Vault Backups` before deleting anything, and tells you where it went. Erasing the vault is a separate, clearly labelled choice that requires typing `ERASE`. A silent uninstall always keeps the vault.
+
+## Backups
+
+Every save writes `vault.rdpv.bak` next to the vault — the previous good copy. Copy `vault.rdpv` somewhere safe anyway. Losing both the file and your Recovery Code means losing the contents; there is no reset and no support line.
+
+## What it does not protect against
+
+Being straight about the limits:
+
+- Anyone using your unlocked Windows session on a PC where you enabled Windows Hello can open the vault. Lock your screen.
+- Memory forensics against a running, unlocked instance. The master key is wiped on lock, but connection passwords held as .NET strings cannot be reliably erased from memory.
+- Windows Event Logs, EDR/telemetry records of `mstsc.exe` running, and anything logged on the *remote* server. RDP Vault does not touch those — clearing them needs admin rights and is conspicuous in itself.
+- Recovery of deleted files by forensic carving. Deleting is not shredding, and on SSDs even overwriting is not a guarantee.
+- BitLocker. RDP Vault checks whether the drive holding the vault is encrypted and warns you if it is not. It does not, and cannot, encrypt the drive for you, and it will not refuse to open your own vault.
+
+## Build from source
+
+Requires the .NET 9 SDK on Windows.
+
+```
+build.cmd              rem clean, publish, then replace the GitHub release
+build.cmd --no-publish rem clean and publish only
+```
+
+The output is a single file: `compiled\RDPVault.exe`. Publishing deletes every previous release and tag, creates one new release tagged `vYYYY.MM.DD` with that one `.exe` attached, and verifies the uploaded asset's SHA-256 matches the file that was just built.
+
+## Technical summary
+
+| | |
+|---|---|
+| Vault file | `vault.rdpv` — JSON envelope, format V2, atomic save with rolling `.bak` |
+| Cipher | AES-256-GCM, 12-byte nonce, 16-byte tag |
+| Key derivation | Argon2id v1.3, 64 MiB, 3 iterations, 4 lanes, 32-byte salt |
+| Recovery Code | 256-bit secret, 52 Crockford-Base32 characters, wrapped over the master key |
+| Quick unlock | TPM signature → Argon2id → AES-GCM seal, bound to machine + Windows account |
+| Runtime | .NET 9, Avalonia UI, self-contained single-file `win-x64` build |
+
+Detailed design notes live in `project_structure.txt`.

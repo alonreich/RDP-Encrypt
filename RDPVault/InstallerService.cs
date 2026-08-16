@@ -1,129 +1,198 @@
 using System;
 using System.Diagnostics;
 using System.IO;
-using System.Runtime.InteropServices;
 using Microsoft.Win32;
 
 namespace RDPVault;
 
 public static class InstallerService
 {
-    public static string InstallDir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RDPVault");
-    public static string InstalledExe => Path.Combine(InstallDir, "RDPVault.exe");
-    
+    public static string InstallDir => AppPaths.InstallDir;
+    public static string InstalledExe => AppPaths.InstalledExe;
+
+    private const string UninstallKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\RDPVault";
+    private const string ProgId = "RDPVault.Link";
+    private const string LegacyExt = ".rdpvlink";
+
     public static bool IsInstalledLocation()
     {
-        string currentExe = Process.GetCurrentProcess().MainModule?.FileName ?? "";
-        return currentExe.Equals(InstalledExe, StringComparison.OrdinalIgnoreCase);
+        string currentExe = Environment.ProcessPath ?? "";
+        return !string.IsNullOrEmpty(currentExe) &&
+               currentExe.Equals(InstalledExe, StringComparison.OrdinalIgnoreCase);
     }
+
+    // ================================================================ install
 
     public static void InstallWithProgress(Action<string> log)
     {
-        string currentExe = Process.GetCurrentProcess().MainModule?.FileName ?? "";
-        if (string.IsNullOrEmpty(currentExe)) throw new Exception("Could not resolve current executable path.");
+        string currentExe = Environment.ProcessPath ?? "";
+        if (string.IsNullOrEmpty(currentExe)) throw new Exception("Could not resolve the current executable path.");
 
-        // 1. Create Directory
-        log($"Ensuring installation directory exists: {InstallDir}");
-        if (!Directory.Exists(InstallDir)) Directory.CreateDirectory(InstallDir);
-        System.Threading.Thread.Sleep(500); // Artificial delay so user can read
+        log($"Creating installation directory: {InstallDir}");
+        Directory.CreateDirectory(InstallDir);
 
-        // 2. Copy Executable
-        log("Checking for running instances...");
+        log("Checking for a running copy...");
         foreach (var p in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(InstalledExe)))
         {
             try
             {
-                if (p.MainModule != null && p.MainModule.FileName.Equals(InstalledExe, StringComparison.OrdinalIgnoreCase))
+                if (p.Id == Environment.ProcessId) continue;
+                if (p.MainModule != null &&
+                    p.MainModule.FileName.Equals(InstalledExe, StringComparison.OrdinalIgnoreCase))
                 {
-                    log($"Killing running instance (PID: {p.Id})...");
+                    log($"Closing running copy (PID {p.Id})...");
                     p.Kill();
-                    p.WaitForExit(3000);
+                    p.WaitForExit(5000);
                 }
             }
-            catch { /* Ignore access denied for other processes */ }
+            catch { /* another user's process - not ours to touch */ }
         }
 
-        log($"Copying core executable to: {InstalledExe}");
-        File.Copy(currentExe, InstalledExe, true);
-        System.Threading.Thread.Sleep(500);
+        if (!currentExe.Equals(InstalledExe, StringComparison.OrdinalIgnoreCase))
+        {
+            log($"Copying program files to: {InstalledExe}");
+            File.Copy(currentExe, InstalledExe, true);
+        }
 
-        // 3. Register in Appwiz.cpl
-        log("Writing Windows Registry uninstallation keys...");
-        string uninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\RDPVault";
-        using (RegistryKey key = Registry.CurrentUser.CreateSubKey(uninstallKey))
+        log("Registering the uninstaller with Programs and Features...");
+        using (RegistryKey key = Registry.CurrentUser.CreateSubKey(UninstallKeyPath))
         {
             key.SetValue("DisplayName", "RDP Vault (Encrypted Connection Manager)");
             key.SetValue("DisplayIcon", InstalledExe);
+            key.SetValue("InstallLocation", InstallDir);
             key.SetValue("UninstallString", $"\"{InstalledExe}\" --uninstall");
             key.SetValue("QuietUninstallString", $"\"{InstalledExe}\" --uninstall --quiet");
-            key.SetValue("DisplayVersion", "1.0.0.0");
+            key.SetValue("DisplayVersion", "1.1.0.0");
             key.SetValue("Publisher", "RDPVault Open Source");
-            key.SetValue("EstimatedSize", (new FileInfo(InstalledExe).Length / 1024), RegistryValueKind.DWord);
+            key.SetValue("EstimatedSize", new FileInfo(InstalledExe).Length / 1024, RegistryValueKind.DWord);
             key.SetValue("NoModify", 1, RegistryValueKind.DWord);
             key.SetValue("NoRepair", 1, RegistryValueKind.DWord);
         }
-        System.Threading.Thread.Sleep(500);
 
-        // 4. Create Desktop & Start Menu Shortcuts via WScript.Shell COM object
-        log("Generating WScript.Shell COM object...");
-        log("Creating Desktop shortcut...");
-        CreateShortcut(
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "RDP Vault.lnk"),
-            InstalledExe, "Encrypted RDP Connection Manager");
+        // Issue #6: make legacy .rdpvlink files from v1.0.0 actually open.
+        log("Registering the .rdpvlink file type...");
+        try { RegisterFileAssociation(InstalledExe); }
+        catch (Exception ex) { log($"  (skipped: {ex.Message})"); }
 
-        log("Creating Start Menu shortcut...");
-        string startMenuDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "RDP Vault");
-        if (!Directory.Exists(startMenuDir)) Directory.CreateDirectory(startMenuDir);
-        CreateShortcut(
-            Path.Combine(startMenuDir, "RDP Vault.lnk"),
-            InstalledExe, "Encrypted RDP Connection Manager");
-            
-        System.Threading.Thread.Sleep(500);
-        log("Validating deployment integrity...");
-        if (!File.Exists(InstalledExe)) throw new Exception("Post-install validation failed. Executable missing.");
-        log("Finalizing Setup...");
+        // Issue #16: real IShellLink shortcuts, and failures are reported now.
+        log("Creating the Desktop shortcut...");
+        TryShortcut(log, Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "RDP Vault.lnk"));
+
+        log("Creating the Start Menu shortcut...");
+        string startMenuDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.Programs), "RDP Vault");
+        Directory.CreateDirectory(startMenuDir);
+        TryShortcut(log, Path.Combine(startMenuDir, "RDP Vault.lnk"));
+
+        log("Verifying the installation...");
+        if (!File.Exists(InstalledExe)) throw new Exception("Post-install check failed: the executable is missing.");
+        log("Done.");
+    }
+
+    private static void TryShortcut(Action<string> log, string path)
+    {
+        try
+        {
+            ShellLink.Create(path, InstalledExe, "", "Encrypted RDP Connection Manager", InstalledExe);
+        }
+        catch (Exception ex)
+        {
+            log($"  WARNING: could not create {Path.GetFileName(path)} - {ex.Message}");
+        }
+    }
+
+    private static void RegisterFileAssociation(string exePath)
+    {
+        using (var ext = Registry.CurrentUser.CreateSubKey($@"Software\Classes\{LegacyExt}"))
+            ext.SetValue("", ProgId);
+
+        using (var progId = Registry.CurrentUser.CreateSubKey($@"Software\Classes\{ProgId}"))
+        {
+            progId.SetValue("", "RDP Vault Connection");
+            using (var icon = progId.CreateSubKey("DefaultIcon"))
+                icon.SetValue("", $"\"{exePath}\",0");
+            using (var cmd = progId.CreateSubKey(@"shell\open\command"))
+                cmd.SetValue("", $"\"{exePath}\" --launch \"%1\"");
+        }
+    }
+
+    private static void UnregisterFileAssociation()
+    {
+        try { Registry.CurrentUser.DeleteSubKeyTree($@"Software\Classes\{ProgId}", false); } catch { }
+        try { Registry.CurrentUser.DeleteSubKeyTree($@"Software\Classes\{LegacyExt}", false); } catch { }
     }
 
     public static void LaunchInstalledAndExit()
     {
-        Process.Start(new ProcessStartInfo
+        try
         {
-            FileName = InstalledExe,
-            UseShellExecute = false
-        });
+            Process.Start(new ProcessStartInfo { FileName = InstalledExe, UseShellExecute = false });
+        }
+        catch { }
         Environment.Exit(0);
     }
 
-    public static void UninstallWithProgress(Action<string> log)
+    // ================================================================ uninstall
+
+    /// <summary>Is there a vault inside the install directory that would be destroyed?</summary>
+    public static bool InstalledVaultExists() => File.Exists(AppPaths.InstalledVaultPath);
+
+    /// <summary>
+    /// ISSUE #1 - THE WORST BUG IN THE PROJECT.
+    ///
+    /// The old uninstaller ended with:
+    ///     rmdir /S /Q "%LOCALAPPDATA%\RDPVault"
+    /// and the vault lives in exactly that directory. Choosing "Uninstall" in
+    /// Programs and Features - or the QuietUninstallString, which runs with no UI
+    /// whatsoever - permanently deleted every stored credential with no warning, no
+    /// confirmation, no backup and (see issue #2) no way to recover.
+    ///
+    /// Now: the vault is copied out to Documents\RDP Vault Backups BEFORE anything
+    /// is removed, unless the user explicitly asks for it to be destroyed. The
+    /// rescued path is returned so the UI can show it.
+    /// </summary>
+    public static string? UninstallWithProgress(Action<string> log, bool keepVault)
     {
+        string? rescuedTo = null;
         try
         {
-            // 1. Unregister Appwiz.cpl
-            log("Removing appwiz.cpl (Programs and Features) registration...");
-            Registry.CurrentUser.DeleteSubKeyTree(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\RDPVault", false);
-            System.Threading.Thread.Sleep(500);
+            if (keepVault && InstalledVaultExists())
+            {
+                log("Rescuing your vault before removing the program...");
+                rescuedTo = RescueVault();
+                log($"  Your vault has been copied to: {rescuedTo}");
+                log("  Keep this file. It still needs your master password or Recovery Code.");
+            }
+            else if (!keepVault && InstalledVaultExists())
+            {
+                log("Securely erasing the vault at your request...");
+                ShredFile(AppPaths.InstalledVaultPath);
+                ShredFile(AppPaths.InstalledVaultPath + AppPaths.BackupSuffix);
+                ShredFile(AppPaths.InstalledVaultPath + AppPaths.TempSuffix);
+            }
 
-            // 2. Delete Shortcuts
-            log("Deleting Desktop shortcut...");
-            string desktopShortcut = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "RDP Vault.lnk");
-            if (File.Exists(desktopShortcut)) File.Delete(desktopShortcut);
-            System.Threading.Thread.Sleep(500);
+            log("Removing the Programs and Features entry...");
+            try { Registry.CurrentUser.DeleteSubKeyTree(UninstallKeyPath, false); } catch { }
 
-            log("Deleting Start Menu shortcut...");
-            string startMenuDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "RDP Vault");
-            if (Directory.Exists(startMenuDir)) Directory.Delete(startMenuDir, true);
-            System.Threading.Thread.Sleep(500);
+            log("Removing the .rdpvlink file type...");
+            UnregisterFileAssociation();
 
-            // 3. Initiate Self-Destruct CMD script
-            log("Preparing self-destruct payload to obliterate installation directory...");
-            string currentExe = Process.GetCurrentProcess().MainModule?.FileName ?? "";
-            System.Threading.Thread.Sleep(1000);
-            log("RDP Vault has been successfully uninstalled.");
-            log("The application will now terminate and shred itself from the disk.");
-            System.Threading.Thread.Sleep(2000);
+            log("Removing shortcuts...");
+            string desktopShortcut = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "RDP Vault.lnk");
+            try { if (File.Exists(desktopShortcut)) File.Delete(desktopShortcut); } catch { }
 
+            string startMenuDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.Programs), "RDP Vault");
+            try { if (Directory.Exists(startMenuDir)) Directory.Delete(startMenuDir, true); } catch { }
+
+            log("Removing program files...");
+            string currentExe = Environment.ProcessPath ?? "";
             if (File.Exists(currentExe))
             {
+                // A running exe cannot delete itself; hand the last step to cmd.exe.
+                // The vault has already been rescued or deliberately shredded above.
                 string cmd = $"/C choice /C Y /N /D Y /T 2 & Del /F /Q \"{currentExe}\" & rmdir /S /Q \"{InstallDir}\"";
                 Process.Start(new ProcessStartInfo
                 {
@@ -133,29 +202,52 @@ public static class InstallerService
                     CreateNoWindow = true
                 });
             }
+
+            log("RDP Vault has been uninstalled.");
+            return rescuedTo;
         }
         catch (Exception ex)
         {
             log($"ERROR: {ex.Message}");
-        }
-        finally
-        {
-            Environment.Exit(0);
+            return rescuedTo;
         }
     }
 
-    private static void CreateShortcut(string shortcutPath, string targetPath, string description)
+    private static string RescueVault()
+    {
+        Directory.CreateDirectory(AppPaths.RescueDir);
+        string stamp = DateTime.Now.ToString("yyyy-MM-dd_HHmmss");
+        string dest = Path.Combine(AppPaths.RescueDir, $"vault-{stamp}{Path.GetExtension(AppPaths.VaultFileName)}");
+        File.Copy(AppPaths.InstalledVaultPath, dest, overwrite: false);
+
+        string bak = AppPaths.InstalledVaultPath + AppPaths.BackupSuffix;
+        if (File.Exists(bak))
+        {
+            try { File.Copy(bak, dest + AppPaths.BackupSuffix, overwrite: false); } catch { }
+        }
+        return dest;
+    }
+
+    private static void ShredFile(string path)
     {
         try
         {
-            Type? t = Type.GetTypeFromProgID("WScript.Shell");
-            if (t == null) return;
-            dynamic shell = Activator.CreateInstance(t)!;
-            dynamic shortcut = shell.CreateShortcut(shortcutPath);
-            shortcut.TargetPath = targetPath;
-            shortcut.WorkingDirectory = Path.GetDirectoryName(targetPath);
-            shortcut.Description = description;
-            shortcut.Save();
+            if (!File.Exists(path)) return;
+            long len = new FileInfo(path).Length;
+            using (var fs = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.None))
+            {
+                byte[] noise = System.Security.Cryptography.RandomNumberGenerator.GetBytes(
+                    (int)Math.Min(Math.Max(len, 1), 1 << 20));
+                long written = 0;
+                while (written < len)
+                {
+                    int chunk = (int)Math.Min(noise.Length, len - written);
+                    fs.Write(noise, 0, chunk);
+                    written += chunk;
+                }
+                fs.Flush(true);
+            }
+            File.Delete(path);
         }
         catch { }
     }

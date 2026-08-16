@@ -1,0 +1,34 @@
+# Build output ---------------------------------------------------------------
+# These were tracked by mistake: every build churned obj/, bin/ and a ~60 MB
+# compiled/RDPVault.exe into the history. The shipped binary lives on the
+# GitHub release (see project_structure.txt SECTION 14), never in the repo.
+[Bb]in/
+[Oo]bj/
+compiled/
+publish/
+build.log
+
+# Visual Studio / Rider / VS Code --------------------------------------------
+.vs/
+.idea/
+*.user
+*.suo
+*.userprefs
+
+# NuGet ----------------------------------------------------------------------
+*.nupkg
+packages/
+
+# Runtime data that must NEVER be committed ----------------------------------
+# A vault, its rolling backup, and the legacy failure counter all belong to the
+# user, not to the repository.
+vault.rdpv
+vault.rdpv.bak
+vault.rdpv.tmp
+rdpvault_fails.json
+*.rdpvlink
+
+# OS noise -------------------------------------------------------------------
+Thumbs.db
+desktop.ini
+.DS_Store

@@ -1,15 +1,18 @@
+using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading.Tasks;
 
 namespace RDPVault;
 
 /// <summary>
 /// Launches mstsc.exe from a generated temp .rdp file and scrubs everything when it closes.
 /// If a password is saved, it is placed in Windows Credential Manager as a SESSION
-/// credential (vanishes at sign-out / reboot) under TERMSRV/<host> and is deleted
-/// the moment the RDP window closes - never written into the .rdp file itself.
+/// credential (vanishes at sign-out / reboot) and deleted the moment the RDP window
+/// closes - it is never written into the .rdp file itself.
 /// </summary>
 public static class RdpLauncher
 {
@@ -17,48 +20,76 @@ public static class RdpLauncher
     private static readonly object Gate = new();
 
     public static event Action<string>? SessionEnded;
+    public static event Action<string>? SessionStarted;
+    public static event Action<string>? LaunchFailed;
 
     /// <summary>Start one RDP session for the profile. Returns false if mstsc failed to start.</summary>
     public static bool Launch(RdpProfile p)
     {
-        string tempRdp = Path.Combine(Path.GetTempPath(), $"rdpv_{p.Id}.rdp");
-        File.WriteAllText(tempRdp, BuildRdpFile(p), new UTF8Encoding(false));
+        SessionManager.Current.Touch();   // issue #11: connecting is activity
 
-        string? credTarget = null;
+        string tempRdp = Path.Combine(Path.GetTempPath(), $"rdpv_{p.Id}.rdp");
+        try
+        {
+            File.WriteAllText(tempRdp, BuildRdpFile(p), new UTF8Encoding(false));
+        }
+        catch (Exception ex)
+        {
+            LaunchFailed?.Invoke($"Could not prepare the connection file: {ex.Message}");
+            return false;
+        }
+
+        // Issue #18b: mstsc looks the credential up by the exact "full address" string.
+        // Writing only TERMSRV/{host} meant saved passwords were never found for any
+        // profile on a non-default port. Both spellings are now written and removed.
+        var credTargets = new List<string>();
         if (p.HasPassword && !string.IsNullOrEmpty(p.Username))
         {
-            credTarget = $"TERMSRV/{p.Host}";
-            if (!WriteSessionCredential(credTarget, p.Username, p.Password))
-                credTarget = null; // fall back to mstsc asking for the password
+            foreach (string target in CredentialTargets(p))
+                if (WriteSessionCredential(target, p.Username, p.Password))
+                    credTargets.Add(target);
+            // If none could be written, mstsc simply prompts - graceful degradation.
         }
 
         var psi = new ProcessStartInfo
         {
-            FileName = Environment.SystemDirectory + "\\mstsc.exe",
+            FileName = Path.Combine(Environment.SystemDirectory, "mstsc.exe"),
             Arguments = $"\"{tempRdp}\"",
             UseShellExecute = false
         };
 
         Process? proc;
         try { proc = Process.Start(psi); }
-        catch
+        catch (Exception ex)
         {
             TryDelete(tempRdp);
-            if (credTarget != null) DeleteCredential(credTarget);
+            foreach (string t in credTargets) DeleteCredential(t);
+            LaunchFailed?.Invoke($"Windows could not start Remote Desktop: {ex.Message}");
             return false;
         }
-        if (proc == null) return false;
+        if (proc == null)
+        {
+            TryDelete(tempRdp);
+            foreach (string t in credTargets) DeleteCredential(t);
+            LaunchFailed?.Invoke("Windows could not start Remote Desktop.");
+            return false;
+        }
 
-        var target = credTarget;
+        lock (Gate)
+        {
+            LiveSessions.RemoveAll(pr => { try { return pr.HasExited; } catch { return true; } });
+            LiveSessions.Add(proc);
+        }
+        SessionStarted?.Invoke(p.Name);
+
+        string profileName = p.Name;
         _ = Task.Run(async () =>
         {
             try
             {
-                // mstsc may spawn/exit quickly; wait for the real UI process.
                 if (proc.HasExited && proc.ExitCode != 0)
                 {
-                    // Some Windows versions relaunch elevated; give a short grace period
-                    // and watch for any mstsc still alive before giving up.
+                    // Some Windows builds relaunch mstsc; give a short grace period.
                     await Task.Delay(3000);
                 }
                 else
@@ -68,48 +99,21 @@ public static class RdpLauncher
             }
             catch { /* process info no longer available */ }
 
-            try
-            {
-                if (File.Exists(tempRdp))
-                {
-                    bool changed = false;
-                    var lines = File.ReadAllLines(tempRdp);
-                    foreach (var line in lines)
-                    {
-                        var trimmed = line.Trim();
-                        if (trimmed.StartsWith("redirectclipboard:i:", StringComparison.OrdinalIgnoreCase))
-                        {
-                            p.AllowClipboard = trimmed.EndsWith("1");
-                            changed = true;
-                        }
-                        else if (trimmed.StartsWith("redirectdrives:i:", StringComparison.OrdinalIgnoreCase))
-                        {
-                            p.AllowDrives = trimmed.EndsWith("1");
-                            changed = true;
-                        }
-                        else if (trimmed.StartsWith("redirectprinters:i:", StringComparison.OrdinalIgnoreCase))
-                        {
-                            p.AllowPrinters = trimmed.EndsWith("1");
-                            changed = true;
-                        }
-                        else if (trimmed.StartsWith("redirectsmartcards:i:", StringComparison.OrdinalIgnoreCase))
-                        {
-                            p.AllowSmartCards = trimmed.EndsWith("1");
-                            changed = true;
-                        }
-                    }
-                    if (changed) SessionManager.Current.Save();
-                }
-            }
-            catch { }
+            // ISSUE #9 - REMOVED ON PURPOSE.
+            // The old code re-read the temp .rdp after mstsc exited and copied
+            // redirectclipboard / redirectdrives / redirectprinters / redirectsmartcards
+            // back into the saved profile, then wrote the vault. mstsc rewrites that
+            // file whenever the user ticks a box in its own dialog, so a single
+            // "share my local drives" tick silently and permanently enabled drive
+            // redirection on the stored profile. The profile is the user's setting;
+            // a transient session must never edit it.
 
             TryDelete(tempRdp);
-            if (target != null) DeleteCredential(target);
-            TraceCleaner.Sweep();          // immediate scrub the moment the window closes
-            SessionEnded?.Invoke(p.Name);
+            foreach (string t in credTargets) DeleteCredential(t);
+            TraceCleaner.Sweep();
+            SessionEnded?.Invoke(profileName);
         });
 
-        lock (Gate) LiveSessions.Add(proc);
         return true;
     }
 
@@ -127,19 +131,29 @@ public static class RdpLauncher
         }
     }
 
-    public static bool AnyLive()
+    public static int LiveCount()
     {
         lock (Gate)
         {
             LiveSessions.RemoveAll(pr => { try { return pr.HasExited; } catch { return true; } });
-            return LiveSessions.Count > 0;
+            return LiveSessions.Count;
         }
     }
+
+    public static bool AnyLive() => LiveCount() > 0;
 
     // ---------------- .rdp generation ----------------
 
     private static string BuildRdpFile(RdpProfile p)
     {
+        bool useMulti = p.UseMultiMon || (SessionManager.Current.Payload?.Settings.ForceMultiMon ?? false);
+
+        // Issue #10: 2 = refuse to connect when the server's identity cannot be
+        // verified. 1 = warn but allow, used only when the user explicitly opts in
+        // for a host with a self-signed certificate. 0 (silently accept anything,
+        // the old hard-coded value) is no longer reachable.
+        int authLevel = p.AllowUnverifiedServer ? 1 : 2;
+
         var sb = new StringBuilder();
         sb.AppendLine("screen mode id:i:" + (p.FullScreen ? 2 : 1));
         if (!p.FullScreen)
@@ -147,9 +161,8 @@ public static class RdpLauncher
             sb.AppendLine($"desktopwidth:i:{p.Width}");
             sb.AppendLine($"desktopheight:i:{p.Height}");
         }
-        bool useMulti = p.UseMultiMon || (SessionManager.Current.Payload?.Settings.ForceMultiMon ?? false);
         sb.AppendLine("use multimon:i:" + (useMulti ? "1" : "0"));
-        sb.AppendLine($"session bpp:i:32");
+        sb.AppendLine("session bpp:i:32");
         sb.AppendLine($"winposstr:s:0,1,0,0,{Math.Max(800, p.Width)},{Math.Max(600, p.Height)}");
         sb.AppendLine("compression:i:1");
         sb.AppendLine("keyboardhook:i:2");
@@ -167,7 +180,7 @@ public static class RdpLauncher
         sb.AppendLine("disable themes:i:0");
         sb.AppendLine("disable cursor setting:i:0");
         sb.AppendLine("bitmapcachepersistenable:i:1");
-        sb.AppendLine("full address:s:" + (p.Port == 3389 ? p.Host : $"{p.Host}:{p.Port}"));
+        sb.AppendLine("full address:s:" + FullAddress(p));
         sb.AppendLine("audiomode:i:0");
         sb.AppendLine("redirectprinters:i:" + (p.AllowPrinters ? 1 : 0));
         sb.AppendLine("redirectcomports:i:0");
@@ -175,7 +188,8 @@ public static class RdpLauncher
         sb.AppendLine("redirectclipboard:i:" + (p.AllowClipboard ? 1 : 0));
         sb.AppendLine("redirectposdevices:i:0");
         sb.AppendLine("autoreconnection enabled:i:1");
-        sb.AppendLine("authentication level:i:0");
+        sb.AppendLine("authentication level:i:" + authLevel);
+        sb.AppendLine("enablecredsspsupport:i:1");
         sb.AppendLine("prompt for credentials:i:0");
         sb.AppendLine("negotiate security layer:i:1");
         sb.AppendLine("remoteapplicationmode:i:0");
@@ -189,11 +203,10 @@ public static class RdpLauncher
         sb.AppendLine("use redirection server name:i:0");
         if (!string.IsNullOrEmpty(p.Username))
         {
-            sb.AppendLine("username:s:" + p.Username);
+            sb.AppendLine("username:s:" + p.Username);   // password is NEVER written here
             sb.AppendLine("domain:s:");
         }
 
-        // Drive redirection (local disks visible inside the session) - opt-in only.
         if (p.AllowDrives)
         {
             sb.AppendLine("drivestoredirect:s:*");
@@ -207,6 +220,14 @@ public static class RdpLauncher
         sb.AppendLine("pcb:s:");            // no connection bookkeeping id
         sb.AppendLine("disableremoteappcapscheck:i:1");
         return sb.ToString();
+    }
+
+    private static string FullAddress(RdpProfile p) => p.Port == 3389 ? p.Host : $"{p.Host}:{p.Port}";
+
+    private static IEnumerable<string> CredentialTargets(RdpProfile p)
+    {
+        yield return $"TERMSRV/{p.Host}";
+        if (p.Port != 3389) yield return $"TERMSRV/{p.Host}:{p.Port}";
     }
 
     // ---------------- session credential via CredWrite ----------------
@@ -262,6 +283,8 @@ public static class RdpLauncher
         catch { return false; }
         finally
         {
+            // Scrub the unmanaged copy of the password before releasing it.
+            try { for (int i = 0; i < blob.Length; i++) Marshal.WriteByte(blobPtr, i, 0); } catch { }
             Marshal.FreeHGlobal(blobPtr);
             Marshal.FreeHGlobal(userPtr);
             Marshal.FreeHGlobal(targetPtr);

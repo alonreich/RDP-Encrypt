@@ -3,11 +3,11 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:RDPVault"
-        mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="550"
+        mc:Ignorable="d" d:DesignWidth="860" d:DesignHeight="600"
         x:Class="RDPVault.MainWindow"
         Title="RDP Vault"
         Icon="avares://RDPVault/Assets/icon.ico"
-        Width="800" Height="550"
+        Width="860" Height="600" MinWidth="720" MinHeight="480"
         WindowStartupLocation="CenterScreen"
         Background="#0E0E10"
         Foreground="#EDEDED"
@@ -49,6 +49,16 @@
         <Style Selector="Button.Danger:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="#D00000"/>
         </Style>
+        <Style Selector="Button.Link">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Foreground" Value="#8AB4F8"/>
+            <Setter Property="FontWeight" Value="Normal"/>
+            <Setter Property="Padding" Value="2"/>
+        </Style>
+        <Style Selector="Button.Link:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent"/>
+        </Style>
         <Style Selector="TextBox">
             <Setter Property="Background" Value="#141417"/>
             <Setter Property="BorderBrush" Value="#2E2E35"/>
@@ -67,11 +77,6 @@
             <Setter Property="Padding" Value="0"/>
             <Setter Property="Margin" Value="0,0,0,8"/>
             <Setter Property="CornerRadius" Value="6"/>
-            <Setter Property="Transitions">
-                <Transitions>
-                    <BrushTransition Property="Background" Duration="0:0:0.15"/>
-                </Transitions>
-            </Setter>
         </Style>
         <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="#15151A"/>
@@ -82,66 +87,99 @@
     </Window.Styles>
 
     <Grid>
-        <!-- LOCKED PANEL -->
+        <!-- ================= LOCKED / FIRST RUN PANEL ================= -->
         <Border Name="LockedPanel" Background="#0E0E10" IsVisible="True" ZIndex="100">
-            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="320" Spacing="16">
-                <TextBlock Text="RDP VAULT" FontSize="28" FontWeight="Bold" Foreground="#EDEDED" HorizontalAlignment="Center" LetterSpacing="2"/>
-                <TextBlock Text="Enter Master Password or use TPM Quick Unlock." FontSize="13" Foreground="#8A8A93" HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center" Margin="0,0,0,10"/>
-                
-                <TextBox Name="TxtPassword" PasswordChar="•" Watermark="Master Password" KeyDown="TxtPassword_KeyDown"/>
-                
-                <Button Name="BtnUnlock" Content="Unlock Vault" Classes="Accent" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="BtnUnlock_Click"/>
-                
-                <Button Name="BtnHello" Content="Hardware TPM Unlock" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="BtnHello_Click" IsVisible="False" Margin="0,10,0,0"/>
-                
-                <TextBlock Name="TxtLockStatus" Foreground="#26A0DA" FontSize="13" HorizontalAlignment="Center" IsVisible="False" Margin="0,10,0,0"/>
-                <TextBlock Name="TxtLockError" Foreground="#E83030" FontSize="13" HorizontalAlignment="Center" IsVisible="False" Margin="0,5,0,0"/>
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="360" Spacing="14">
+                <TextBlock Text="RDP VAULT" FontSize="28" FontWeight="Bold" Foreground="#EDEDED"
+                           HorizontalAlignment="Center" LetterSpacing="2"/>
+                <TextBlock Name="TxtLockSubtitle" Text="Enter your master password."
+                           FontSize="13" Foreground="#8A8A93" HorizontalAlignment="Center"
+                           TextWrapping="Wrap" TextAlignment="Center" Margin="0,0,0,6"/>
+
+                <!-- Existing vault -->
+                <StackPanel Name="PnlUnlock" Spacing="12">
+                    <TextBox Name="TxtPassword" PasswordChar="•" Watermark="Master Password" KeyDown="TxtPassword_KeyDown"/>
+                    <Button Name="BtnUnlock" Content="Unlock Vault" Classes="Accent"
+                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="BtnUnlock_Click"/>
+                    <Button Name="BtnHello" Content="Unlock with Windows Hello"
+                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                            Click="BtnHello_Click" IsVisible="False"/>
+                    <Button Name="BtnRecovery" Content="I forgot my master password" Classes="Link"
+                            HorizontalAlignment="Center" Click="BtnRecovery_Click"/>
+                </StackPanel>
+
+                <!-- No vault yet (issue #3) -->
+                <StackPanel Name="PnlFirstRun" Spacing="12" IsVisible="False">
+                    <TextBlock Text="No vault was found in this folder. Create one to get started."
+                               FontSize="12" Foreground="#8A8A93" TextWrapping="Wrap" TextAlignment="Center"/>
+                    <Button Name="BtnCreateVault" Content="Create a new vault" Classes="Accent"
+                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="BtnCreateVault_Click"/>
+                </StackPanel>
+
+                <TextBlock Name="TxtLockStatus" Foreground="#26A0DA" FontSize="13" HorizontalAlignment="Center"
+                           IsVisible="False" TextWrapping="Wrap" TextAlignment="Center"/>
+                <TextBlock Name="TxtLockError" Foreground="#E83030" FontSize="13" HorizontalAlignment="Center"
+                           IsVisible="False" TextWrapping="Wrap" TextAlignment="Center"/>
             </StackPanel>
         </Border>
 
-        <!-- MAIN PANEL -->
-        <Grid Name="MainPanel" IsVisible="False" RowDefinitions="Auto,*,Auto" Margin="20">
-            <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,20">
+        <!-- ================= MAIN PANEL ================= -->
+        <Grid Name="MainPanel" IsVisible="False" RowDefinitions="Auto,Auto,*,Auto" Margin="20">
+            <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,14">
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10">
                     <TextBlock Text="RDP VAULT" FontSize="20" FontWeight="Bold" VerticalAlignment="Center" LetterSpacing="1"/>
                     <Border Background="#1A1A1E" CornerRadius="4" Padding="6,2" VerticalAlignment="Center">
-                        <TextBlock Name="TxtCount" Text="0 Profiles" FontSize="12" Foreground="#8A8A93"/>
+                        <TextBlock Name="TxtCount" Text="0 profiles" FontSize="12" Foreground="#8A8A93"/>
                     </Border>
                 </StackPanel>
-                
+
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10">
+                    <TextBlock Name="TxtIdle" Text="" FontSize="12" Foreground="#6A6A73" VerticalAlignment="Center"/>
                     <Button Name="BtnSettings" Content="Settings" Click="BtnSettings_Click"/>
                     <Button Name="BtnLock" Content="Lock Vault" Click="BtnLock_Click"/>
                 </StackPanel>
             </Grid>
 
-            <ScrollViewer Grid.Row="1">
-                <ListBox Name="LstProfiles">
-                    <ListBox.ItemTemplate>
-                        <DataTemplate x:DataType="local:RdpProfile">
-                            <Border Background="#121215" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="6" Padding="16">
-                                <Grid ColumnDefinitions="*,Auto">
-                                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                        <TextBlock Text="{Binding Name}" FontSize="16" FontWeight="SemiBold"/>
-                                        <TextBlock Text="{Binding DisplayHost}" FontSize="13" Foreground="#8A8A93" Margin="0,4,0,0"/>
-                                        <TextBlock Text="{Binding Username}" FontSize="12" Foreground="#6A6A73" Margin="0,2,0,0"/>
-                                    </StackPanel>
-                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                                        <Button Content="Connect" Classes="Accent" Click="BtnConnect_Click" Tag="{Binding .}"/>
-                                        <Button Content="Shortcut" Click="BtnShortcut_Click" Tag="{Binding .}"/>
-                                        <Button Content="Edit" Click="BtnEdit_Click" Tag="{Binding .}"/>
-                                        <Button Content="Delete" Classes="Danger" Click="BtnDelete_Click" Tag="{Binding .}"/>
-                                    </StackPanel>
-                                </Grid>
-                            </Border>
-                        </DataTemplate>
-                    </ListBox.ItemTemplate>
-                </ListBox>
+            <!-- Honest warning strip (issue #7 / #17) -->
+            <Border Grid.Row="1" Name="WarnBar" IsVisible="False" Background="#2A1F0A" BorderBrush="#5A431A"
+                    BorderThickness="1" CornerRadius="4" Padding="12,8" Margin="0,0,0,12">
+                <TextBlock Name="TxtWarn" Foreground="#E8A030" FontSize="12" TextWrapping="Wrap"/>
+            </Border>
+
+            <ScrollViewer Grid.Row="2">
+                <StackPanel>
+                    <TextBlock Name="TxtEmpty" IsVisible="False" Foreground="#6A6A73" FontSize="13"
+                               Margin="4,20,0,0"
+                               Text="No profiles yet. Use &quot;Add Profile&quot; to store your first connection."/>
+                    <ListBox Name="LstProfiles">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate x:DataType="local:RdpProfile">
+                                <Border Background="#121215" BorderBrush="#2E2E35" BorderThickness="1"
+                                        CornerRadius="6" Padding="16">
+                                    <Grid ColumnDefinitions="*,Auto">
+                                        <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding Name}" FontSize="16" FontWeight="SemiBold"/>
+                                            <TextBlock Text="{Binding DisplayHost}" FontSize="13" Foreground="#8A8A93" Margin="0,4,0,0"/>
+                                            <TextBlock Text="{Binding Username}" FontSize="12" Foreground="#6A6A73" Margin="0,2,0,0"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                            <Button Content="Connect" Classes="Accent" Click="BtnConnect_Click" Tag="{Binding .}"/>
+                                            <Button Content="Shortcut" Click="BtnShortcut_Click" Tag="{Binding .}"/>
+                                            <Button Content="Edit" Click="BtnEdit_Click" Tag="{Binding .}"/>
+                                            <Button Content="Delete" Classes="Danger" Click="BtnDelete_Click" Tag="{Binding .}"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </StackPanel>
             </ScrollViewer>
 
-            <Grid Grid.Row="2" Margin="0,20,0,0">
-                <Button Name="BtnAddProfile" Content="+ Add Profile" HorizontalAlignment="Left" Click="BtnAddProfile_Click"/>
-                <TextBlock Name="TxtStatus" Text="Connected to Hardware TPM." FontSize="12" Foreground="#6A6A73" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+            <Grid Grid.Row="3" Margin="0,16,0,0" ColumnDefinitions="Auto,*">
+                <Button Grid.Column="0" Name="BtnAddProfile" Content="+ Add Profile" Click="BtnAddProfile_Click"/>
+                <TextBlock Grid.Column="1" Name="TxtStatus" Text="" FontSize="12" Foreground="#6A6A73"
+                           HorizontalAlignment="Right" VerticalAlignment="Center" TextWrapping="NoWrap"/>
             </Grid>
         </Grid>
     </Grid>

@@ -41,7 +41,9 @@ set "PROJECT_EXE=RDPVault.exe"
 set "OUTPUT_EXE=RDPVault.exe"
 set "OUTPUT_DIR=.\compiled"
 set "PUBLISH_BASE_ARGS=-p:TreatWarningsAsErrors=false"
-set "PUBLISH_AOT_ARGS=-p:PublishSingleFile=true -p:SelfContained=true"
+rem Self-contained single file. This is NOT a NativeAOT build - see
+rem project_structure.txt SECTION 2. The csproj sets PublishAot=false on purpose.
+set "PUBLISH_SF_ARGS=-p:PublishSingleFile=true -p:SelfContained=true"
 set "DOTNET_LOG_ARGS=-consoleLoggerParameters:ErrorsOnly"
 
 echo ###########################################################
@@ -54,15 +56,9 @@ call :CLEAN_ALL
 
 echo.
 echo ###########################################################
-echo ###########################################################
-echo CHECKING AVALONIA SINGLE FILE PIPELINE...
-echo ###########################################################
-
-echo.
-echo ###########################################################
 echo BUILDING RDP Vault: Self-Contained SingleFile win-x64
 echo ###########################################################
-call :BUILD_NATIVE
+call :BUILD_SINGLEFILE
 if errorlevel 1 exit /b 1
 
 call :VALIDATE_COMPILED_OUTPUT
@@ -72,8 +68,8 @@ echo.
 echo ###########################################################
 echo SUCCESS: Build completed successfully.
 echo.
-echo Native EXE: %OUTPUT_DIR%\%OUTPUT_EXE%
-echo Log file:  .\build.log
+echo Single EXE: %OUTPUT_DIR%\%OUTPUT_EXE%
+echo Log file:   .\build.log
 echo ###########################################################
 
 if "!DO_PUBLISH!"=="0" (
@@ -116,13 +112,17 @@ if not defined LOCALHASH (
 )
 for /f "usebackq delims=" %%D in (`powershell -NoProfile -Command "Get-Date -Format yyyy.MM.dd"`) do set "TAG=v%%D"
 
+rem Every previous release and tag is removed, so the repository always offers
+rem exactly ONE download and the /releases/latest/download/ URL in README.md
+rem can never resolve to a stale installer.
 set "REMOVED=0"
 for /f "usebackq delims=" %%T in (`gh release list --repo !REPO! --json tagName --jq ".[].tagName" 2^>nul`) do (
   gh release delete %%T --repo !REPO! --cleanup-tag --yes >nul 2>&1
   set /a REMOVED+=1
 )
+echo [PUBLISH] Removed !REMOVED! previous release^(s^).
 
-gh release create !TAG! "%OUTPUT_DIR%\%OUTPUT_EXE%" --repo !REPO! --title "RDP Vault !TAG!" --notes "Automated NativeAOT release published by build.cmd on !TAG!. SHA256 !LOCALHASH!" --latest >nul 2>&1
+gh release create !TAG! "%OUTPUT_DIR%\%OUTPUT_EXE%" --repo !REPO! --title "RDP Vault !TAG!" --notes "Self-contained single-file win-x64 build published by build.cmd on !TAG!. This is the only supported download. SHA256 !LOCALHASH!" --latest >nul 2>&1
 if errorlevel 1 (
   echo [PUBLISH] STOPPED: creating release !TAG! failed.
   exit /b 1
@@ -136,22 +136,37 @@ if /I not "!REMOTEHASH!"=="!LOCALHASH!" (
   exit /b 1
 )
 
+rem Guarantee the "one installer only" promise made in README.md.
+set "ASSETCOUNT=0"
+for /f "usebackq delims=" %%A in (`gh release view !TAG! --repo !REPO! --json assets --jq ".assets[].name" 2^>nul`) do set /a ASSETCOUNT+=1
+if not "!ASSETCOUNT!"=="1" (
+  echo [PUBLISH] STOPPED: release !TAG! carries !ASSETCOUNT! assets; exactly one ^(%OUTPUT_EXE%^) was expected.
+  exit /b 1
+)
+
+set "RELEASECOUNT=0"
+for /f "usebackq delims=" %%R in (`gh release list --repo !REPO! --json tagName --jq ".[].tagName" 2^>nul`) do set /a RELEASECOUNT+=1
+if not "!RELEASECOUNT!"=="1" (
+  echo [PUBLISH] WARNING: !RELEASECOUNT! releases exist; expected exactly one.
+)
+
 echo.
 echo ###########################################################
-echo SUCCESS: release !TAG! is live.
+echo SUCCESS: release !TAG! is live and is the only release.
 echo Download: https://github.com/!REPO!/releases/latest/download/%OUTPUT_EXE%
+echo SHA256:   !LOCALHASH!
 echo ###########################################################
 exit /b 0
 
-:BUILD_NATIVE
-set "FINAL_DIR=.\obj\NativeAot_final"
+:BUILD_SINGLEFILE
+set "FINAL_DIR=.\obj\SingleFile_final"
 if exist "%FINAL_DIR%" rd /s /q "%FINAL_DIR%"
 
-dotnet publish "%PROJECT_FILE%" -c Release -r win-x64 %PUBLISH_BASE_ARGS% %PUBLISH_AOT_ARGS% -o "%FINAL_DIR%" %DOTNET_LOG_ARGS%
+dotnet publish "%PROJECT_FILE%" -c Release -r win-x64 %PUBLISH_BASE_ARGS% %PUBLISH_SF_ARGS% -o "%FINAL_DIR%" %DOTNET_LOG_ARGS%
 if errorlevel 1 exit /b 1
 
 if not exist "%FINAL_DIR%\%PROJECT_EXE%" (
-  echo ERROR: Expected NativeAOT EXE was not produced.
+  echo ERROR: Expected single-file EXE was not produced.
   exit /b 1
 )
 
@@ -174,6 +189,14 @@ exit /b 0
 
 :VALIDATE_COMPILED_OUTPUT
 if not exist "%OUTPUT_DIR%\%OUTPUT_EXE%" exit /b 1
+set "EXTRA=0"
+for %%F in ("%OUTPUT_DIR%\*") do (
+  if /I not "%%~nxF"=="%OUTPUT_EXE%" set /a EXTRA+=1
+)
+if not "!EXTRA!"=="0" (
+  echo ERROR: %OUTPUT_DIR% must contain only %OUTPUT_EXE%; found !EXTRA! extra item^(s^).
+  exit /b 1
+)
 exit /b 0
 
 

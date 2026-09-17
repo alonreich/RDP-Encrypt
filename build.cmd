@@ -128,7 +128,7 @@ for /f "usebackq delims=" %%T in (`gh release list --repo !REPO! --json tagName 
 echo [PUBLISH] Removed !REMOVED! previous release^(s^).
 echo [PUBLISH] Uploading %OUTPUT_DIR%\%OUTPUT_EXE% to GitHub release !TAG!...
 
-gh release create !TAG! "%OUTPUT_DIR%\%OUTPUT_EXE%" --repo !REPO! --title "RDP Vault !TAG!" --notes "Self-contained single-file win-x64 build published by build.cmd on !TAG!. This is the only supported download. SHA256 !LOCALHASH!" --latest >nul 2>&1
+gh release create !TAG! "%OUTPUT_DIR%\%OUTPUT_EXE%" --repo !REPO! --title "RDP Vault !TAG!" --notes "Self-contained single-file win-x64 build published by build.cmd on !TAG!. This is the only supported download. SHA256 !LOCALHASH!" --latest
 if errorlevel 1 (
   echo [PUBLISH] STOPPED: creating release !TAG! failed.
   exit /b 1

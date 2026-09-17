@@ -127,18 +127,9 @@ for /f "usebackq delims=" %%T in (`gh release list --repo !REPO! --json tagName 
 )
 echo [PUBLISH] Removed !REMOVED! previous release^(s^).
 echo [PUBLISH] Uploading %OUTPUT_DIR%\%OUTPUT_EXE% to GitHub release !TAG!...
-
-gh release create !TAG! "%OUTPUT_DIR%\%OUTPUT_EXE%" --repo !REPO! --title "RDP Vault !TAG!" --notes "Self-contained single-file win-x64 build published by build.cmd on !TAG!. This is the only supported download. SHA256 !LOCALHASH!" --latest
+powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%developer_tools\UploadAsset.ps1" -Repo "!REPO!" -Tag "!TAG!" -FilePath "%OUTPUT_DIR%\%OUTPUT_EXE%" -LocalHash "!LOCALHASH!"
 if errorlevel 1 (
-  echo [PUBLISH] STOPPED: creating release !TAG! failed.
-  exit /b 1
-)
-
-set "REMOTEHASH="
-for /f "usebackq delims=" %%V in (`gh release view !TAG! --repo !REPO! --json assets --jq ".assets[0].digest" 2^>nul`) do set "REMOTEHASH=%%V"
-set "REMOTEHASH=!REMOTEHASH:sha256:=!"
-if /I not "!REMOTEHASH!"=="!LOCALHASH!" (
-  echo [PUBLISH] STOPPED: the uploaded asset does NOT match the file that was just built.
+  echo [PUBLISH] STOPPED: uploading release asset failed.
   exit /b 1
 )
 

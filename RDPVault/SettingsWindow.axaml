@@ -109,12 +109,32 @@
 
                 <Border Height="1" Background="#1A1A1E"/>
 
-                <!-- ============ display ============ -->
+                <!-- ============ certificate & identity warnings ============ -->
                 <StackPanel Spacing="6">
-                    <TextBlock Classes="h" Text="Display"/>
-                    <CheckBox Name="ChkForceMultiMon">
-                        <TextBlock Text="Use all monitors for every profile" Foreground="#EDEDED"/>
+                    <TextBlock Classes="h" Text="Certificate &amp; Identity Warnings"/>
+                    <CheckBox Name="ChkSuppressCertWarnings">
+                        <TextBlock Text="Ignore and suppress certificate &amp; identity warnings (authentication level: 0)"
+                                   TextWrapping="Wrap" Foreground="#EDEDED"/>
                     </CheckBox>
+                    <TextBlock Classes="hint"
+                               Text="Default: checked (suppressed). Suppresses certificate validation prompts when connecting via mstsc. Uncheck to re-enable certificate error and untrusted host warning dialogs."/>
+                </StackPanel>
+
+                <Border Height="1" Background="#1A1A1E"/>
+
+                <!-- ============ display defaults ============ -->
+                <StackPanel Spacing="6">
+                    <TextBlock Classes="h" Text="Display Defaults"/>
+                    <CheckBox Name="ChkDefaultFullScreen">
+                        <TextBlock Text="Launch sessions in full screen by default"
+                                   TextWrapping="Wrap" Foreground="#EDEDED"/>
+                    </CheckBox>
+                    <CheckBox Name="ChkDefaultMultiMon">
+                        <TextBlock Text="Use all monitors by default (multi-monitor spanning)"
+                                   TextWrapping="Wrap" Foreground="#EDEDED"/>
+                    </CheckBox>
+                    <TextBlock Classes="hint"
+                               Text="Default: both checked. Can be overridden on individual connection profiles."/>
                 </StackPanel>
 
                 <Border Height="1" Background="#1A1A1E"/>

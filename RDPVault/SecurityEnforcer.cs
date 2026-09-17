@@ -44,9 +44,14 @@ public static class SecurityEnforcer
         try { if (File.Exists(LegacyFailsFile)) File.Delete(LegacyFailsFile); } catch { }
     }
 
+    // Monotonic timestamp tracking to prevent OS clock manipulation from bypassing brute-force defenses
+    private static long _lastFailureTick = 0;
+    private static double _inProcessCooldownSeconds = 0;
+
     /// <summary>
     /// How long the user must wait before the next attempt is accepted.
     /// 0-4 failures: no delay. Then 2s, 4s, 8s ... capped at 60s.
+    /// Uses monotonic stopwatch ticks to prevent advancing the OS clock from clearing the cooldown.
     /// </summary>
     public static TimeSpan CooldownRemaining(VaultFile file)
     {
@@ -55,9 +60,22 @@ public static class SecurityEnforcer
         if (n < 5) return TimeSpan.Zero;
 
         double seconds = Math.Min(60, Math.Pow(2, Math.Min(n - 4, 6)));
+
+        // Monotonic check for attempts within the current process lifetime
+        TimeSpan monotonicLeft = TimeSpan.Zero;
+        if (_lastFailureTick > 0 && _inProcessCooldownSeconds > 0)
+        {
+            double elapsed = Stopwatch.GetElapsedTime(_lastFailureTick).TotalSeconds;
+            if (elapsed < _inProcessCooldownSeconds)
+                monotonicLeft = TimeSpan.FromSeconds(_inProcessCooldownSeconds - elapsed);
+        }
+
         DateTime readyAt = file.Fails.LastFailUtc.AddSeconds(seconds);
-        TimeSpan left = readyAt - DateTime.UtcNow;
-        return left > TimeSpan.Zero ? left : TimeSpan.Zero;
+        TimeSpan wallClockLeft = readyAt - DateTime.UtcNow;
+        if (wallClockLeft < TimeSpan.Zero) wallClockLeft = TimeSpan.Zero;
+
+        // Take the maximum of monotonic and wall-clock delays
+        return monotonicLeft > wallClockLeft ? monotonicLeft : wallClockLeft;
     }
 
     /// <summary>Records one wrong password/recovery code and persists it inside the vault envelope.</summary>
@@ -66,17 +84,33 @@ public static class SecurityEnforcer
         var now = DateTime.UtcNow;
         var policy = file.Policy;
 
-        if (file.Fails.FirstFailUtc == DateTime.MinValue ||
-            (now - file.Fails.FirstFailUtc).TotalMinutes > policy.WindowMinutes)
+        // Detect clock rollback (user moving clock backwards)
+        bool clockRolledBack = file.Fails.LastFailUtc != DateTime.MinValue && now < file.Fails.LastFailUtc;
+
+        if (!clockRolledBack && (file.Fails.FirstFailUtc == DateTime.MinValue ||
+            (now - file.Fails.FirstFailUtc).TotalMinutes > policy.WindowMinutes))
         {
-            file.Fails.Count = 1;
-            file.Fails.FirstFailUtc = now;
+            // Only reset if failures haven't occurred consecutively in the current running process
+            if (_lastFailureTick == 0 || Stopwatch.GetElapsedTime(_lastFailureTick).TotalMinutes > policy.WindowMinutes)
+            {
+                file.Fails.Count = 1;
+                file.Fails.FirstFailUtc = now;
+            }
+            else
+            {
+                file.Fails.Count++;
+            }
         }
         else
         {
             file.Fails.Count++;
         }
-        file.Fails.LastFailUtc = now;
+
+        file.Fails.LastFailUtc = clockRolledBack ? file.Fails.LastFailUtc.AddSeconds(1) : now;
+
+        // Update in-process monotonic tracking
+        _lastFailureTick = Stopwatch.GetTimestamp();
+        _inProcessCooldownSeconds = file.Fails.Count < 5 ? 0 : Math.Min(60, Math.Pow(2, Math.Min(file.Fails.Count - 4, 6)));
 
         bool destroy = policy.SelfDestructEnabled && file.Fails.Count >= policy.MaxAttempts;
 

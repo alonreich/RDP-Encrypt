@@ -188,12 +188,12 @@ public static class InstallerService
             try { if (Directory.Exists(startMenuDir)) Directory.Delete(startMenuDir, true); } catch { }
 
             log("Removing program files...");
-            string currentExe = Environment.ProcessPath ?? "";
-            if (File.Exists(currentExe))
+            bool isInstalledExe = IsInstalledLocation();
+            if (isInstalledExe)
             {
-                // A running exe cannot delete itself; hand the last step to cmd.exe.
+                // A running installed exe cannot delete itself; hand the last step to cmd.exe.
                 // The vault has already been rescued or deliberately shredded above.
-                string cmd = $"/C choice /C Y /N /D Y /T 2 & Del /F /Q \"{currentExe}\" & rmdir /S /Q \"{InstallDir}\"";
+                string cmd = $"/C choice /C Y /N /D Y /T 2 & Del /F /Q \"{InstalledExe}\" & rmdir /S /Q \"{InstallDir}\"";
                 Process.Start(new ProcessStartInfo
                 {
                     FileName = "cmd.exe",
@@ -201,6 +201,12 @@ public static class InstallerService
                     WindowStyle = ProcessWindowStyle.Hidden,
                     CreateNoWindow = true
                 });
+            }
+            else
+            {
+                // Running from portable or external location: only delete installed files, NEVER current portable exe!
+                try { if (File.Exists(InstalledExe)) File.Delete(InstalledExe); } catch { }
+                try { if (Directory.Exists(InstallDir)) Directory.Delete(InstallDir, true); } catch { }
             }
 
             log("RDP Vault has been uninstalled.");

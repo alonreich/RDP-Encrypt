@@ -24,13 +24,32 @@ public sealed class SessionManager : IDisposable
     public bool IsUnlocked => Master != null;
     public bool VaultExists => System.IO.File.Exists(VaultPath);
 
+    /// <summary>
+    /// ISSUE #1 (2026 review). True when this session was opened with the printed
+    /// Recovery Code rather than the master password.
+    ///
+    /// What was broken: after a recovery unlock the app told the user to "set a new
+    /// master password in Settings", but ChangePassword demanded the CURRENT password
+    /// to prove knowledge - the exact thing the user had just proved they did not
+    /// have. The instruction was impossible to follow and the vault stayed locked to a
+    /// password nobody knew, with the Recovery Code as the only key forever.
+    ///
+    /// When this is true the proof-of-knowledge step is skipped: the master key is
+    /// already unwrapped in memory, unwrapped by a 256-bit secret, so there is nothing
+    /// further to prove.
+    /// </summary>
+    public bool UnlockedViaRecovery { get; private set; }
+
     // Timers are created lazily ON THE UI THREAD - see StartTimers (issue #18a).
     private DispatcherTimer? _lockTimer;
     private DispatcherTimer? _usbTimer;
-
-    private readonly Mutex _singleMutex;
     private DateTime _lastActivity = DateTime.UtcNow;
     private bool _exiting;
+
+    /// <summary>Issue #3 (2026 review): consecutive 2 s polls that must all fail before
+    /// the app tears itself down. One transient miss is not a removed drive.</summary>
+    private const int UsbMissesBeforeShutdown = 3;
+    private int _usbMisses;
 
     public event Action? Locked;
     public event Action? Unlocked;
@@ -40,28 +59,15 @@ public sealed class SessionManager : IDisposable
     public event Action? VaultDestroyed;
     /// <summary>Human-readable one-liner for the status bar (issue #17).</summary>
     public event Action<string>? Notice;
+    /// <summary>Fired when an RDP profile launch is requested via shortcut, pipe, or pending launch.</summary>
+    public event Action<RdpProfile>? LaunchRequested;
 
     private SessionManager()
     {
         VaultPath = AppPaths.VaultPath;              // issue #5: one source of truth
         SecurityEnforcer.RemoveLegacyState();        // issue #4: kill the old plaintext counter
 
-        string pipeMsg = ParseCommandLine();
-
-        _singleMutex = new Mutex(true, @"Local\RDPVault_SingleInstance", out bool createdNew);
-        if (!createdNew)
-        {
-            try
-            {
-                using var client = new NamedPipeClientStream(".", "RDPVault_Show", PipeDirection.Out);
-                client.Connect(1000);
-                using var w = new StreamWriter(client) { AutoFlush = true };
-                w.Write(pipeMsg);
-            }
-            catch { }
-            Environment.Exit(0);
-        }
-
+        ParseCommandLine();
         _ = Task.Run(PipeLoop);
     }
 
@@ -155,13 +161,16 @@ public sealed class SessionManager : IDisposable
 
     // ---------------------------------------------------------------- unlock
 
-    /// <summary>Seconds the user must wait before another attempt is accepted (issue #4).</summary>
+    /// <summary>Seconds the user must wait before another attempt is accepted (issue #4 / #10).</summary>
     public TimeSpan CooldownRemaining()
     {
         try
         {
-            if (File == null && VaultExists) LoadFile();
-            return File == null ? TimeSpan.Zero : SecurityEnforcer.CooldownRemaining(File);
+            if (File != null) return SecurityEnforcer.CooldownRemaining(File);
+            if (!VaultExists) return TimeSpan.Zero;
+            string json = System.IO.File.ReadAllText(VaultPath);
+            var peek = System.Text.Json.JsonSerializer.Deserialize(json, VaultJsonContext.Default.VaultFile);
+            return peek == null ? TimeSpan.Zero : SecurityEnforcer.CooldownRemaining(peek);
         }
         catch { return TimeSpan.Zero; }
     }
@@ -184,6 +193,8 @@ public sealed class SessionManager : IDisposable
             HandleFailedAttempt();
             throw;
         }
+
+        UnlockedViaRecovery = false;
 
         SecurityEnforcer.ClearFailures(File!, VaultPath);
         AfterUnlock();
@@ -211,6 +222,7 @@ public sealed class SessionManager : IDisposable
         }
 
         (Master, Payload) = opened.Value;
+        UnlockedViaRecovery = true;      // issue #1: lets ChangePassword skip the old password
         SecurityEnforcer.ClearFailures(File, VaultPath);
         AfterUnlock();
         return true;
@@ -227,9 +239,12 @@ public sealed class SessionManager : IDisposable
         OnUi(() => VaultDestroyed?.Invoke());
     }
 
+    /// <summary>
+    /// Issue #3: Offload Argon2id computation to Task.Run to prevent freezing the UI Dispatcher.
+    /// </summary>
     public async Task<bool> UnlockWithHelloAsync()
     {
-        LoadFile();
+        if (File == null) LoadFile();
         string machineId = VaultCrypto.CurrentMachineId();
         SealEntry? seal = File!.Seals.FirstOrDefault(s => s.MachineId == machineId && !string.IsNullOrEmpty(s.KeyId));
         if (seal == null) return false;
@@ -237,27 +252,50 @@ public sealed class SessionManager : IDisposable
         byte[]? signature = await WindowsHello.GetSignatureAsync(seal.KeyId);
         if (signature == null) return false;
 
-        byte[]? master = VaultCrypto.UnsealTpm(File, seal, signature);
-        CryptographicOperations.ZeroMemory(signature);
-        if (master == null) return false;
+        var vaultFile = File;
+        var (master, payload) = await Task.Run<(byte[]?, VaultPayload?)>(() =>
+        {
+            byte[]? m = VaultCrypto.UnsealTpm(vaultFile, seal, signature);
+            CryptographicOperations.ZeroMemory(signature);
+            if (m == null) return (null, null);
 
-        try { Payload = VaultCrypto.OpenPayload(File, master); }
-        catch { CryptographicOperations.ZeroMemory(master); return false; }
+            try
+            {
+                var p = VaultCrypto.OpenPayload(vaultFile, m);
+                return (m, p);
+            }
+            catch
+            {
+                CryptographicOperations.ZeroMemory(m);
+                return (null, null);
+            }
+        });
+
+        if (master == null || payload == null) return false;
 
         Master = master;
+        Payload = payload;
+        UnlockedViaRecovery = false;
         SecurityEnforcer.ClearFailures(File, VaultPath);
         AfterUnlock();
         return true;
     }
 
+    /// <summary>
+    /// Issue #10: Inspect in-memory File representation when unlocked to avoid redundant disk reads and state tearing.
+    /// </summary>
     public bool HelloSealAvailable()
     {
         try
         {
-            if (!VaultExists) return false;
-            LoadFile();
             string machineId = VaultCrypto.CurrentMachineId();
-            return File!.Seals.Any(s => s.MachineId == machineId && !string.IsNullOrEmpty(s.KeyId));
+            if (File != null)
+                return File.Seals.Any(s => s.MachineId == machineId && !string.IsNullOrEmpty(s.KeyId));
+
+            if (!VaultExists) return false;
+            string json = System.IO.File.ReadAllText(VaultPath);
+            var peek = System.Text.Json.JsonSerializer.Deserialize(json, VaultJsonContext.Default.VaultFile);
+            return peek?.Seals.Any(s => s.MachineId == machineId && !string.IsNullOrEmpty(s.KeyId)) ?? false;
         }
         catch { return false; }
     }
@@ -266,7 +304,7 @@ public sealed class SessionManager : IDisposable
     {
         Touch();
         ApplySweepConfig();
-        TraceCleaner.Sweep();
+        _ = Task.Run(TraceCleaner.Sweep);
         StartTimers();
         OnUi(() => Unlocked?.Invoke());
 
@@ -292,7 +330,11 @@ public sealed class SessionManager : IDisposable
             string target = PendingLaunchId;
             PendingLaunchId = null;
             var p = Payload.Profiles.FirstOrDefault(x => x.Id == target);
-            if (p != null) OnUi(() => RdpLauncher.Launch(p));
+            if (p != null)
+            {
+                if (LaunchRequested != null) OnUi(() => LaunchRequested.Invoke(p));
+                else OnUi(() => RdpLauncher.Launch(p));
+            }
             else OnUi(() => Notice?.Invoke("That shortcut points at a profile that no longer exists."));
         }
     }
@@ -345,25 +387,37 @@ public sealed class SessionManager : IDisposable
     /// Issue #2/#19: this existed but was wired to nothing, discarded the key it
     /// derived without zeroing it, and dereferenced possibly-null state.
     /// </summary>
-    public void ChangePassword(string oldPassword, string newPassword)
+    public void ChangePassword(string? oldPassword, string newPassword)
     {
         if (File == null || Master == null || Payload == null)
             throw new InvalidOperationException("The vault is locked.");
         if (newPassword.Length < 10)
             throw new ArgumentException("The new master password must be at least 10 characters.");
 
-        byte[] verifyMaster;
-        VaultPayload verifyPayload;
-        try { (verifyMaster, verifyPayload) = VaultCrypto.Open(File, oldPassword); }
-        catch (InvalidDataException) { throw new InvalidDataException("The current password is not correct."); }
+        // ISSUE #1 (2026 review): a session opened with the Recovery Code cannot be
+        // asked for the old password - that is the whole reason the user is here. The
+        // master key is already unwrapped, so proof of knowledge adds nothing.
+        if (!UnlockedViaRecovery)
+        {
+            if (string.IsNullOrEmpty(oldPassword))
+                throw new ArgumentException("Enter your current master password.");
 
-        // We only needed proof of knowledge; keep the already-open master key.
-        CryptographicOperations.ZeroMemory(verifyMaster);
-        _ = verifyPayload;
+            byte[] verifyMaster;
+            VaultPayload verifyPayload;
+            try { (verifyMaster, verifyPayload) = VaultCrypto.Open(File, oldPassword); }
+            catch (InvalidDataException) { throw new InvalidDataException("The current password is not correct."); }
+
+            // We only needed proof of knowledge; keep the already-open master key.
+            CryptographicOperations.ZeroMemory(verifyMaster);
+            _ = verifyPayload;
+        }
 
         // A password change is treated as a possible compromise: every quick-unlock
         // seal is dropped, so each PC must re-enroll Windows Hello.
         VaultCrypto.Save(File, Master, Payload, VaultPath, newPassword, newSeals: new List<SealEntry>());
+
+        // The vault is now on a password the user chose and knows.
+        UnlockedViaRecovery = false;
     }
 
     // ---------------------------------------------------------------- lock
@@ -375,13 +429,17 @@ public sealed class SessionManager : IDisposable
         if (Master != null) CryptographicOperations.ZeroMemory(Master);
         Master = null;
         Payload = null;
+        UnlockedViaRecovery = false;
         Touch();
 
         OnUi(() => Locked?.Invoke());
         if (killSessions) RdpLauncher.KillAll();
 
-        if (deep) TraceCleaner.DeepSweep(); else TraceCleaner.Sweep();
-        TraceCleaner.ForgetHosts();   // issue #20: don't retain host names after locking
+        _ = Task.Run(() =>
+        {
+            if (deep) TraceCleaner.DeepSweep(); else TraceCleaner.Sweep();
+            TraceCleaner.ForgetHosts();   // issue #20: don't retain host names after locking
+        });
     }
 
     /// <summary>Issue #11: ANY meaningful user action postpones the auto-lock.</summary>
@@ -400,24 +458,52 @@ public sealed class SessionManager : IDisposable
         if (IdleRemaining() == TimeSpan.Zero) Lock(killSessions: false);
     }
 
+    /// <summary>
+    /// ISSUE #3 (2026 review).
+    ///
+    /// What was broken: a SINGLE failed Directory.Exists / File.Exists poll tore the
+    /// whole app down - Lock, KillAll, DeepSweep, Environment.Exit - with no debounce,
+    /// no retry and no confirmation. An antivirus lock, a sleep/resume cycle, a slow
+    /// USB controller or a network-drive hiccup was enough to kill every open remote
+    /// desktop. Worse, UsbRemoved was posted to the UI thread and the process exited
+    /// before it could render, so the user got no explanation at all.
+    ///
+    /// Now: the drive must be missing for UsbMissesBeforeShutdown consecutive polls
+    /// (3 x 2 s = 6 s), a single recovery resets the counter, and the shutdown work
+    /// runs off the UI thread with a short grace period so the on-screen message is
+    /// actually painted before the process ends.
+    /// </summary>
     private void CheckUsbStillPresent()
     {
         if (_exiting) return;
+
+        bool present;
         try
         {
-            if (!Directory.Exists(AppPaths.ExeDir)) throw new IOException("root gone");
+            present = Directory.Exists(AppPaths.ExeDir);
             string? exe = Environment.ProcessPath;
-            if (exe != null && !System.IO.File.Exists(exe)) throw new IOException("exe gone");
+            if (present && exe != null) present = System.IO.File.Exists(exe);
         }
-        catch
+        catch { present = false; }
+
+        if (present) { _usbMisses = 0; return; }
+        if (++_usbMisses < UsbMissesBeforeShutdown) return;
+
+        _exiting = true;
+        bool kill = Payload?.Settings.KillSessionsOnUsbRemoval ?? true;
+        OnUi(() => UsbRemoved?.Invoke());
+
+        _ = Task.Run(async () =>
         {
-            _exiting = true;
-            bool kill = Payload?.Settings.KillSessionsOnUsbRemoval ?? true;
-            OnUi(() => UsbRemoved?.Invoke());
-            Lock(killSessions: kill);
-            if (kill) TraceCleaner.DeepSweep();
+            try
+            {
+                Lock(killSessions: kill);
+                if (kill) TraceCleaner.DeepSweep();
+            }
+            catch { }
+            await Task.Delay(2500);   // let the explanation on screen actually render
             Environment.Exit(0);
-        }
+        });
     }
 
     // ---------------------------------------------------------------- Windows Hello enrollment
@@ -478,7 +564,11 @@ public sealed class SessionManager : IDisposable
                     if (IsUnlocked && Payload != null)
                     {
                         var p = Payload.Profiles.FirstOrDefault(x => x.Id == target);
-                        if (p != null) OnUi(() => RdpLauncher.Launch(p));
+                        if (p != null)
+                        {
+                            if (LaunchRequested != null) OnUi(() => LaunchRequested.Invoke(p));
+                            else OnUi(() => RdpLauncher.Launch(p));
+                        }
                         else OnUi(() => Notice?.Invoke("That shortcut points at a profile that no longer exists."));
                     }
                     else
@@ -508,6 +598,7 @@ public sealed class SessionManager : IDisposable
         if (Master != null) CryptographicOperations.ZeroMemory(Master);
         Master = null;
         Payload = null;
+        UnlockedViaRecovery = false;
 
         OnUi(() =>
         {
@@ -515,10 +606,10 @@ public sealed class SessionManager : IDisposable
             _usbTimer?.Stop();
         });
 
-        if (deep) TraceCleaner.DeepSweep(); else TraceCleaner.Sweep();
-        TraceCleaner.ForgetHosts();
-
-        try { _singleMutex.ReleaseMutex(); } catch { }
-        try { _singleMutex.Dispose(); } catch { }
+        _ = Task.Run(() =>
+        {
+            if (deep) TraceCleaner.DeepSweep(); else TraceCleaner.Sweep();
+            TraceCleaner.ForgetHosts();
+        });
     }
 }

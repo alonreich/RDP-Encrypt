@@ -2,9 +2,11 @@ using System;
 using System.IO;
 using System.Threading.Tasks;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Input;
+using Avalonia.Threading;
 
 namespace RDPVault;
 
@@ -12,8 +14,7 @@ namespace RDPVault;
 /// Small shared dialogs, built in code so there is one consistent look and no extra
 /// XAML/InitializeComponent pairs to keep in sync.
 ///
-/// Covers issues #3 (guarded vault creation), #2 (Recovery Code display / entry /
-/// password change) and #12 (confirmation before anything destructive).
+/// Responsive dialog layout with bounded dimensions, scrollable body and pinned action buttons (Issue #8).
 /// </summary>
 public static class Dialogs
 {
@@ -32,14 +33,43 @@ public static class Dialogs
         {
             Title = title,
             Width = width,
-            Height = height,
-            CanResize = false,
+            MinWidth = Math.Min(380, width),
+            MaxWidth = Math.Max(720, width * 1.5),
+            MinHeight = Math.Min(160, height),
+            MaxHeight = 850,
+            SizeToContent = SizeToContent.Height,
+            CanResize = true,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Background = Bg,
             Foreground = Text,
             FontFamily = new FontFamily("Inter, Arial"),
             ShowInTaskbar = false
         };
+
+    private static Grid CreateDialogContent(Control scrollableBody, Control bottomActionRow)
+    {
+        var root = new Grid
+        {
+            Margin = new Avalonia.Thickness(24),
+            RowDefinitions = new RowDefinitions("*,Auto")
+        };
+
+        var scroller = new ScrollViewer
+        {
+            Content = scrollableBody,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            MaxHeight = 580
+        };
+
+        Grid.SetRow(scroller, 0);
+        Grid.SetRow(bottomActionRow, 1);
+        bottomActionRow.Margin = new Avalonia.Thickness(0, 16, 0, 0);
+
+        root.Children.Add(scroller);
+        root.Children.Add(bottomActionRow);
+        return root;
+    }
 
     private static TextBlock Label(string text, double size = 13, IBrush? brush = null, bool bold = false)
         => new()
@@ -95,10 +125,10 @@ public static class Dialogs
                 confirm.IsEnabled = string.Equals(typed.Text?.Trim(), typeToConfirm, StringComparison.OrdinalIgnoreCase);
         }
 
-        var stack = new StackPanel { Margin = new Avalonia.Thickness(24), Spacing = 14 };
-        stack.Children.Add(Label(title, 17, danger ? Danger : Text, bold: true));
-        stack.Children.Add(Label(message, 13, Dim));
-        if (typeToConfirm != null) stack.Children.Add(typed);
+        var body = new StackPanel { Spacing = 14 };
+        body.Children.Add(Label(title, 17, danger ? Danger : Text, bold: true));
+        body.Children.Add(Label(message, 13, Dim));
+        if (typeToConfirm != null) body.Children.Add(typed);
 
         var row = new StackPanel
         {
@@ -108,8 +138,7 @@ public static class Dialogs
         };
         row.Children.Add(cancel);
         row.Children.Add(confirm);
-        stack.Children.Add(row);
-        w.Content = stack;
+        w.Content = CreateDialogContent(body, row);
 
         confirm.Click += (_, _) => w.Close(true);
         cancel.Click += (_, _) => w.Close(false);
@@ -120,32 +149,22 @@ public static class Dialogs
     {
         var w = Shell(title, 460, 240);
         var close = Btn("OK", accent: true);
-        var stack = new StackPanel { Margin = new Avalonia.Thickness(24), Spacing = 14 };
-        stack.Children.Add(Label(title, 17, isError ? Danger : Text, bold: true));
-        stack.Children.Add(Label(message, 13, Dim));
-        stack.Children.Add(new StackPanel
+        var body = new StackPanel { Spacing = 14 };
+        body.Children.Add(Label(title, 17, isError ? Danger : Text, bold: true));
+        body.Children.Add(Label(message, 13, Dim));
+        var row = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             HorizontalAlignment = HorizontalAlignment.Right,
             Children = { close }
-        });
-        w.Content = stack;
+        };
+        w.Content = CreateDialogContent(body, row);
         close.Click += (_, _) => w.Close(true);
         return w.ShowDialog<bool>(owner);
     }
 
     // ============================================================ create vault (issue #3)
 
-    /// <summary>
-    /// ISSUE #3.
-    /// Before: if the vault file was missing, whatever the user typed into the
-    /// ordinary "Unlock" box on the lock screen silently BECAME the master password.
-    /// One field, no confirmation, no minimum length, no warning that it could never
-    /// be recovered. A typo on first run locked the user out of their own vault
-    /// forever.
-    /// After: an explicit "create your vault" dialog with a confirmation field, a
-    /// 10-character minimum, a strength read-out, and a plainly worded warning.
-    /// </summary>
     public static Task<string?> CreateVaultAsync(Window owner)
     {
         var w = Shell("Create your vault", 470, 420);
@@ -173,28 +192,26 @@ public static class Dialogs
         pw2.TextChanged += (_, _) => Validate();
         pw2.KeyDown += (_, e) => { if (e.Key == Key.Enter && create.IsEnabled) w.Close(pw1.Text); };
 
-        var stack = new StackPanel { Margin = new Avalonia.Thickness(24), Spacing = 12 };
-        stack.Children.Add(Label("CREATE YOUR VAULT", 18, Text, bold: true));
-        stack.Children.Add(Label(
+        var body = new StackPanel { Spacing = 12 };
+        body.Children.Add(Label("CREATE YOUR VAULT", 18, Text, bold: true));
+        body.Children.Add(Label(
             "This password encrypts everything in the vault. Nobody - including this app - can read or reset it. " +
             "If you lose it, your only other way in is the Recovery Code shown on the next screen.",
             12, Dim));
-        stack.Children.Add(pw1);
-        stack.Children.Add(pw2);
-        stack.Children.Add(strength);
-        stack.Children.Add(error);
+        body.Children.Add(pw1);
+        body.Children.Add(pw2);
+        body.Children.Add(strength);
+        body.Children.Add(error);
 
         var row = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             HorizontalAlignment = HorizontalAlignment.Right,
-            Spacing = 10,
-            Margin = new Avalonia.Thickness(0, 10, 0, 0)
+            Spacing = 10
         };
         row.Children.Add(cancel);
         row.Children.Add(create);
-        stack.Children.Add(row);
-        w.Content = stack;
+        w.Content = CreateDialogContent(body, row);
 
         create.Click += (_, _) => w.Close(pw1.Text);
         cancel.Click += (_, _) => w.Close(null);
@@ -234,6 +251,9 @@ public static class Dialogs
         var done = Btn("I have saved it", accent: true);
         done.IsEnabled = !mustAcknowledge;
 
+        bool acknowledged = !mustAcknowledge;
+        w.Closing += (_, e) => { if (!acknowledged) e.Cancel = true; };
+
         var codeBox = new TextBox
         {
             Text = code,
@@ -255,63 +275,77 @@ public static class Dialogs
             Foreground = Text,
             IsVisible = mustAcknowledge
         };
-        ack.IsCheckedChanged += (_, _) => done.IsEnabled = ack.IsChecked == true;
+        ack.IsCheckedChanged += (_, _) =>
+        {
+            acknowledged = ack.IsChecked == true;
+            done.IsEnabled = acknowledged;
+        };
 
         var status = Label("", 12, Dim);
-        var copy = Btn("Copy");
-        var save = Btn("Save to a file");
+        var copy = Btn("Copy for 60 seconds");
+
+        DispatcherTimer? clipTimer = null;
+
+        void ClearClipboard()
+        {
+            clipTimer?.Stop();
+            clipTimer = null;
+            try
+            {
+                var clip = TopLevel.GetTopLevel(w)?.Clipboard;
+                if (clip != null) _ = clip.SetTextAsync("");
+            }
+            catch { }
+        }
 
         copy.Click += async (_, _) =>
         {
             try
             {
                 var clip = TopLevel.GetTopLevel(w)?.Clipboard;
-                if (clip != null) { await clip.SetTextAsync(code); status.Text = "Copied to the clipboard."; }
+                if (clip == null) { status.Text = "Could not access the clipboard."; return; }
+                await clip.SetTextAsync(code);
+                status.Text = "Copied. The clipboard is cleared again in 60 seconds - paste it somewhere safe now. " +
+                              "Windows clipboard history (Win+V) may still hold a copy.";
+
+                clipTimer?.Stop();
+                clipTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(60) };
+                clipTimer.Tick += (_, _) =>
+                {
+                    ClearClipboard();
+                    status.Text = "The clipboard has been cleared.";
+                };
+                clipTimer.Start();
             }
             catch { status.Text = "Could not access the clipboard."; }
         };
 
-        save.Click += (_, _) =>
-        {
-            try
-            {
-                Directory.CreateDirectory(AppPaths.RescueDir);
-                string path = Path.Combine(AppPaths.RescueDir,
-                    $"rdpvault-recovery-code-{DateTime.Now:yyyy-MM-dd_HHmmss}.txt");
-                File.WriteAllText(path,
-                    "RDP VAULT RECOVERY CODE\r\n" +
-                    "=======================\r\n\r\n" + code + "\r\n\r\n" +
-                    "Anyone holding this code can open your vault without the master password.\r\n" +
-                    "Print it, then delete this file.\r\n");
-                status.Text = "Saved to " + path;
-            }
-            catch (Exception ex) { status.Text = "Could not save the file: " + ex.Message; }
-        };
+        w.Closed += (_, _) => ClearClipboard();
 
-        var stack = new StackPanel { Margin = new Avalonia.Thickness(24), Spacing = 12 };
-        stack.Children.Add(Label("YOUR RECOVERY CODE", 18, Text, bold: true));
-        stack.Children.Add(Label(
+        var body = new StackPanel { Spacing = 12 };
+        body.Children.Add(Label("YOUR RECOVERY CODE", 18, Text, bold: true));
+        body.Children.Add(Label(
             "This is the only other way into your vault if you forget the master password. " +
             "Write it on paper and keep it somewhere safe. It is not stored anywhere you can read it again - " +
             "you can only replace it with a new one.",
             12, Dim));
-        stack.Children.Add(codeBox);
+        body.Children.Add(codeBox);
 
         var tools = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
         tools.Children.Add(copy);
-        tools.Children.Add(save);
-        stack.Children.Add(tools);
-        stack.Children.Add(status);
-        stack.Children.Add(ack);
-        stack.Children.Add(new StackPanel
+        body.Children.Add(tools);
+        body.Children.Add(status);
+        body.Children.Add(ack);
+
+        var row = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             HorizontalAlignment = HorizontalAlignment.Right,
             Children = { done }
-        });
-        w.Content = stack;
+        };
+        w.Content = CreateDialogContent(body, row);
 
-        done.Click += (_, _) => w.Close(true);
+        done.Click += (_, _) => { acknowledged = true; w.Close(true); };
         return w.ShowDialog<bool>(owner);
     }
 
@@ -336,13 +370,14 @@ public static class Dialogs
         };
         box.KeyDown += (_, e) => { if (e.Key == Key.Enter && unlock.IsEnabled) w.Close(box.Text); };
 
-        var stack = new StackPanel { Margin = new Avalonia.Thickness(24), Spacing = 12 };
-        stack.Children.Add(Label("UNLOCK WITH A RECOVERY CODE", 17, Text, bold: true));
-        stack.Children.Add(Label(
+        var body = new StackPanel { Spacing = 12 };
+        body.Children.Add(Label("UNLOCK WITH A RECOVERY CODE", 17, Text, bold: true));
+        body.Children.Add(Label(
             "Type the code exactly as printed. Dashes, spaces and upper/lower case do not matter.",
             12, Dim));
-        stack.Children.Add(box);
-        stack.Children.Add(hint);
+        body.Children.Add(box);
+        body.Children.Add(hint);
+
         var row = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -351,8 +386,7 @@ public static class Dialogs
         };
         row.Children.Add(cancel);
         row.Children.Add(unlock);
-        stack.Children.Add(row);
-        w.Content = stack;
+        w.Content = CreateDialogContent(body, row);
 
         unlock.Click += (_, _) => w.Close(box.Text);
         cancel.Click += (_, _) => w.Close(null);
@@ -361,14 +395,11 @@ public static class Dialogs
 
     // ============================================================ change password (issue #2)
 
-    /// <summary>
-    /// Issue #2: SessionManager.ChangePassword existed but no screen ever called it,
-    /// so there was literally no way to change the master password.
-    /// </summary>
-    public static Task<(string Old, string New)?> ChangePasswordAsync(Window owner)
+    public static Task<(string Old, string New)?> ChangePasswordAsync(Window owner, bool requireOldPassword = true)
     {
-        var w = Shell("Change master password", 470, 400);
+        var w = Shell("Change master password", 470, requireOldPassword ? 400 : 360);
         var oldPw = Field("Current master password", password: true);
+        oldPw.IsVisible = requireOldPassword;
         var new1 = Field("New master password", password: true);
         var new2 = Field("Type the new one again", password: true);
         var error = Label("", 12, Danger);
@@ -382,23 +413,27 @@ public static class Dialogs
             if (a.Length > 0 && a.Length < 10) { error.Text = "Use at least 10 characters."; save.IsEnabled = false; return; }
             if (b.Length > 0 && a != b) { error.Text = "The two new passwords do not match."; save.IsEnabled = false; return; }
             error.Text = "";
-            save.IsEnabled = o.Length > 0 && a.Length >= 10 && a == b;
+            save.IsEnabled = (!requireOldPassword || o.Length > 0) && a.Length >= 10 && a == b;
         }
 
         oldPw.TextChanged += (_, _) => Validate();
         new1.TextChanged += (_, _) => Validate();
         new2.TextChanged += (_, _) => Validate();
 
-        var stack = new StackPanel { Margin = new Avalonia.Thickness(24), Spacing = 12 };
-        stack.Children.Add(Label("CHANGE MASTER PASSWORD", 17, Text, bold: true));
-        stack.Children.Add(Label(
-            "Every Windows Hello quick unlock will be switched off and must be set up again on each PC. " +
-            "Your Recovery Code keeps working.",
+        var body = new StackPanel { Spacing = 12 };
+        body.Children.Add(Label("CHANGE MASTER PASSWORD", 17, Text, bold: true));
+        body.Children.Add(Label(
+            requireOldPassword
+                ? "Every Windows Hello quick unlock will be switched off and must be set up again on each PC. " +
+                  "Your Recovery Code keeps working."
+                : "You unlocked this vault with your Recovery Code, so the old master password is not needed. " +
+                  "Every Windows Hello quick unlock will be switched off and must be set up again on each PC. " +
+                  "Your Recovery Code keeps working.",
             12, Dim));
-        stack.Children.Add(oldPw);
-        stack.Children.Add(new1);
-        stack.Children.Add(new2);
-        stack.Children.Add(error);
+        body.Children.Add(oldPw);
+        body.Children.Add(new1);
+        body.Children.Add(new2);
+        body.Children.Add(error);
 
         var row = new StackPanel
         {
@@ -408,8 +443,7 @@ public static class Dialogs
         };
         row.Children.Add(cancel);
         row.Children.Add(save);
-        stack.Children.Add(row);
-        w.Content = stack;
+        w.Content = CreateDialogContent(body, row);
 
         save.Click += (_, _) => w.Close(((string, string)?)(oldPw.Text ?? "", new1.Text ?? ""));
         cancel.Click += (_, _) => w.Close(null);

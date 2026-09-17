@@ -56,8 +56,13 @@ public static class TraceCleaner
 
     private static bool Everything => Snapshot().scope == SweepScope.Everything;
 
-    private static bool MentionsOurHost(string text)
+    private static bool MentionsOurHost(string text) => MentionsTargetHost(text, null);
+
+    private static bool MentionsTargetHost(string text, string[]? explicitHosts)
     {
+        if (explicitHosts != null && explicitHosts.Length > 0)
+            return explicitHosts.Any(h => text.Contains(h, StringComparison.OrdinalIgnoreCase));
+
         var (_, hosts) = Snapshot();
         return hosts.Any(h => text.Contains(h, StringComparison.OrdinalIgnoreCase));
     }
@@ -72,7 +77,28 @@ public static class TraceCleaner
         JumpLists();
         RecentItems();
         TempLaunchers();
+        CleanBundleResidue();
         if (Everything) { UserAssist(); Prefetch(); }
+    }
+
+    /// <summary>
+    /// Issue #1: Cleans specific target hosts deterministically, even if ForgetHosts() was called when the vault locked.
+    /// </summary>
+    public static void SweepHosts(IEnumerable<string> hosts)
+    {
+        string[] targetHosts = hosts.Where(h => !string.IsNullOrWhiteSpace(h))
+                                    .Select(h => h.Trim())
+                                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                                    .ToArray();
+        if (targetHosts.Length == 0) return;
+
+        RegistryHistory(targetHosts);
+        DefaultRdpFile(targetHosts);
+        JumpLists(targetHosts);
+        RecentItems(targetHosts);
+        TempLaunchers();
+        DeleteSavedRdpCredentials(targetHosts);
+        CleanBundleResidue();
     }
 
     /// <summary>Sweep + delete every saved RDP credential on this PC.</summary>
@@ -84,7 +110,7 @@ public static class TraceCleaner
 
     // ---------------- registry history ----------------
 
-    private static void RegistryHistory()
+    private static void RegistryHistory(string[]? explicitHosts = null)
     {
         TryRun(() =>
         {
@@ -92,7 +118,7 @@ public static class TraceCleaner
                 @"Software\Microsoft\Terminal Server Client", writable: true);
             if (key == null) return;
 
-            if (Everything)
+            if (Everything && (explicitHosts == null || explicitHosts.Length == 0))
             {
                 foreach (var name in key.GetValueNames())
                     if (name.StartsWith("MRU", StringComparison.OrdinalIgnoreCase))
@@ -107,7 +133,7 @@ public static class TraceCleaner
             foreach (var name in key.GetValueNames())
             {
                 if (!name.StartsWith("MRU", StringComparison.OrdinalIgnoreCase)) continue;
-                if (MentionsOurHost(key.GetValue(name)?.ToString() ?? ""))
+                if (MentionsTargetHost(key.GetValue(name)?.ToString() ?? "", explicitHosts))
                     key.DeleteValue(name, throwOnMissingValue: false);
             }
 
@@ -116,7 +142,7 @@ public static class TraceCleaner
             {
                 if (def != null)
                     foreach (var name in def.GetValueNames())
-                        if (MentionsOurHost(def.GetValue(name)?.ToString() ?? ""))
+                        if (MentionsTargetHost(def.GetValue(name)?.ToString() ?? "", explicitHosts))
                             def.DeleteValue(name, throwOnMissingValue: false);
             }
 
@@ -125,7 +151,7 @@ public static class TraceCleaner
             {
                 if (servers != null)
                     foreach (string sub in servers.GetSubKeyNames())
-                        if (MentionsOurHost(sub))
+                        if (MentionsTargetHost(sub, explicitHosts))
                             servers.DeleteSubKeyTree(sub, throwOnMissingSubKey: false);
             }
         });
@@ -133,7 +159,7 @@ public static class TraceCleaner
 
     // ---------------- files ----------------
 
-    private static void DefaultRdpFile()
+    private static void DefaultRdpFile(string[]? explicitHosts = null)
     {
         TryRun(() =>
         {
@@ -148,7 +174,7 @@ public static class TraceCleaner
                     if (!File.Exists(path)) continue;
                     // Scoped: Default.rdp records the LAST host used. Only remove it
                     // when that host is one of ours.
-                    if (!Everything && !MentionsOurHost(File.ReadAllText(path))) continue;
+                    if (!Everything && !MentionsTargetHost(File.ReadAllText(path), explicitHosts)) continue;
                     File.Delete(path);
                 }
                 catch { }
@@ -156,7 +182,7 @@ public static class TraceCleaner
         });
     }
 
-    private static void JumpLists()
+    private static void JumpLists(string[]? explicitHosts = null)
     {
         TryRun(() =>
         {
@@ -175,7 +201,7 @@ public static class TraceCleaner
                     if (!Everything)
                     {
                         string asText = Encoding.Unicode.GetString(data);
-                        if (!MentionsOurHost(asText)) continue;
+                        if (!MentionsTargetHost(asText, explicitHosts)) continue;
                     }
                     File.Delete(file);
                 }
@@ -184,7 +210,7 @@ public static class TraceCleaner
         });
     }
 
-    private static void RecentItems()
+    private static void RecentItems(string[]? explicitHosts = null)
     {
         TryRun(() =>
         {
@@ -197,7 +223,7 @@ public static class TraceCleaner
                 try
                 {
                     string name = Path.GetFileName(file);
-                    bool ours = name.StartsWith("rdpv_", StringComparison.OrdinalIgnoreCase) || MentionsOurHost(name);
+                    bool ours = name.StartsWith("rdpv_", StringComparison.OrdinalIgnoreCase) || MentionsTargetHost(name, explicitHosts);
                     if (!Everything && !ours) continue;
                     File.Delete(file);
                 }
@@ -214,6 +240,21 @@ public static class TraceCleaner
             foreach (string file in Directory.GetFiles(Path.GetTempPath(), "rdpv_*.rdp"))
             {
                 try { File.Delete(file); } catch { }
+            }
+        });
+    }
+
+    /// <summary>
+    /// Issue #7: Removes any .net single-file extraction directories left in %TEMP%.
+    /// </summary>
+    public static void CleanBundleResidue()
+    {
+        TryRun(() =>
+        {
+            string netTemp = Path.Combine(Path.GetTempPath(), ".net", "RDPVault");
+            if (Directory.Exists(netTemp))
+            {
+                try { Directory.Delete(netTemp, recursive: true); } catch { }
             }
         });
     }
@@ -257,7 +298,7 @@ public static class TraceCleaner
 
     // ---------------- Windows Credential Manager: TERMSRV/* ----------------
 
-    public static void DeleteSavedRdpCredentials()
+    public static void DeleteSavedRdpCredentials(string[]? explicitHosts = null)
     {
         TryRun(() =>
         {
@@ -273,7 +314,7 @@ public static class TraceCleaner
                     string? target = Marshal.PtrToStringUni(c.TargetName);
                     if (target == null) continue;
                     if (!target.StartsWith("TERMSRV/", StringComparison.OrdinalIgnoreCase)) continue;
-                    if (!Everything && !MentionsOurHost(target)) continue;
+                    if (!Everything && !MentionsTargetHost(target, explicitHosts)) continue;
                     _ = CredDeleteW(target, c.Type, 0);
                 }
             }

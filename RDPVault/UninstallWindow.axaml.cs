@@ -90,7 +90,11 @@ public partial class UninstallWindow : Window
                         $"RDP Vault has been removed. Your vault file was copied to:\n\n{rescued}\n\n" +
                         "It still needs your master password or Recovery Code to open.");
                 }
-                Environment.Exit(0);
+                else
+                {
+                    await Dialogs.MessageAsync(this, "Uninstall Complete",
+                        "RDP Vault has been uninstalled successfully.");
+                }
             });
         });
     }

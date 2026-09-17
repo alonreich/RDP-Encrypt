@@ -2,11 +2,45 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
+using System.Net;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
+using Avalonia.Threading;
+using Microsoft.Win32;
 
 namespace RDPVault;
+
+public sealed class ActiveSessionInfo
+{
+    public Process Process { get; }
+    public string ProfileId { get; }
+    public string ProfileName { get; }
+    public string Host { get; }
+    public int Port { get; }
+    public DateTime StartedAt { get; }
+
+    public ActiveSessionInfo(Process process, RdpProfile profile)
+    {
+        Process = process;
+        ProfileId = profile.Id;
+        ProfileName = profile.Name;
+        Host = profile.Host;
+        Port = profile.Port;
+        StartedAt = DateTime.UtcNow;
+    }
+
+    public bool HasExited
+    {
+        get
+        {
+            try { return Process.HasExited; }
+            catch { return true; }
+        }
+    }
+}
 
 /// <summary>
 /// Launches mstsc.exe from a generated temp .rdp file and scrubs everything when it closes.
@@ -16,17 +50,95 @@ namespace RDPVault;
 /// </summary>
 public static class RdpLauncher
 {
-    private static readonly List<Process> LiveSessions = new();
+    private static readonly List<ActiveSessionInfo> LiveSessions = new();
     private static readonly object Gate = new();
 
     public static event Action<string>? SessionEnded;
     public static event Action<string>? SessionStarted;
     public static event Action<string>? LaunchFailed;
 
-    /// <summary>Start one RDP session for the profile. Returns false if mstsc failed to start.</summary>
+    public static ActiveSessionInfo? FindActiveSession(RdpProfile p)
+    {
+        lock (Gate)
+        {
+            LiveSessions.RemoveAll(s => s.HasExited);
+            return LiveSessions.FirstOrDefault(s =>
+                s.ProfileId == p.Id ||
+                (string.Equals(s.Host, p.Host, StringComparison.OrdinalIgnoreCase) && s.Port == p.Port));
+        }
+    }
+
+    public static void DisconnectSession(ActiveSessionInfo session)
+    {
+        try
+        {
+            if (!session.Process.HasExited)
+                session.Process.Kill(entireProcessTree: true);
+        }
+        catch { }
+    }
+
+    // ---------------- Wake-on-LAN (WOL) ----------------
+
+    public static async Task<bool> SendWakeOnLanAsync(string macAddress, string broadcastIp = "255.255.255.255", int port = 9)
+    {
+        try
+        {
+            byte[]? macBytes = ParseMacAddress(macAddress);
+            if (macBytes == null || macBytes.Length != 6) return false;
+
+            byte[] packet = new byte[102];
+            for (int i = 0; i < 6; i++) packet[i] = 0xFF;
+            for (int i = 0; i < 16; i++)
+                Buffer.BlockCopy(macBytes, 0, packet, 6 + i * 6, 6);
+
+            using var client = new UdpClient();
+            client.EnableBroadcast = true;
+            IPAddress ip = IPAddress.TryParse(broadcastIp, out var parsed) ? parsed : IPAddress.Broadcast;
+            await client.SendAsync(packet, packet.Length, new IPEndPoint(ip, port));
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static byte[]? ParseMacAddress(string mac)
+    {
+        try
+        {
+            string cleaned = new string(mac.Where(Uri.IsHexDigit).ToArray());
+            if (cleaned.Length != 12) return null;
+            return Convert.FromHexString(cleaned);
+        }
+        catch { return null; }
+    }
+
+    // ---------------- Launch ----------------
+
+    /// <summary>Start one RDP session for the profile synchronously.</summary>
     public static bool Launch(RdpProfile p)
     {
+        _ = LaunchAsync(p);
+        return true;
+    }
+
+    /// <summary>Start one RDP session for the profile with WOL and async monitoring.</summary>
+    public static async Task<bool> LaunchAsync(RdpProfile p)
+    {
         SessionManager.Current.Touch();   // issue #11: connecting is activity
+
+        // Wake-on-LAN handling
+        if (p.EnableWol && !string.IsNullOrWhiteSpace(p.WolMacAddress))
+        {
+            SessionStarted?.Invoke($"{p.Name} (Sending Wake-on-LAN magic packet...)");
+            await SendWakeOnLanAsync(p.WolMacAddress, p.WolBroadcastIp, p.WolPort);
+            if (p.WolWaitSeconds > 0)
+            {
+                await Task.Delay(p.WolWaitSeconds * 1000);
+            }
+        }
 
         string tempRdp = Path.Combine(Path.GetTempPath(), $"rdpv_{p.Id}.rdp");
         try
@@ -39,17 +151,19 @@ public static class RdpLauncher
             return false;
         }
 
-        // Issue #18b: mstsc looks the credential up by the exact "full address" string.
-        // Writing only TERMSRV/{host} meant saved passwords were never found for any
-        // profile on a non-default port. Both spellings are now written and removed.
+        // Issue #4: Reference-counted session credentials to avoid cross-session collisions
         var credTargets = new List<string>();
         if (p.HasPassword && !string.IsNullOrEmpty(p.Username))
         {
             foreach (string target in CredentialTargets(p))
-                if (WriteSessionCredential(target, p.Username, p.Password))
+            {
+                if (SessionCredentialCoordinator.Acquire(target, p.Username, p.Password))
                     credTargets.Add(target);
-            // If none could be written, mstsc simply prompts - graceful degradation.
+            }
         }
+
+        // Certificate pinning replay if warnings are enabled
+        RestoreCertPin(p);
 
         var psi = new ProcessStartInfo
         {
@@ -63,26 +177,33 @@ public static class RdpLauncher
         catch (Exception ex)
         {
             TryDelete(tempRdp);
-            foreach (string t in credTargets) DeleteCredential(t);
+            foreach (string t in credTargets) SessionCredentialCoordinator.Release(t);
+            RemoveCertPin(p);
             LaunchFailed?.Invoke($"Windows could not start Remote Desktop: {ex.Message}");
             return false;
         }
         if (proc == null)
         {
             TryDelete(tempRdp);
-            foreach (string t in credTargets) DeleteCredential(t);
+            foreach (string t in credTargets) SessionCredentialCoordinator.Release(t);
+            RemoveCertPin(p);
             LaunchFailed?.Invoke("Windows could not start Remote Desktop.");
             return false;
         }
 
+        proc.EnableRaisingEvents = true;
+        var sessionInfo = new ActiveSessionInfo(proc, p);
         lock (Gate)
         {
-            LiveSessions.RemoveAll(pr => { try { return pr.HasExited; } catch { return true; } });
-            LiveSessions.Add(proc);
+            LiveSessions.RemoveAll(pr => pr.HasExited);
+            LiveSessions.Add(sessionInfo);
         }
         SessionStarted?.Invoke(p.Name);
 
         string profileName = p.Name;
+        string targetHost = p.Host;
+
+        // Issue #2: Asynchronous process wait eliminates ThreadPool starvation
         _ = Task.Run(async () =>
         {
             try
@@ -94,23 +215,26 @@ public static class RdpLauncher
                 }
                 else
                 {
-                    proc.WaitForExit();
+                    await proc.WaitForExitAsync();
                 }
             }
             catch { /* process info no longer available */ }
 
-            // ISSUE #9 - REMOVED ON PURPOSE.
-            // The old code re-read the temp .rdp after mstsc exited and copied
-            // redirectclipboard / redirectdrives / redirectprinters / redirectsmartcards
-            // back into the saved profile, then wrote the vault. mstsc rewrites that
-            // file whenever the user ticks a box in its own dialog, so a single
-            // "share my local drives" tick silently and permanently enabled drive
-            // redirection on the stored profile. The profile is the user's setting;
-            // a transient session must never edit it.
-
+            CaptureCertPin(p);
             TryDelete(tempRdp);
-            foreach (string t in credTargets) DeleteCredential(t);
+            foreach (string t in credTargets) SessionCredentialCoordinator.Release(t);
+
+            // Issue #1: deterministic host cleanup even if vault locked during session
+            TraceCleaner.SweepHosts(new[] { targetHost });
             TraceCleaner.Sweep();
+
+            lock (Gate)
+            {
+                LiveSessions.Remove(sessionInfo);
+            }
+
+            try { proc.Dispose(); } catch { }
+
             SessionEnded?.Invoke(profileName);
         });
 
@@ -122,12 +246,13 @@ public static class RdpLauncher
     {
         lock (Gate)
         {
-            foreach (var proc in LiveSessions)
+            foreach (var session in LiveSessions)
             {
-                try { if (!proc.HasExited) proc.Kill(entireProcessTree: true); }
+                try { if (!session.Process.HasExited) session.Process.Kill(entireProcessTree: true); }
                 catch { }
             }
             LiveSessions.Clear();
+            SessionCredentialCoordinator.PurgeAll();
         }
     }
 
@@ -135,7 +260,7 @@ public static class RdpLauncher
     {
         lock (Gate)
         {
-            LiveSessions.RemoveAll(pr => { try { return pr.HasExited; } catch { return true; } });
+            LiveSessions.RemoveAll(pr => pr.HasExited);
             return LiveSessions.Count;
         }
     }
@@ -146,32 +271,17 @@ public static class RdpLauncher
 
     private static string BuildRdpFile(RdpProfile p)
     {
-        bool useMulti = p.UseMultiMon || (SessionManager.Current.Payload?.Settings.ForceMultiMon ?? false);
+        var settings = SessionManager.Current.Payload?.Settings;
+        bool useMulti = p.ResolveUseMultiMon(settings);
+        bool fullScreen = p.ResolveFullScreen(settings);
 
-        // ISSUE #22 - the certificate prompt on every connect.
-        //
-        // The real mstsc values (I had these inverted in the 1.1.0 rewrite):
-        //     0 = connect and DO NOT warn
-        //     1 = do NOT connect if the server cannot be verified
-        //     2 = warn, and let the user connect or refuse
-        //
-        // 1.1.0 shipped `AllowUnverifiedServer ? 1 : 2`, which meant the default was
-        // 2 (a warning on every single connect) and ticking "connect even if the
-        // identity cannot be verified" produced 1 - refuse to connect - the exact
-        // opposite of the checkbox label.
-        //
-        // Why "don't ask me again" never stuck: mstsc records an accepted
-        // certificate under HKCU\Software\Microsoft\Terminal Server Client\
-        // Servers\<host> (CertHash). TraceCleaner deletes that key by design - it is
-        // one of the traces this app exists to remove. So the approval was erased
-        // after every session and the prompt returned. Remembering the approval and
-        // erasing the history are mutually exclusive; suppressing the prompt in the
-        // .rdp file is the only way to have both.
-        int authLevel = p.AllowUnverifiedServer ? 0 : 2;
+        // Certificate warning suppression: default is to suppress (authLevel 0), can be unchecked globally or overridden per-profile
+        bool suppressWarnings = p.ResolveSuppressCertWarnings(settings);
+        int authLevel = suppressWarnings ? 0 : 2;
 
         var sb = new StringBuilder();
-        sb.AppendLine("screen mode id:i:" + (p.FullScreen ? 2 : 1));
-        if (!p.FullScreen)
+        sb.AppendLine("screen mode id:i:" + (fullScreen ? 2 : 1));
+        if (!fullScreen)
         {
             sb.AppendLine($"desktopwidth:i:{p.Width}");
             sb.AppendLine($"desktopheight:i:{p.Height}");
@@ -239,10 +349,167 @@ public static class RdpLauncher
 
     private static string FullAddress(RdpProfile p) => p.Port == 3389 ? p.Host : $"{p.Host}:{p.Port}";
 
+    // ---------------- certificate pinning (issue #2) ----------------
+    //
+    // Windows records "don't ask me again for connections to this computer" as a
+    // REG_BINARY value named CertHash under
+    //     HKCU\Software\Microsoft\Terminal Server Client\Servers\<address>
+    // holding the thumbprint of the certificate the user accepted. TraceCleaner
+    // deletes that key on purpose, so the approval never used to survive a session and
+    // the warning returned on every connect - which is why 1.1.1 gave up and shipped
+    // authentication level 0 (no verification at all, credentials handed to whatever
+    // answered). Keeping the approval inside the encrypted vault and replaying it here
+    // gives us both halves: the user is asked once, and nothing is left on the PC.
+    //
+    // Everything below is best effort. If the registry is not writable, or Windows
+    // changes where it stores this, the only consequence is that the user sees the
+    // normal certificate warning again - never a failed or silently unverified
+    // connection.
+
+    private const string TscServersKey = @"Software\Microsoft\Terminal Server Client\Servers";
+
+    private static void RestoreCertPin(RdpProfile p)
+    {
+        var settings = SessionManager.Current.Payload?.Settings;
+        if (p.ResolveSuppressCertWarnings(settings)) return; // warnings suppressed globally or per-profile
+        if (p.AllowUnverifiedServer) return;                 // nothing is being verified
+        if (string.IsNullOrWhiteSpace(p.CertThumbprint)) return;
+
+        try
+        {
+            byte[] hash = Convert.FromHexString(p.CertThumbprint.Trim());
+            if (hash.Length == 0) return;
+            using var key = Registry.CurrentUser.CreateSubKey($@"{TscServersKey}\{FullAddress(p)}");
+            key?.SetValue("CertHash", hash, RegistryValueKind.Binary);
+        }
+        catch { /* the user simply gets the normal warning */ }
+    }
+
+    private static void CaptureCertPin(RdpProfile p)
+    {
+        if (p.AllowUnverifiedServer) { RemoveCertPin(p); return; }
+
+        string? seen = null;
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey($@"{TscServersKey}\{FullAddress(p)}");
+            if (key?.GetValue("CertHash") is byte[] b && b.Length > 0)
+                seen = Convert.ToHexString(b);
+        }
+        catch { }
+
+        // Delete the key ourselves rather than leaving it to TraceCleaner.Sweep().
+        // Sweep only removes Servers\<host> entries that match a CONFIGURED vault host,
+        // and ForgetHosts() empties that list the moment the vault auto-locks - so a
+        // session that outlives an auto-lock would otherwise leave the very registry
+        // trace this app exists to erase, planted by us.
+        RemoveCertPin(p);
+
+        if (string.IsNullOrEmpty(seen)) return;
+        if (string.Equals(seen, p.CertThumbprint, StringComparison.OrdinalIgnoreCase)) return;
+
+        // Copy into a non-nullable local: the compiler discards the null-state of a
+        // captured variable inside a lambda (CS8601 otherwise).
+        string thumb = seen;
+
+        // This runs on a background task when mstsc exits. Every other vault save
+        // happens on the UI thread from a user action, and VaultCrypto.WriteAtomic
+        // shares one .tmp path - so hop to the UI thread instead of racing them.
+        Dispatcher.UIThread.Post(() =>
+        {
+            try
+            {
+                var mgr = SessionManager.Current;
+                if (!mgr.IsUnlocked) return;                       // locked since; nothing to write into
+                if (mgr.Payload?.Profiles.Contains(p) != true) return;  // deleted or edited away
+                p.CertThumbprint = thumb;
+                mgr.TrySave(out _);   // bookkeeping: never surface as an error to the user
+            }
+            catch { }
+        });
+    }
+
+    /// <summary>
+    /// Removes the Servers\&lt;address&gt; key this app created to replay a certificate
+    /// approval. Always called once the session is over, so the pin lives only in the
+    /// encrypted vault and never on this PC.
+    /// </summary>
+    private static void RemoveCertPin(RdpProfile p)
+    {
+        try
+        {
+            using var servers = Registry.CurrentUser.OpenSubKey(TscServersKey, writable: true);
+            servers?.DeleteSubKeyTree(FullAddress(p), throwOnMissingSubKey: false);
+        }
+        catch { }
+    }
+
     private static IEnumerable<string> CredentialTargets(RdpProfile p)
     {
         yield return $"TERMSRV/{p.Host}";
         if (p.Port != 3389) yield return $"TERMSRV/{p.Host}:{p.Port}";
+    }
+
+    // ---------------- session credential coordinator (issue #4) ----------------
+
+    private static class SessionCredentialCoordinator
+    {
+        private static readonly Dictionary<string, int> TargetRefCounts = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly object CredLock = new();
+
+        public static bool Acquire(string target, string user, string password)
+        {
+            lock (CredLock)
+            {
+                if (TargetRefCounts.TryGetValue(target, out int count))
+                {
+                    TargetRefCounts[target] = count + 1;
+                    return true;
+                }
+
+                if (WriteSessionCredential(target, user, password))
+                {
+                    TargetRefCounts[target] = 1;
+                    return true;
+                }
+                return false;
+            }
+        }
+
+        public static void Release(string target)
+        {
+            lock (CredLock)
+            {
+                if (TargetRefCounts.TryGetValue(target, out int count))
+                {
+                    if (count <= 1)
+                    {
+                        TargetRefCounts.Remove(target);
+                        DeleteCredential(target);
+                    }
+                    else
+                    {
+                        TargetRefCounts[target] = count - 1;
+                    }
+                }
+                else
+                {
+                    DeleteCredential(target);
+                }
+            }
+        }
+
+        public static void PurgeAll()
+        {
+            lock (CredLock)
+            {
+                foreach (string target in TargetRefCounts.Keys)
+                {
+                    DeleteCredential(target);
+                }
+                TargetRefCounts.Clear();
+            }
+        }
     }
 
     // ---------------- session credential via CredWrite ----------------

@@ -2,10 +2,11 @@
 PROJECT_STRUCTURE.TXT  —  RDP VAULT
 SOURCE OF TRUTH & GUIDANCE FOR ANY AI AGENT (OR HUMAN) WORKING ON THIS PROJECT
 ================================================================================
-Last updated : 2026-08-16
-Version      : 1.1.1
-Status       : Source rewritten to close a 20-item audit plus issue #21. NOT YET COMPILED OR
-               SMOKE-TESTED after that rewrite — see SECTION 13.
+Last updated : 2026-08-19
+Version      : 1.1.1 + 2026-08-19 critical fixes
+Status       : Source rewritten to close a 20-item audit plus issues #21/#22, then patched
+               on 2026-08-19 to close review items R1-R5 (SECTION 15). STILL NOT COMPILED
+               OR SMOKE-TESTED — see SECTION 13 and SECTION 15.
 
 --------------------------------------------------------------------------------
 SECTION 0 — TL;DR (READ THIS FIRST)
@@ -201,7 +202,8 @@ rewritten as V=2 on the next save.
 Payload (decrypted Data): { "Profiles": [...], "Settings": {...} }
 RdpProfile: Id, Name, Host, Port, Username, Password, UseMultiMon, GatewayHost,
   FullScreen, Width, Height, AllowClipboard, AllowDrives, AllowPrinters,
-  AllowSmartCards, AllowUnverifiedServer (new), Notes.
+  AllowSmartCards, AllowUnverifiedServer (default FALSE since R2),
+  CertThumbprint (new in R2 — the accepted server certificate, see SECTION 7), Notes.
 VaultSettings: LockMinutes(60), KillSessionsOnUsbRemoval(true), ForceMultiMon,
   DeepSweep(false), SweepScope(OwnHostsOnly), WarnIfDriveNotEncrypted(true).
   RequireFido2 was REMOVED — it was stored and shown but enforced nowhere.
@@ -239,7 +241,19 @@ SECTION 5 — RUNTIME MECHANICS (END-TO-END FLOWS)
 5.4 UNLOCK (Recovery Code)
     "I forgot my master password" -> Dialogs.AskRecoveryCodeAsync ->
     SessionManager.UnlockWithRecoveryCode -> VaultCrypto.OpenWithRecoveryCode.
-    On success the user is told to set a new master password.
+
+    R1: on success SessionManager.UnlockedViaRecovery is set, and MainWindow runs
+    OfferPasswordResetAfterRecoveryAsync immediately: change-password dialog with the
+    CURRENT-password field hidden, then an offer to regenerate the Recovery Code.
+    ChangePassword(null, new) skips proof-of-knowledge while that flag is set — the
+    master key is already unwrapped by a 256-bit secret, so there is nothing left to
+    prove. Declining leaves a persistent warning strip explaining how to finish later.
+    The flag is cleared on a successful change, on lock, on dispose, and by any
+    password or Hello unlock.
+
+    NEVER go back to demanding the old password here. That was the bug: the app told
+    the user to change a password it then refused to change without the one thing they
+    had just proved they did not have.
 
 5.5 UNLOCK (Windows Hello)
     Attempted automatically 300 ms after the window loads when a seal exists for
@@ -306,8 +320,14 @@ SECTION 5 — RUNTIME MECHANICS (END-TO-END FLOWS)
     RDPVault.Link so shortcuts created by v1.0.0 finally work.
 
 5.11 USB REMOVAL
-    2 s poll of AppContext.BaseDirectory / Environment.ProcessPath. On loss:
-    raise UsbRemoved, Lock (killing sessions per setting), DeepSweep, exit.
+    2 s poll of AppContext.BaseDirectory / Environment.ProcessPath.
+    R3: the drive must be missing for 3 CONSECUTIVE polls (UsbMissesBeforeShutdown,
+    ~6 s) before anything happens, and one successful poll resets the counter. A single
+    transient miss — AV lock, sleep/resume, slow controller, network hiccup — used to
+    kill every open remote desktop. On confirmed loss: raise UsbRemoved, then Lock
+    (killing sessions per setting), DeepSweep and Environment.Exit(0) all run OFF the
+    UI thread after a 2.5 s grace period, so the on-screen explanation actually renders
+    before the process ends.
 
 5.12 UNINSTALL
     UninstallWindow asks first: "keep my vault" (default — copies vault.rdpv and
@@ -635,5 +655,81 @@ each one creates a second thing a user can download and get wrong.
 If a build fails, the previous release is left completely untouched. A broken
 build must never take the working download offline.
 
+--------------------------------------------------------------------------------
+SECTION 15 — 2026-08-19 REVIEW: CRITICAL ITEMS R1-R5
+--------------------------------------------------------------------------------
+A fresh read of the 1.1.1 source produced 17 findings. The five ranked critical were
+fixed on 2026-08-19; R6-R17 remain open (see the backlog note at the end).
+
+ R1. RECOVERY CODE UNLOCK WAS A DEAD END. After unlocking with the Recovery Code the
+     app said "set a new master password in Settings", but ChangePassword demanded the
+     CURRENT password to prove knowledge — the exact thing the user had just proved
+     they did not have. The vault stayed pinned to a password nobody knew, with the
+     Recovery Code as the only key forever. Fixed: SessionManager.UnlockedViaRecovery,
+     Dialogs.ChangePasswordAsync(requireOldPassword), and an automatic reset flow in
+     MainWindow. See SECTION 5.4.
+
+ R2. authentication level:i:0 ON EVERY PROFILE BY DEFAULT. AllowUnverifiedServer
+     defaulted to true, so every generated .rdp disabled server identity checking while
+     also carrying enablecredsspsupport:i:1 — and RdpLauncher had already pushed the
+     saved password into Credential Manager under TERMSRV/{host}. Anything that could
+     answer for that address got the credentials, silently. It also broke SECTION 10
+     rule 4, which forbids a level below 1.
+
+     Issue #22's complaint was real but misdiagnosed. The cause was never the warning;
+     it was that TraceCleaner deletes the CertHash key where Windows remembers "don't
+     ask me again", so the approval could not survive a sweep. That is now fixed at the
+     source: RdpProfile.CertThumbprint stores the accepted certificate INSIDE the
+     encrypted vault, RdpLauncher.RestoreCertPin replays it into the registry right
+     before launch, and RdpLauncher.CaptureCertPin reads the user's answer back
+     immediately after the session and before the sweep. Result: one warning per host,
+     nothing left on disk, and a CHANGED certificate still stops the user.
+
+     CaptureCertPin is a deliberate, narrow exception to the issue #9 ban on reading
+     state back from a session. It copies exactly one value — the certificate the user
+     accepted — and never touches redirection settings or anything else mstsc rewrote.
+     Keep it that way.
+
+     The pin is dropped whenever the profile's host or port changes (ProfileEditor).
+     Everything in the pinning path is best effort: if the registry is unwritable or
+     Windows moves the value, the only consequence is that the normal warning appears
+     again — never a failed or silently unverified connection.
+
+ R3. USB WATCHDOG FIRED ON A SINGLE TRANSIENT I/O MISS. See SECTION 5.11.
+
+ R4. THE RECOVERY CODE SCREEN COULD BE DISMISSED WITH THE TITLE-BAR X. The acknowledge
+     gate only ever guarded the button; the X returned default(bool) and
+     CreateVaultFlowAsync ignored the result, leaving vaults whose Recovery Code the
+     owner had never seen and could never retrieve. Dialogs.ShowRecoveryCodeAsync now
+     cancels its own Closing event until the checkbox is ticked.
+
+ R5. "SAVE TO A FILE" WROTE THE RECOVERY CODE IN CLEARTEXT. It dropped a full second
+     master key into Documents\RDP Vault Backups and merely *told* the user to delete
+     it — breaking SECTION 10 rule 2 and the app's whole no-trace promise. The button
+     is gone; paper is the supported backup. Copy survives (52 characters by hand is
+     worse) but now clears the clipboard after 60 seconds and on dialog close, and says
+     out loud that Win+V history may still hold a copy.
+
+STILL OPEN (R6-R17, ranked): TraceCleaner.Sweep runs on the UI thread from
+CheckAutoLock/BtnLock/Dispose and freezes the app; UnlockWithHelloAsync runs Argon2 on
+the UI thread; Environment.Exit inside the SessionManager static type initializer, and
+SetupWindow enforcing no single-instance at all; UninstallWindow exiting before its log
+or error can be read; TERMSRV credential collision between concurrent sessions on one
+host; WaitForExit blocking a pool thread per session; raw JsonException text on the lock
+screen with no restore-from-.bak UI; fixed-size non-scrolling dialogs clipping their own
+buttons at high DPI; HelloSealAvailable re-reading the vault from disk while unlocked;
+the single-file extraction trace in %TEMP%\.net\RDPVault; clock-rollback bypass of the
+throttle; and version drift between csproj (1.1.0), this file and
+InstallerService.DisplayVersion.
+
+ADDITIONAL REGRESSIONS TO NEVER REINTRODUCE
+  - Asking for the old master password after a Recovery Code unlock.
+  - An authentication level below 1 as any profile's default.
+  - Writing the Recovery Code, or any other key material, to a file outside vault.rdpv.
+  - A Recovery Code screen that can be closed without acknowledgement.
+  - Acting on a single failed USB presence poll.
+  - Widening CaptureCertPin to copy anything other than CertHash.
+
+--------------------------------------------------------------------------------
 END OF FILE — keep synchronized with the code.
 ================================================================================

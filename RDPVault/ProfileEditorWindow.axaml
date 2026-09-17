@@ -1,9 +1,9 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="RDPVault.ProfileEditorWindow"
-        Title="Edit Profile" Width="460" Height="720"
+        Title="Edit Profile" Width="500" Height="780"
         Icon="avares://RDPVault/Assets/icon.ico"
-        WindowStartupLocation="CenterOwner" CanResize="False"
+        WindowStartupLocation="CenterOwner" CanResize="True"
         Background="#0E0E10" Foreground="#EDEDED" FontFamily="Inter, Arial">
     <Window.Styles>
         <Style Selector="TextBox">
@@ -67,7 +67,8 @@
         <TextBlock Text="RD Gateway host (optional)" FontSize="13" Foreground="#8A8A93" Margin="0,6,0,0"/>
         <TextBox Name="TxtGateway" Watermark="gateway.example.com"/>
 
-        <TextBlock Text="Display resolution" FontSize="13" Foreground="#8A8A93" Margin="0,6,0,0"/>
+        <!-- Display settings -->
+        <TextBlock Text="Display resolution preset" FontSize="13" Foreground="#8A8A93" Margin="0,6,0,0"/>
         <ComboBox Name="CmbResolution" HorizontalAlignment="Stretch" Background="#141417"
                   BorderBrush="#2E2E35" Foreground="#EDEDED">
             <ComboBoxItem Content="Full screen"/>
@@ -81,6 +82,63 @@
             <ComboBoxItem Content="800 x 600"/>
         </ComboBox>
 
+        <!-- Overrides -->
+        <TextBlock Text="Full screen override" FontSize="13" Foreground="#8A8A93" Margin="0,6,0,0"/>
+        <ComboBox Name="CmbFullScreen" HorizontalAlignment="Stretch" Background="#141417"
+                  BorderBrush="#2E2E35" Foreground="#EDEDED">
+            <ComboBoxItem Content="Default (Follow Global Vault Settings)"/>
+            <ComboBoxItem Content="Always Full Screen"/>
+            <ComboBoxItem Content="Always Windowed Mode"/>
+        </ComboBox>
+
+        <TextBlock Text="Multi-monitor override" FontSize="13" Foreground="#8A8A93" Margin="0,6,0,0"/>
+        <ComboBox Name="CmbMultiMon" HorizontalAlignment="Stretch" Background="#141417"
+                  BorderBrush="#2E2E35" Foreground="#EDEDED">
+            <ComboBoxItem Content="Default (Follow Global Vault Settings)"/>
+            <ComboBoxItem Content="Always Use All Monitors (Multi-monitor)"/>
+            <ComboBoxItem Content="Single Monitor Only"/>
+        </ComboBox>
+
+        <TextBlock Text="Certificate &amp; identity warnings override" FontSize="13" Foreground="#8A8A93" Margin="0,6,0,0"/>
+        <ComboBox Name="CmbCertWarnings" HorizontalAlignment="Stretch" Background="#141417"
+                  BorderBrush="#2E2E35" Foreground="#EDEDED">
+            <ComboBoxItem Content="Default (Follow Global Vault Settings)"/>
+            <ComboBoxItem Content="Always Suppress Warnings (Ignore untrusted certs)"/>
+            <ComboBoxItem Content="Always Show Warnings (Ask before connecting)"/>
+        </ComboBox>
+
+        <!-- Wake-on-LAN (WOL) -->
+        <Border Background="#121215" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="4"
+                Padding="12" Margin="0,10,0,0">
+            <StackPanel Spacing="8">
+                <TextBlock Text="WAKE-ON-LAN (WOL)" FontSize="13" FontWeight="Bold" Foreground="#EDEDED"/>
+                <CheckBox Name="ChkEnableWol">
+                    <TextBlock Text="Send Wake-on-LAN magic packet before connecting" Foreground="#EDEDED"/>
+                </CheckBox>
+                <StackPanel Name="PnlWolDetails" Spacing="8">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Target MAC address (e.g. 00:11:22:33:44:55)" FontSize="12" Foreground="#8A8A93"/>
+                        <TextBox Name="TxtWolMac" Watermark="00:11:22:33:44:55"/>
+                    </StackPanel>
+                    <Grid ColumnDefinitions="*,10,80,10,90">
+                        <StackPanel Grid.Column="0" Spacing="4">
+                            <TextBlock Text="Broadcast IP" FontSize="12" Foreground="#8A8A93"/>
+                            <TextBox Name="TxtWolBroadcast" Watermark="255.255.255.255"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="4">
+                            <TextBlock Text="Port" FontSize="12" Foreground="#8A8A93"/>
+                            <TextBox Name="TxtWolPort" Watermark="9"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="4" Spacing="4">
+                            <TextBlock Text="Wait (sec)" FontSize="12" Foreground="#8A8A93"/>
+                            <TextBox Name="TxtWolWait" Watermark="5"/>
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- Local resources -->
         <TextBlock Text="Local resources to share with the remote PC" FontSize="13" FontWeight="Bold"
                    Foreground="#8A8A93" Margin="0,10,0,0"/>
         <WrapPanel Orientation="Horizontal" Margin="0,4,0,0">
@@ -94,10 +152,10 @@
                 Padding="10" Margin="0,8,0,0">
             <StackPanel Spacing="4">
                 <CheckBox Name="ChkAllowUnverified">
-                    <TextBlock Text="Skip the certificate warning for this host"
+                    <TextBlock Text="Never check this server's identity (allow unverified server)"
                                TextWrapping="Wrap" Foreground="#EDEDED"/>
                 </CheckBox>
-                <TextBlock Text="On by default. Most RDP hosts use a self-signed certificate, and RDP Vault erases the registry entry where Windows remembers &quot;don't ask me again&quot; - so leaving this off means a warning on every single connection. Untick it only for a host with a properly issued certificate, where you want the connection stopped if its identity ever fails to check out."
+                <TextBlock Text="When enabled, bypasses server identity checks entirely on connection."
                            FontSize="11" Foreground="#8A8A93" TextWrapping="Wrap"/>
             </StackPanel>
         </Border>

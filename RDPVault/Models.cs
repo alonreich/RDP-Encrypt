@@ -4,6 +4,13 @@ using System.Text.Json.Serialization;
 
 namespace RDPVault;
 
+public enum TriStateOverride
+{
+    InheritGlobal = 0,
+    Enabled = 1,
+    Disabled = 2
+}
+
 public class RdpProfile
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
@@ -23,30 +30,58 @@ public class RdpProfile
     public bool AllowSmartCards { get; set; } = false;
 
     /// <summary>
-    /// Controls "authentication level" in the generated .rdp.
-    ///
-    /// true  (default) -> 0: connect without any certificate warning.
-    /// false           -> 2: warn on every connect that cannot be verified.
-    ///
-    /// Issue #22: this defaults to true, and profiles saved before the field
-    /// existed also read as true, so nobody gets a prompt they did not ask for.
-    /// Almost every RDP host uses a self-signed certificate, and this app wipes the
-    /// registry key where Windows remembers "don't ask me again" (see RdpLauncher),
-    /// so a warning here is guaranteed to reappear on every single connection -
-    /// which trains people to click through warnings rather than read them.
-    ///
-    /// Untick it per profile for a host with a properly issued certificate, where a
-    /// verification failure is genuinely worth stopping for.
+    /// Per-profile override for certificate warnings.
+    /// InheritGlobal = follow global setting (default: suppress).
+    /// Enabled = suppress certificate warnings for this host.
+    /// Disabled = show certificate warnings.
     /// </summary>
-    public bool AllowUnverifiedServer { get; set; } = true;
+    public TriStateOverride SuppressCertWarningsOverride { get; set; } = TriStateOverride.InheritGlobal;
+
+    /// <summary>Per-profile override for full screen mode.</summary>
+    public TriStateOverride FullScreenOverride { get; set; } = TriStateOverride.InheritGlobal;
+
+    /// <summary>Per-profile override for multi-monitor mode.</summary>
+    public TriStateOverride MultiMonOverride { get; set; } = TriStateOverride.InheritGlobal;
+
+    /// <summary>Controls whether mstsc connects and ignores identity warnings directly.</summary>
+    public bool AllowUnverifiedServer { get; set; } = false;
+
+    /// <summary>Hex SHA-1 thumbprint of the server certificate accepted by user.</summary>
+    public string CertThumbprint { get; set; } = "";
+
+    // Wake-on-LAN (WOL) settings
+    public bool EnableWol { get; set; } = false;
+    public string WolMacAddress { get; set; } = "";
+    public string WolBroadcastIp { get; set; } = "255.255.255.255";
+    public int WolPort { get; set; } = 9;
+    public int WolWaitSeconds { get; set; } = 5;
 
     public string Notes { get; set; } = "";
 
     [JsonIgnore] public bool HasPassword => !string.IsNullOrEmpty(Password);
 
-    // Issue #8: this used to be the literal string "$Host:$Port" (missing the
-    // interpolation prefix), so every non-3389 profile rendered that garbage.
     [JsonIgnore] public string DisplayHost => Port == 3389 ? Host : $"{Host}:{Port}";
+
+    public bool ResolveSuppressCertWarnings(VaultSettings? settings)
+    {
+        if (SuppressCertWarningsOverride == TriStateOverride.Enabled) return true;
+        if (SuppressCertWarningsOverride == TriStateOverride.Disabled) return false;
+        return settings?.SuppressCertWarnings ?? true;
+    }
+
+    public bool ResolveFullScreen(VaultSettings? settings)
+    {
+        if (FullScreenOverride == TriStateOverride.Enabled) return true;
+        if (FullScreenOverride == TriStateOverride.Disabled) return false;
+        return settings?.DefaultFullScreen ?? FullScreen;
+    }
+
+    public bool ResolveUseMultiMon(VaultSettings? settings)
+    {
+        if (MultiMonOverride == TriStateOverride.Enabled) return true;
+        if (MultiMonOverride == TriStateOverride.Disabled) return false;
+        return settings?.DefaultUseMultiMon ?? UseMultiMon;
+    }
 
     public RdpProfile Clone() => (RdpProfile)MemberwiseClone();
 }
@@ -66,6 +101,15 @@ public class VaultSettings
     public bool KillSessionsOnUsbRemoval { get; set; } = true;
     public bool ForceMultiMon { get; set; } = false;
 
+    /// <summary>Global default: ignore errors and warnings for certificates or identities.</summary>
+    public bool SuppressCertWarnings { get; set; } = true;
+
+    /// <summary>Global default: launch connections in full screen by default.</summary>
+    public bool DefaultFullScreen { get; set; } = true;
+
+    /// <summary>Global default: use all monitors by default.</summary>
+    public bool DefaultUseMultiMon { get; set; } = true;
+
     /// <summary>Issue #7: now actually honoured - DeepSweep runs on lock and exit when true.</summary>
     public bool DeepSweep { get; set; } = false;
 
@@ -74,9 +118,6 @@ public class VaultSettings
 
     /// <summary>Issue #7: warn (never silently pretend) when the vault drive is not encrypted.</summary>
     public bool WarnIfDriveNotEncrypted { get; set; } = true;
-
-    // NOTE (issue #7): "RequireFido2" was removed. It was stored and displayed but
-    // never enforced by any code path, which actively misled users.
 }
 
 public class VaultPayload
@@ -173,6 +214,8 @@ public class VaultFile
 [JsonSerializable(typeof(VaultPayload))]
 [JsonSerializable(typeof(FailState))]
 [JsonSerializable(typeof(VaultPolicy))]
+[JsonSerializable(typeof(TriStateOverride))]
+[JsonSerializable(typeof(SweepScope))]
 public partial class VaultJsonContext : JsonSerializerContext
 {
 }

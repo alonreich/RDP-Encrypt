@@ -21,10 +21,12 @@ public partial class SettingsWindow : Window
         {
             TxtLockMinutes.Text = settings.LockMinutes.ToString();
             ChkKillSessions.IsChecked = settings.KillSessionsOnUsbRemoval;
-            ChkForceMultiMon.IsChecked = settings.ForceMultiMon;
             ChkDeepSweep.IsChecked = settings.DeepSweep;
             ChkWarnBitLocker.IsChecked = settings.WarnIfDriveNotEncrypted;
             CmbSweepScope.SelectedIndex = settings.SweepScope == SweepScope.Everything ? 1 : 0;
+            ChkSuppressCertWarnings.IsChecked = settings.SuppressCertWarnings;
+            ChkDefaultFullScreen.IsChecked = settings.DefaultFullScreen;
+            ChkDefaultMultiMon.IsChecked = settings.DefaultUseMultiMon;
         }
 
         ChkSelfDestruct.IsChecked = policy.SelfDestructEnabled;
@@ -117,12 +119,17 @@ public partial class SettingsWindow : Window
     private async void BtnChangePassword_Click(object? sender, RoutedEventArgs e)
     {
         SessionManager.Current.Touch();
-        var result = await Dialogs.ChangePasswordAsync(this);
+
+        // Issue #1 (2026 review): a session opened with the Recovery Code has no old
+        // password to offer, so the field is hidden and the check is skipped.
+        bool needOld = !SessionManager.Current.UnlockedViaRecovery;
+        var result = await Dialogs.ChangePasswordAsync(this, needOld);
         if (result == null) return;
 
         try
         {
-            await Task.Run(() => SessionManager.Current.ChangePassword(result.Value.Old, result.Value.New));
+            await Task.Run(() => SessionManager.Current.ChangePassword(
+                needOld ? result.Value.Old : null, result.Value.New));
             UpdateHelloUI();
             await Dialogs.MessageAsync(this, "Password changed",
                 "Your master password has been changed. Windows Hello quick unlock was switched off on every PC and must be set up again.");
@@ -265,10 +272,13 @@ public partial class SettingsWindow : Window
 
         settings.LockMinutes = lockMinutes;
         settings.KillSessionsOnUsbRemoval = ChkKillSessions.IsChecked == true;
-        settings.ForceMultiMon = ChkForceMultiMon.IsChecked == true;
         settings.DeepSweep = ChkDeepSweep.IsChecked == true;
         settings.WarnIfDriveNotEncrypted = ChkWarnBitLocker.IsChecked == true;
         settings.SweepScope = CmbSweepScope.SelectedIndex == 1 ? SweepScope.Everything : SweepScope.OwnHostsOnly;
+        settings.SuppressCertWarnings = ChkSuppressCertWarnings.IsChecked == true;
+        settings.DefaultFullScreen = ChkDefaultFullScreen.IsChecked == true;
+        settings.DefaultUseMultiMon = ChkDefaultMultiMon.IsChecked == true;
+        settings.ForceMultiMon = settings.DefaultUseMultiMon;
 
         file.Policy.SelfDestructEnabled = armed;
         file.Policy.MaxAttempts = attempts;

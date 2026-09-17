@@ -24,6 +24,7 @@ public partial class MainWindow : Window
         mgr.UsbRemoved += OnUsbRemoved;          // issue #17: was never wired up
         mgr.VaultDestroyed += OnVaultDestroyed;
         mgr.Notice += SetStatus;
+        mgr.LaunchRequested += async p => await ValidateAndLaunchProfileAsync(p);
 
         RdpLauncher.SessionStarted += name => Dispatcher.UIThread.Post(() => SetStatus($"Connecting to {name}..."));
         RdpLauncher.SessionEnded += name => Dispatcher.UIThread.Post(() => SetStatus($"{name} closed - local traces cleaned."));
@@ -229,9 +230,14 @@ public partial class MainWindow : Window
 
             UpdateUIState();
             SetBusy(false, null);
-            await Dialogs.MessageAsync(this, "Unlocked with your Recovery Code",
-                "Set a new master password now, in Settings > Change master password. " +
-                "Consider generating a fresh Recovery Code afterwards.");
+
+            // ISSUE #1 (2026 review): this used to point the user at
+            // Settings > Change master password, which demanded the CURRENT password -
+            // the one they had just told us they had forgotten. The flow was a dead
+            // end. The new password is now set right here, with no old password asked
+            // for, and a fresh Recovery Code is offered immediately afterwards because
+            // the one they just used is now the only key they have proven they hold.
+            await OfferPasswordResetAfterRecoveryAsync();
             return;
         }
         catch (Exception ex)
@@ -242,6 +248,54 @@ public partial class MainWindow : Window
         {
             SetBusy(false, null);
         }
+    }
+
+    /// <summary>Issue #1 (2026 review): completes the "I forgot my master password" journey.</summary>
+    private async Task OfferPasswordResetAfterRecoveryAsync()
+    {
+        await Dialogs.MessageAsync(this, "Unlocked with your Recovery Code",
+            "Your Recovery Code opened the vault. Choose a new master password now - the old one still works " +
+            "until you do, and right now the Recovery Code is the only key you are certain of.");
+
+        var result = await Dialogs.ChangePasswordAsync(this, requireOldPassword: false);
+        if (result == null)
+        {
+            SetStatus("Unlocked with your Recovery Code. The master password was NOT changed.");
+            ShowWarning("You unlocked with your Recovery Code and did not set a new master password. " +
+                        "Open Settings > Change master password to set one - you will not be asked for the old one.");
+            return;
+        }
+
+        try
+        {
+            await Task.Run(() => SessionManager.Current.ChangePassword(null, result.Value.New));
+        }
+        catch (Exception ex)
+        {
+            await Dialogs.MessageAsync(this, "Password not changed", ex.Message, isError: true);
+            return;
+        }
+
+        bool fresh = await Dialogs.ConfirmAsync(this, "Generate a new Recovery Code?",
+            "Your master password has been changed and Windows Hello quick unlock was switched off on every PC. " +
+            "The Recovery Code you just used still works. Replacing it now retires the copy you have been carrying around.",
+            confirmText: "Generate a new code");
+
+        if (fresh)
+        {
+            try
+            {
+                string code = await Task.Run(() => SessionManager.Current.RegenerateRecoveryCode());
+                await Dialogs.ShowRecoveryCodeAsync(this, code);
+            }
+            catch (Exception ex)
+            {
+                await Dialogs.MessageAsync(this, "Could not create a Recovery Code", ex.Message, isError: true);
+            }
+        }
+
+        UpdateUIState();
+        SetStatus("Master password changed.");
     }
 
     private async void BtnHello_Click(object? sender, RoutedEventArgs e) => await AttemptHelloUnlockAsync();
@@ -360,9 +414,42 @@ public partial class MainWindow : Window
         RefreshProfiles();
     }
 
-    private void BtnConnect_Click(object? sender, RoutedEventArgs e)
+    private async void BtnConnect_Click(object? sender, RoutedEventArgs e)
     {
-        if (sender is Button b && b.Tag is RdpProfile p) RdpLauncher.Launch(p);
+        if (sender is Button b && b.Tag is RdpProfile p)
+        {
+            await ValidateAndLaunchProfileAsync(p);
+        }
+    }
+
+    private async Task ValidateAndLaunchProfileAsync(RdpProfile p)
+    {
+        SessionManager.Current.Touch();
+        var active = RdpLauncher.FindActiveSession(p);
+        if (active != null)
+        {
+            string hostDisplay = $"{active.Host}:{active.Port}";
+            string nameDisplay = string.IsNullOrWhiteSpace(active.ProfileName) ? hostDisplay : active.ProfileName;
+            bool disconnectAndReconnect = await Dialogs.ConfirmAsync(
+                this,
+                "Active Session Detected",
+                $"A Remote Desktop session to \"{nameDisplay}\" ({hostDisplay}) is currently active.\n\n" +
+                "Do you want to disconnect the active session and start a new connection, or abort and keep the current session running?",
+                confirmText: "Disconnect & Connect",
+                danger: true);
+
+            if (!disconnectAndReconnect)
+            {
+                SetStatus($"Connection to {p.Name} cancelled. Active session was kept.");
+                return;
+            }
+
+            SetStatus($"Disconnecting existing session to {hostDisplay}...");
+            RdpLauncher.DisconnectSession(active);
+            await Task.Delay(500); // Allow mstsc process to terminate cleanly
+        }
+
+        await RdpLauncher.LaunchAsync(p);
     }
 
     private async void BtnShortcut_Click(object? sender, RoutedEventArgs e)

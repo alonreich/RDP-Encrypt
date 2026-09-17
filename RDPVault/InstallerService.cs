@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Threading;
 using Microsoft.Win32;
 
 namespace RDPVault;
@@ -21,6 +23,98 @@ public static class InstallerService
                currentExe.Equals(InstalledExe, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Forcefully terminates any other running instances of RDP Vault across the system to release
+    /// file locks, mutexes, named pipes, and handles before installing, upgrading, or uninstalling.
+    /// </summary>
+    public static void KillRunningInstances(bool excludeCurrent = true, Action<string>? log = null)
+    {
+        int currentPid = Environment.ProcessId;
+        string? currentProcName = null;
+        try { currentProcName = Process.GetCurrentProcess().ProcessName; } catch { }
+
+        var targetNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "RDPVault",
+            Path.GetFileNameWithoutExtension(InstalledExe)
+        };
+        if (!string.IsNullOrEmpty(currentProcName))
+            targetNames.Add(currentProcName);
+
+        bool killedAny = false;
+
+        foreach (string name in targetNames)
+        {
+            Process[] processes;
+            try { processes = Process.GetProcessesByName(name); }
+            catch { continue; }
+
+            foreach (var p in processes)
+            {
+                try
+                {
+                    if (excludeCurrent && p.Id == currentPid) continue;
+
+                    log?.Invoke($"Closing running copy (PID {p.Id})...");
+                    killedAny = true;
+
+                    try
+                    {
+                        p.Kill(entireProcessTree: true);
+                        p.WaitForExit(3000);
+                    }
+                    catch
+                    {
+                        RunTaskKillPid(p.Id);
+                    }
+                }
+                catch { }
+                finally
+                {
+                    try { p.Dispose(); } catch { }
+                }
+            }
+        }
+
+        // Secondary failsafe: taskkill by image name excluding current PID
+        try
+        {
+            using var proc = Process.Start(new ProcessStartInfo
+            {
+                FileName = "taskkill.exe",
+                Arguments = $"/F /FI \"PID ne {currentPid}\" /IM RDPVault.exe /T",
+                CreateNoWindow = true,
+                UseShellExecute = false,
+                WindowStyle = ProcessWindowStyle.Hidden
+            });
+            proc?.WaitForExit(2000);
+        }
+        catch { }
+
+        if (killedAny)
+        {
+            // Allow Windows kernel to cleanly tear down handles, single-instance mutex, and file locks
+            Thread.Sleep(500);
+        }
+    }
+
+    private static void RunTaskKillPid(int pid)
+    {
+        try
+        {
+            using var proc = Process.Start(new ProcessStartInfo
+            {
+                FileName = "taskkill.exe",
+                Arguments = $"/F /PID {pid} /T",
+                CreateNoWindow = true,
+                UseShellExecute = false,
+                WindowStyle = ProcessWindowStyle.Hidden
+            });
+            proc?.WaitForExit(2000);
+        }
+        catch { }
+    }
+
     // ================================================================ install
 
     public static void InstallWithProgress(Action<string> log)
@@ -31,27 +125,30 @@ public static class InstallerService
         log($"Creating installation directory: {InstallDir}");
         Directory.CreateDirectory(InstallDir);
 
-        log("Checking for a running copy...");
-        foreach (var p in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(InstalledExe)))
-        {
-            try
-            {
-                if (p.Id == Environment.ProcessId) continue;
-                if (p.MainModule != null &&
-                    p.MainModule.FileName.Equals(InstalledExe, StringComparison.OrdinalIgnoreCase))
-                {
-                    log($"Closing running copy (PID {p.Id})...");
-                    p.Kill();
-                    p.WaitForExit(5000);
-                }
-            }
-            catch { /* another user's process - not ours to touch */ }
-        }
+        log("Checking for running copies and releasing process locks...");
+        KillRunningInstances(excludeCurrent: true, log);
 
         if (!currentExe.Equals(InstalledExe, StringComparison.OrdinalIgnoreCase))
         {
             log($"Copying program files to: {InstalledExe}");
-            File.Copy(currentExe, InstalledExe, true);
+            const int maxRetries = 5;
+            for (int attempt = 1; attempt <= maxRetries; attempt++)
+            {
+                try
+                {
+                    File.Copy(currentExe, InstalledExe, true);
+                    break;
+                }
+                catch (IOException ex)
+                {
+                    if (attempt == maxRetries)
+                        throw new Exception($"Failed to copy executable to {InstalledExe} after {maxRetries} attempts: {ex.Message}", ex);
+
+                    log($"File is locked, retrying copy ({attempt}/{maxRetries})...");
+                    KillRunningInstances(excludeCurrent: true, log);
+                    Thread.Sleep(500 * attempt);
+                }
+            }
         }
 
         log("Registering the uninstaller with Programs and Features...");
@@ -157,6 +254,9 @@ public static class InstallerService
         string? rescuedTo = null;
         try
         {
+            log("Checking for running copies and releasing process locks...");
+            KillRunningInstances(excludeCurrent: true, log);
+
             if (keepVault && InstalledVaultExists())
             {
                 log("Rescuing your vault before removing the program...");

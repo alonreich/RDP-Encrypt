@@ -21,8 +21,14 @@ del /f /q "%USERPROFILE%\Desktop\RDP Vault.lnk" >nul 2>&1
 echo Scrubbing temporary RDP configuration traces...
 del /f /q "%TEMP%\rdpv_*.rdp" >nul 2>&1
 
+if exist "%INSTALL_DIR%\vault.rdpv" (
+    echo Rescuing your vault to Documents\RDP Vault Backups...
+    mkdir "%USERPROFILE%\Documents\RDP Vault Backups" 2>nul
+    copy /y "%INSTALL_DIR%\vault.rdpv" "%USERPROFILE%\Documents\RDP Vault Backups\vault.rdpv" >nul
+)
+
 echo SUCCESS: RDP Vault cleanly uninstalled.
-echo Closing window and shredding directory...
+echo Closing window and cleaning directory...
 
 ping 127.0.0.1 -n 2 >nul
 cd /d "%USERPROFILE%"

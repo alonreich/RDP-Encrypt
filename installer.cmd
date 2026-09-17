@@ -4,17 +4,23 @@ echo =========================================
 echo  INSTALLING RDP VAULT
 echo =========================================
 
+echo Closing any running instances of RDP Vault to release file locks...
+taskkill /F /IM RDPVault.exe /T >nul 2>&1
+powershell -NoProfile -Command "Start-Sleep -Milliseconds 600"
+
 set "INSTALL_DIR=%LOCALAPPDATA%\RDPVault"
 mkdir "%INSTALL_DIR%" 2>nul
 copy /y ".\compiled\RDPVault.exe" "%INSTALL_DIR%\RDPVault.exe" >nul
 copy /y ".\uninstaller.cmd" "%INSTALL_DIR%\uninstaller.cmd" >nul
 
 set "REG_PATH=HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\RDPVault"
-reg add "%REG_PATH%" /v DisplayName /d "RDP Vault" /f >nul
+reg add "%REG_PATH%" /v DisplayName /d "RDP Vault (Encrypted Connection Manager)" /f >nul
 reg add "%REG_PATH%" /v DisplayIcon /d "\"%INSTALL_DIR%\RDPVault.exe\",0" /f >nul
-reg add "%REG_PATH%" /v UninstallString /d "\"%INSTALL_DIR%\uninstaller.cmd\"" /f >nul
-reg add "%REG_PATH%" /v DisplayVersion /d "1.0.0" /f >nul
-reg add "%REG_PATH%" /v Publisher /d "Alon Reich" /f >nul
+reg add "%REG_PATH%" /v InstallLocation /d "%INSTALL_DIR%" /f >nul
+reg add "%REG_PATH%" /v UninstallString /d "\"%INSTALL_DIR%\RDPVault.exe\" --uninstall" /f >nul
+reg add "%REG_PATH%" /v QuietUninstallString /d "\"%INSTALL_DIR%\RDPVault.exe\" --uninstall --quiet" /f >nul
+reg add "%REG_PATH%" /v DisplayVersion /d "1.1.0.0" /f >nul
+reg add "%REG_PATH%" /v Publisher /d "RDPVault Open Source" /f >nul
 
 set "CLASS_PATH=HKCU\Software\Classes"
 reg add "%CLASS_PATH%\.rdpvlink" /d "RDPVault.Link" /f >nul

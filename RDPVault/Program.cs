@@ -2,6 +2,7 @@ using Avalonia;
 using System;
 using System.IO;
 using System.IO.Pipes;
+using System.Linq;
 using System.Threading;
 
 namespace RDPVault;
@@ -15,26 +16,66 @@ internal static class Program
     private static extern int MessageBoxW(IntPtr hWnd, string text, string caption, uint type);
 
     private static Mutex? _singleInstanceMutex;
+    private static bool _ownsMutex;
 
     [STAThread]
     public static void Main(string[] args)
     {
         try
         {
-            // Issue #5: Verify single-instance at the primary entry point before Avalonia initialization.
-            _singleInstanceMutex = new Mutex(true, @"Local\RDPVault_SingleInstance", out bool createdNew);
-            if (!createdNew)
+            // If running in installer, setup, upgrade, or maintenance mode, kill any running
+            // instances first to release file locks on the binaries and release the named mutex.
+            bool isSetupOrMaintenance =
+                args.Any(a => string.Equals(a, "--install", StringComparison.OrdinalIgnoreCase) ||
+                              string.Equals(a, "--setup", StringComparison.OrdinalIgnoreCase) ||
+                              string.Equals(a, "--upgrade", StringComparison.OrdinalIgnoreCase) ||
+                              string.Equals(a, "--uninstall", StringComparison.OrdinalIgnoreCase))
+                || (!InstallerService.IsInstalledLocation() && !File.Exists(AppPaths.VaultPath));
+
+            if (isSetupOrMaintenance)
             {
-                string pipeMsg = FormatPipeMessage(args);
-                try
+                InstallerService.KillRunningInstances(excludeCurrent: true);
+            }
+
+            // Verify single-instance at the primary entry point before Avalonia initialization.
+            _singleInstanceMutex = new Mutex(false, @"Local\RDPVault_SingleInstance");
+            try
+            {
+                _ownsMutex = _singleInstanceMutex.WaitOne(100, false);
+            }
+            catch (AbandonedMutexException)
+            {
+                _ownsMutex = true;
+            }
+
+            if (!_ownsMutex)
+            {
+                if (isSetupOrMaintenance)
                 {
-                    using var client = new NamedPipeClientStream(".", "RDPVault_Show", PipeDirection.Out);
-                    client.Connect(1200);
-                    using var w = new StreamWriter(client) { AutoFlush = true };
-                    w.Write(pipeMsg);
+                    InstallerService.KillRunningInstances(excludeCurrent: true);
+                    try
+                    {
+                        _ownsMutex = _singleInstanceMutex.WaitOne(1000, false);
+                    }
+                    catch (AbandonedMutexException)
+                    {
+                        _ownsMutex = true;
+                    }
                 }
-                catch { }
-                return; // Clean exit without initializing UI framework
+
+                if (!_ownsMutex)
+                {
+                    string pipeMsg = FormatPipeMessage(args);
+                    try
+                    {
+                        using var client = new NamedPipeClientStream(".", "RDPVault_Show", PipeDirection.Out);
+                        client.Connect(1200);
+                        using var w = new StreamWriter(client) { AutoFlush = true };
+                        w.Write(pipeMsg);
+                    }
+                    catch { }
+                    return; // Clean exit without initializing UI framework
+                }
             }
 
             BuildAvaloniaApp().StartWithClassicDesktopLifetime(
@@ -50,7 +91,10 @@ internal static class Program
         {
             if (_singleInstanceMutex != null)
             {
-                try { _singleInstanceMutex.ReleaseMutex(); } catch { }
+                if (_ownsMutex)
+                {
+                    try { _singleInstanceMutex.ReleaseMutex(); } catch { }
+                }
                 try { _singleInstanceMutex.Dispose(); } catch { }
                 _singleInstanceMutex = null;
             }

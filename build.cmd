@@ -122,10 +122,11 @@ rem exactly ONE download and the /releases/latest/download/ URL in README.md
 rem can never resolve to a stale installer.
 set "REMOVED=0"
 for /f "usebackq delims=" %%T in (`gh release list --repo !REPO! --json tagName --jq ".[].tagName" 2^>nul`) do (
-  gh release delete %%T --repo !REPO! --cleanup-tag --yes >nul 2>&1
+  gh release delete %%T --repo !REPO! --cleanup-tag --yes >nul 2>&1 || gh release delete %%T --repo !REPO! --yes >nul 2>&1
   set /a REMOVED+=1
 )
 echo [PUBLISH] Removed !REMOVED! previous release^(s^).
+echo [PUBLISH] Uploading %OUTPUT_DIR%\%OUTPUT_EXE% to GitHub release !TAG!...
 
 gh release create !TAG! "%OUTPUT_DIR%\%OUTPUT_EXE%" --repo !REPO! --title "RDP Vault !TAG!" --notes "Self-contained single-file win-x64 build published by build.cmd on !TAG!. This is the only supported download. SHA256 !LOCALHASH!" --latest >nul 2>&1
 if errorlevel 1 (

@@ -52,7 +52,7 @@ Write-Host "Uploading $fileName ($fileLength bytes) via curl..."
 $uploadUrl = "https://uploads.github.com/repos/$Repo/releases/$releaseId/assets?name=$fileName"
 $authHeader = "Authorization: Bearer $token"
 
-& curl.exe --progress-bar -X POST -H $authHeader -H "Content-Type: application/octet-stream" --data-binary "@$FilePath" $uploadUrl -o upload_result.json
+& curl.exe -sS --fail -X POST -H $authHeader -H "Content-Type: application/octet-stream" --data-binary "@$FilePath" $uploadUrl -o upload_result.json
 
 if (Test-Path "upload_result.json") {
     $res = Get-Content "upload_result.json" -Raw | ConvertFrom-Json

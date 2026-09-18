@@ -61,8 +61,11 @@ Output type     : WinExe, published SELF-CONTAINED SINGLE FILE.
 
   *** PACKAGING & PERFORMANCE CHARACTERISTICS: ***
   1. PublishSingleFile=true, SelfContained=true, PublishReadyToRun=false.
-  2. EnableCompressionInSingleFile=false: Disabling single-file compression reduces
-     startup time from 7-10s down to <600ms by avoiding decompressing bundle archives.
+  2. EnableCompressionInSingleFile=false: Disabling single-file bundle compression
+     trades disk footprint (~56MB compressed vs ~115MB uncompressed) for instant
+     startup. With compression enabled, every double-click caused a 7-10s delay while
+     the CPU decompressed 115MB+ of assemblies into memory. Storing uncompressed allows
+     Windows to memory-map the binary directly, cutting cold start down to <600ms.
   3. IncludeNativeLibrariesForSelfExtract=true: Required by Avalonia/SkiaSharp so native
      binaries (libSkiaSharp.dll) are extracted into %TEMP%\.net\RDPVault and load cleanly,
      preventing DllNotFoundException on startup.
@@ -600,7 +603,7 @@ Uninstall         : rescues the vault to Documents\RDP Vault Backups by default
 Session cred      : CredWriteW TERMSRV/{host}[:port], Persist=SESSION
 Language          : C# 12 / .NET 9 / Avalonia 11.1.3 / net9.0-windows10.0.19041.0
 Build             : build.cmd (self-contained single file, NOT NativeAOT)
-Output            : compiled\RDPVault.exe — the only artifact, the only download
+Output            : compiled\RDPVault.exe — the only artifact, the only download (~115 MB uncompressed for <600ms startup)
 Release           : one GitHub release at a time; see SECTION 14
 
 --------------------------------------------------------------------------------
@@ -738,10 +741,13 @@ All 17 review findings from the 1.1.1 source audit are completely resolved:
 --------------------------------------------------------------------------------
 SECTION 16 — SEPTEMBER 2026 ARCHITECTURAL ENHANCEMENTS
 --------------------------------------------------------------------------------
- 1. INSTANT COLD-START OPTIMIZATION:
+ 1. INSTANT COLD-START OPTIMIZATION & SIZE TRADEOFF:
     Disabled single-file bundle compression (<EnableCompressionInSingleFile>false)
     and aligned app.manifest (<requestedExecutionLevel level="asInvoker" uiAccess="false" />).
-    Launch latency reduced from ~7-10s to <600ms.
+    Tradeoff: The artifact size moved from ~56 MB to ~115 MB because the self-contained
+    .NET 9 runtime, Avalonia framework, and SkiaSharp assemblies are stored uncompressed.
+    In return, cold-start latency was slashed from ~7-10 seconds of CPU decompression
+    down to under 600ms via instant Windows memory mapping.
 
  2. NATIVE BINARY EXTRACTION FIX:
     Enabled <IncludeNativeLibrariesForSelfExtract>true to extract libSkiaSharp.dll

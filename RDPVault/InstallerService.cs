@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
+using System.Security.Principal;
 using System.Threading;
 using Microsoft.Win32;
 
@@ -24,95 +26,159 @@ public static class InstallerService
     }
 
     /// <summary>
-    /// Forcefully terminates any other running instances of RDP Vault across the system to release
-    /// file locks, mutexes, named pipes, and handles before installing, upgrading, or uninstalling.
+    /// Checks whether the current process is running with elevated administrator privileges.
+    /// </summary>
+    public static bool IsAdministrator()
+    {
+        try
+        {
+            using var identity = WindowsIdentity.GetCurrent();
+            var principal = new WindowsPrincipal(identity);
+            return principal.IsInRole(WindowsBuiltInRole.Administrator);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Automatically requests elevation via the Windows UAC prompt without requiring the user
+    /// to manually right-click 'Run as administrator'. If elevation is approved, spawns the elevated
+    /// process and terminates the current process cleanly.
+    /// </summary>
+    public static bool TryElevate(string[]? args = null)
+    {
+        if (IsAdministrator()) return false;
+
+        args ??= Environment.GetCommandLineArgs().Skip(1).ToArray();
+        if (args.Any(a => string.Equals(a, "--no-elevate", StringComparison.OrdinalIgnoreCase)))
+            return false;
+
+        try
+        {
+            string? currentExe = Environment.ProcessPath;
+            if (string.IsNullOrEmpty(currentExe) || !File.Exists(currentExe))
+                return false;
+
+            var argList = args.Where(a => !string.Equals(a, "--no-elevate", StringComparison.OrdinalIgnoreCase)).ToList();
+            if (!argList.Any(a => string.Equals(a, "--elevated", StringComparison.OrdinalIgnoreCase)))
+                argList.Add("--elevated");
+
+            string arguments = string.Join(" ", argList.Select(a => a.Contains(' ') ? $"\"{a}\"" : a));
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = currentExe,
+                Arguments = arguments,
+                UseShellExecute = true,
+                Verb = "runas",
+                WorkingDirectory = Environment.CurrentDirectory
+            };
+
+            var proc = Process.Start(psi);
+            if (proc != null)
+            {
+                Environment.Exit(0);
+                return true;
+            }
+        }
+        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        {
+            // User cancelled / declined the UAC prompt (ERROR_CANCELLED).
+            // Return false to gracefully continue in user-level mode without crashing.
+            return false;
+        }
+        catch
+        {
+            return false;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Fast, non-blocking termination of running RDPVault instances to release file locks and mutexes.
+    /// Exits in milliseconds if no other instances are active. If an elevated process cannot be killed
+    /// due to lack of privileges, triggers UAC privilege escalation.
     /// </summary>
     public static void KillRunningInstances(bool excludeCurrent = true, Action<string>? log = null)
     {
         int currentPid = Environment.ProcessId;
-        string? currentProcName = null;
-        try { currentProcName = Process.GetCurrentProcess().ProcessName; } catch { }
-
-        var targetNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        Process[] processes;
+        try
         {
-            "RDPVault",
-            Path.GetFileNameWithoutExtension(InstalledExe)
-        };
-        if (!string.IsNullOrEmpty(currentProcName))
-            targetNames.Add(currentProcName);
-
-        bool killedAny = false;
-
-        foreach (string name in targetNames)
+            processes = Process.GetProcessesByName("RDPVault");
+        }
+        catch
         {
-            Process[] processes;
-            try { processes = Process.GetProcessesByName(name); }
-            catch { continue; }
+            return;
+        }
 
-            foreach (var p in processes)
+        var targets = processes.Where(p => !excludeCurrent || p.Id != currentPid).ToList();
+        if (targets.Count == 0) return;
+
+        bool needTaskKillFallback = false;
+        bool accessDenied = false;
+
+        foreach (var p in targets)
+        {
+            try
             {
-                try
-                {
-                    if (excludeCurrent && p.Id == currentPid) continue;
-
-                    log?.Invoke($"Closing running copy (PID {p.Id})...");
-                    killedAny = true;
-
-                    try
-                    {
-                        p.Kill(entireProcessTree: true);
-                        p.WaitForExit(3000);
-                    }
-                    catch
-                    {
-                        RunTaskKillPid(p.Id);
-                    }
-                }
-                catch { }
-                finally
-                {
-                    try { p.Dispose(); } catch { }
-                }
+                log?.Invoke($"Closing running copy (PID {p.Id})...");
+                p.Kill(entireProcessTree: true);
+            }
+            catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 5)
+            {
+                accessDenied = true;
+                needTaskKillFallback = true;
+            }
+            catch
+            {
+                needTaskKillFallback = true;
+            }
+            finally
+            {
+                try { p.Dispose(); } catch { }
             }
         }
 
-        // Secondary failsafe: taskkill by image name excluding current PID
-        try
+        if (accessDenied && !IsAdministrator())
         {
-            using var proc = Process.Start(new ProcessStartInfo
-            {
-                FileName = "taskkill.exe",
-                Arguments = $"/F /FI \"PID ne {currentPid}\" /IM RDPVault.exe /T",
-                CreateNoWindow = true,
-                UseShellExecute = false,
-                WindowStyle = ProcessWindowStyle.Hidden
-            });
-            proc?.WaitForExit(2000);
+            if (TryElevate()) return;
         }
-        catch { }
 
-        if (killedAny)
+        if (needTaskKillFallback)
         {
-            // Allow Windows kernel to cleanly tear down handles, single-instance mutex, and file locks
-            Thread.Sleep(500);
-        }
-    }
-
-    private static void RunTaskKillPid(int pid)
-    {
-        try
-        {
-            using var proc = Process.Start(new ProcessStartInfo
+            try
             {
-                FileName = "taskkill.exe",
-                Arguments = $"/F /PID {pid} /T",
-                CreateNoWindow = true,
-                UseShellExecute = false,
-                WindowStyle = ProcessWindowStyle.Hidden
-            });
-            proc?.WaitForExit(2000);
+                using var proc = Process.Start(new ProcessStartInfo
+                {
+                    FileName = "taskkill.exe",
+                    Arguments = $"/F /FI \"PID ne {currentPid}\" /IM RDPVault.exe /T",
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    WindowStyle = ProcessWindowStyle.Hidden
+                });
+                proc?.WaitForExit(1000);
+            }
+            catch { }
         }
-        catch { }
+
+        // Fast poll: wait up to 400ms in 25ms intervals, exiting immediately when all PIDs are gone
+        for (int i = 0; i < 16; i++)
+        {
+            try
+            {
+                var remaining = Process.GetProcessesByName("RDPVault")
+                    .Where(p => !excludeCurrent || p.Id != currentPid).ToArray();
+                bool anyLeft = remaining.Length > 0;
+                foreach (var r in remaining) { try { r.Dispose(); } catch { } }
+                if (!anyLeft) break;
+            }
+            catch { break; }
+            Thread.Sleep(25);
+        }
     }
 
     // ================================================================ install
@@ -139,6 +205,13 @@ public static class InstallerService
                     File.Copy(currentExe, InstalledExe, true);
                     break;
                 }
+                catch (UnauthorizedAccessException) when (!IsAdministrator())
+                {
+                    log("Elevation required to overwrite existing installation. Requesting UAC...");
+                    if (TryElevate(new[] { "--setup" }))
+                        return;
+                    throw;
+                }
                 catch (IOException ex)
                 {
                     if (attempt == maxRetries)
@@ -146,7 +219,7 @@ public static class InstallerService
 
                     log($"File is locked, retrying copy ({attempt}/{maxRetries})...");
                     KillRunningInstances(excludeCurrent: true, log);
-                    Thread.Sleep(500 * attempt);
+                    Thread.Sleep(200 * attempt);
                 }
             }
         }

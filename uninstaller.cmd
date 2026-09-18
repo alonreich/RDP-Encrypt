@@ -4,6 +4,14 @@ echo =========================================
 echo  UNINSTALLING RDP VAULT
 echo =========================================
 
+rem Auto-elevate via UAC if not already running as administrator
+net session >nul 2>&1
+if %errorLevel% neq 0 (
+    echo Requesting administrative privileges via UAC...
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process cmd.exe -ArgumentList '/c `\"%~f0`\" %*' -Verb RunAs"
+    exit /b
+)
+
 echo Terminating active Vault instances...
 taskkill /F /IM RDPVault.exe /T >nul 2>&1
 

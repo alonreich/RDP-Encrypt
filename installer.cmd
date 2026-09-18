@@ -4,9 +4,17 @@ echo =========================================
 echo  INSTALLING RDP VAULT
 echo =========================================
 
+rem Auto-elevate via UAC if not already running as administrator
+net session >nul 2>&1
+if %errorLevel% neq 0 (
+    echo Requesting administrative privileges via UAC...
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process cmd.exe -ArgumentList '/c `\"%~f0`\" %*' -Verb RunAs"
+    exit /b
+)
+
 echo Closing any running instances of RDP Vault to release file locks...
 taskkill /F /IM RDPVault.exe /T >nul 2>&1
-powershell -NoProfile -Command "Start-Sleep -Milliseconds 600"
+powershell -NoProfile -Command "Start-Sleep -Milliseconds 300"
 
 set "INSTALL_DIR=%LOCALAPPDATA%\RDPVault"
 mkdir "%INSTALL_DIR%" 2>nul

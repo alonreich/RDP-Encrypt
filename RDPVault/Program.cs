@@ -34,6 +34,14 @@ internal static class Program
 
             if (isSetupOrMaintenance)
             {
+                // Auto-elevate via UAC if running as standard user in setup/maintenance mode
+                if (!InstallerService.IsAdministrator() &&
+                    !args.Any(a => string.Equals(a, "--no-elevate", StringComparison.OrdinalIgnoreCase)))
+                {
+                    if (InstallerService.TryElevate(args))
+                        return; // Successfully spawned elevated instance; current un-elevated caller exits
+                }
+
                 InstallerService.KillRunningInstances(excludeCurrent: true);
             }
 
@@ -41,7 +49,7 @@ internal static class Program
             _singleInstanceMutex = new Mutex(false, @"Local\RDPVault_SingleInstance");
             try
             {
-                _ownsMutex = _singleInstanceMutex.WaitOne(100, false);
+                _ownsMutex = _singleInstanceMutex.WaitOne(50, false);
             }
             catch (AbandonedMutexException)
             {
@@ -55,7 +63,7 @@ internal static class Program
                     InstallerService.KillRunningInstances(excludeCurrent: true);
                     try
                     {
-                        _ownsMutex = _singleInstanceMutex.WaitOne(1000, false);
+                        _ownsMutex = _singleInstanceMutex.WaitOne(300, false);
                     }
                     catch (AbandonedMutexException)
                     {
@@ -69,7 +77,7 @@ internal static class Program
                     try
                     {
                         using var client = new NamedPipeClientStream(".", "RDPVault_Show", PipeDirection.Out);
-                        client.Connect(1200);
+                        client.Connect(500);
                         using var w = new StreamWriter(client) { AutoFlush = true };
                         w.Write(pipeMsg);
                     }

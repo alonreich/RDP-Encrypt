@@ -27,7 +27,7 @@
     <PublishTrimmed>false</PublishTrimmed>
     <PublishAot>false</PublishAot>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
 
     <ApplicationIcon>Assets\icon.ico</ApplicationIcon>

@@ -39,6 +39,7 @@ public partial class ProfileEditorWindow : Window
         target.SuppressCertWarningsOverride = Profile.SuppressCertWarningsOverride;
         target.FullScreenOverride = Profile.FullScreenOverride;
         target.MultiMonOverride = Profile.MultiMonOverride;
+        target.AllowClipboardOverride = Profile.AllowClipboardOverride;
         target.EnableWol = Profile.EnableWol;
         target.WolMacAddress = Profile.WolMacAddress;
         target.WolBroadcastIp = Profile.WolBroadcastIp;
@@ -55,6 +56,8 @@ public partial class ProfileEditorWindow : Window
 
     private void LoadProfileToUI()
     {
+        var settings = SessionManager.Current.Payload?.Settings;
+
         TxtName.Text = Profile.Name;
         TxtHost.Text = Profile.Host;
         TxtPort.Text = Profile.Port.ToString();
@@ -88,7 +91,15 @@ public partial class ProfileEditorWindow : Window
         PnlWolDetails.IsEnabled = Profile.EnableWol;
         ChkEnableWol.IsCheckedChanged += (_, _) => PnlWolDetails.IsEnabled = ChkEnableWol.IsChecked == true;
 
-        ChkClipboard.IsChecked = Profile.AllowClipboard;
+        TxtWolMac.LostFocus += (_, _) =>
+        {
+            if (MacAddressHelper.TryNormalizeMac(TxtWolMac.Text, out string formatted, out _))
+            {
+                TxtWolMac.Text = formatted;
+            }
+        };
+
+        ChkClipboard.IsChecked = Profile.ResolveAllowClipboard(settings);
         ChkDrives.IsChecked = Profile.AllowDrives;
         ChkPrinters.IsChecked = Profile.AllowPrinters;
         ChkSmartCards.IsChecked = Profile.AllowSmartCards;
@@ -123,13 +134,12 @@ public partial class ProfileEditorWindow : Window
 
         if (ChkEnableWol.IsChecked == true)
         {
-            string mac = (TxtWolMac.Text ?? "").Trim();
-            string cleaned = new string(mac.Where(Uri.IsHexDigit).ToArray());
-            if (cleaned.Length != 12)
+            if (!MacAddressHelper.TryNormalizeMac(TxtWolMac.Text, out string formattedMac, out string macError))
             {
-                error = "Wake-on-LAN requires a valid 12-digit MAC address (e.g. 00:11:22:33:44:55).";
+                error = macError;
                 return false;
             }
+            TxtWolMac.Text = formattedMac;
 
             string wolPortText = (TxtWolPort.Text ?? "").Trim();
             if (!int.TryParse(wolPortText, out int wolPort) || wolPort < 1 || wolPort > 65535)
@@ -201,12 +211,28 @@ public partial class ProfileEditorWindow : Window
         Profile.SuppressCertWarningsOverride = (TriStateOverride)Math.Clamp(CmbCertWarnings.SelectedIndex, 0, 2);
 
         Profile.EnableWol = ChkEnableWol.IsChecked == true;
-        Profile.WolMacAddress = (TxtWolMac.Text ?? "").Trim();
+        if (Profile.EnableWol && MacAddressHelper.TryNormalizeMac(TxtWolMac.Text, out string normMac, out _))
+        {
+            Profile.WolMacAddress = normMac;
+            TxtWolMac.Text = normMac;
+        }
+        else
+        {
+            Profile.WolMacAddress = (TxtWolMac.Text ?? "").Trim();
+        }
         Profile.WolBroadcastIp = string.IsNullOrWhiteSpace(TxtWolBroadcast.Text) ? "255.255.255.255" : TxtWolBroadcast.Text.Trim();
         Profile.WolPort = int.TryParse((TxtWolPort.Text ?? "").Trim(), out int wp) ? wp : 9;
         Profile.WolWaitSeconds = int.TryParse((TxtWolWait.Text ?? "").Trim(), out int ww) ? ww : 5;
 
-        Profile.AllowClipboard = ChkClipboard.IsChecked ?? false;
+        var globalSettings = SessionManager.Current.Payload?.Settings;
+        bool globalClipboard = globalSettings?.DefaultAllowClipboard ?? true;
+        bool profileClipboard = ChkClipboard.IsChecked ?? true;
+
+        Profile.AllowClipboard = profileClipboard;
+        Profile.AllowClipboardOverride = profileClipboard == globalClipboard
+            ? TriStateOverride.InheritGlobal
+            : (profileClipboard ? TriStateOverride.Enabled : TriStateOverride.Disabled);
+
         Profile.AllowDrives = ChkDrives.IsChecked ?? false;
         Profile.AllowPrinters = ChkPrinters.IsChecked ?? false;
         Profile.AllowSmartCards = ChkSmartCards.IsChecked ?? false;

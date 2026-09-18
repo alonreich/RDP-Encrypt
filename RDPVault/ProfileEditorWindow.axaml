@@ -118,9 +118,10 @@
                 <StackPanel Name="PnlWolDetails" Spacing="8">
                     <StackPanel Spacing="4">
                         <TextBlock Text="Target MAC address (e.g. 00:11:22:33:44:55)" FontSize="12" Foreground="#8A8A93"/>
-                        <TextBox Name="TxtWolMac" Watermark="00:11:22:33:44:55"/>
+                        <TextBox Name="TxtWolMac" Watermark="00:11:22:33:44:55"
+                                 ToolTip.Tip="Accepts any MAC format (e.g. 00:11:22:33:44:55, 00-11-22-33-44-55, 001122334455). Automatically formatted on exit."/>
                     </StackPanel>
-                    <Grid ColumnDefinitions="*,10,80,10,90">
+                    <Grid ColumnDefinitions="*,10,80,10,100">
                         <StackPanel Grid.Column="0" Spacing="4">
                             <TextBlock Text="Broadcast IP" FontSize="12" Foreground="#8A8A93"/>
                             <TextBox Name="TxtWolBroadcast" Watermark="255.255.255.255"/>
@@ -130,8 +131,9 @@
                             <TextBox Name="TxtWolPort" Watermark="9"/>
                         </StackPanel>
                         <StackPanel Grid.Column="4" Spacing="4">
-                            <TextBlock Text="Wait (sec)" FontSize="12" Foreground="#8A8A93"/>
-                            <TextBox Name="TxtWolWait" Watermark="5"/>
+                            <TextBlock Text="Wait delay (sec)" FontSize="12" Foreground="#8A8A93"/>
+                            <TextBox Name="TxtWolWait" Watermark="5"
+                                     ToolTip.Tip="Seconds to wait after sending WOL magic packet before launching Remote Desktop (0-300)."/>
                         </StackPanel>
                     </Grid>
                 </StackPanel>
@@ -142,7 +144,8 @@
         <TextBlock Text="Local resources to share with the remote PC" FontSize="13" FontWeight="Bold"
                    Foreground="#8A8A93" Margin="0,10,0,0"/>
         <WrapPanel Orientation="Horizontal" Margin="0,4,0,0">
-            <CheckBox Name="ChkClipboard" Content="Clipboard" Margin="0,0,15,5"/>
+            <CheckBox Name="ChkClipboard" Content="Clipboard" Margin="0,0,15,5"
+                      ToolTip.Tip="Allow clipboard sharing (copy/paste) between local and remote PC. Can override global vault setting."/>
             <CheckBox Name="ChkDrives" Content="Drives" Margin="0,0,15,5"/>
             <CheckBox Name="ChkPrinters" Content="Printers" Margin="0,0,15,5"/>
             <CheckBox Name="ChkSmartCards" Content="Smart cards" Margin="0,0,15,5"/>

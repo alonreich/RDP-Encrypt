@@ -43,6 +43,9 @@ public class RdpProfile
     /// <summary>Per-profile override for multi-monitor mode.</summary>
     public TriStateOverride MultiMonOverride { get; set; } = TriStateOverride.InheritGlobal;
 
+    /// <summary>Per-profile override for clipboard sharing.</summary>
+    public TriStateOverride AllowClipboardOverride { get; set; } = TriStateOverride.InheritGlobal;
+
     /// <summary>Controls whether mstsc connects and ignores identity warnings directly.</summary>
     public bool AllowUnverifiedServer { get; set; } = false;
 
@@ -83,6 +86,13 @@ public class RdpProfile
         return settings?.DefaultUseMultiMon ?? UseMultiMon;
     }
 
+    public bool ResolveAllowClipboard(VaultSettings? settings)
+    {
+        if (AllowClipboardOverride == TriStateOverride.Enabled) return true;
+        if (AllowClipboardOverride == TriStateOverride.Disabled) return false;
+        return settings?.DefaultAllowClipboard ?? AllowClipboard;
+    }
+
     public RdpProfile Clone() => (RdpProfile)MemberwiseClone();
 }
 
@@ -109,6 +119,9 @@ public class VaultSettings
 
     /// <summary>Global default: use all monitors by default.</summary>
     public bool DefaultUseMultiMon { get; set; } = true;
+
+    /// <summary>Global default: share local clipboard with remote sessions by default.</summary>
+    public bool DefaultAllowClipboard { get; set; } = true;
 
     /// <summary>Issue #7: now actually honoured - DeepSweep runs on lock and exit when true.</summary>
     public bool DeepSweep { get; set; } = false;
@@ -218,4 +231,46 @@ public class VaultFile
 [JsonSerializable(typeof(SweepScope))]
 public partial class VaultJsonContext : JsonSerializerContext
 {
+}
+
+public static class MacAddressHelper
+{
+    /// <summary>
+    /// Validates and normalizes any MAC address input into uppercase standard XX:XX:XX:XX:XX:XX format.
+    /// Rejects non-hex characters and ensures exactly 12 hex digits.
+    /// Supports separators ':', '-', '.', and spaces.
+    /// </summary>
+    public static bool TryNormalizeMac(string? input, out string formattedMac, out string error)
+    {
+        formattedMac = "";
+        error = "";
+
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            error = "MAC address cannot be empty.";
+            return false;
+        }
+
+        string trimmed = input.Trim();
+
+        for (int i = 0; i < trimmed.Length; i++)
+        {
+            char c = trimmed[i];
+            if (!Uri.IsHexDigit(c) && c != ':' && c != '-' && c != '.' && c != ' ')
+            {
+                error = $"Invalid character '{c}' in MAC address. Only hexadecimal digits (0-9, A-F) and separators (:, -, .) are allowed.";
+                return false;
+            }
+        }
+
+        var hexChars = trimmed.Where(Uri.IsHexDigit).Select(char.ToUpperInvariant).ToArray();
+        if (hexChars.Length != 12)
+        {
+            error = $"A valid MAC address must contain exactly 12 hexadecimal characters (found {hexChars.Length}). Example: 00:11:22:33:44:55.";
+            return false;
+        }
+
+        formattedMac = string.Join(":", Enumerable.Range(0, 6).Select(i => new string(hexChars, i * 2, 2)));
+        return true;
+    }
 }

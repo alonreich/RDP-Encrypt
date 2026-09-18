@@ -139,6 +139,19 @@
 
                 <Border Height="1" Background="#1A1A1E"/>
 
+                <!-- ============ clipboard defaults ============ -->
+                <StackPanel Spacing="6">
+                    <TextBlock Classes="h" Text="Clipboard Sharing Default"/>
+                    <CheckBox Name="ChkDefaultAllowClipboard">
+                        <TextBlock Text="Share local clipboard with remote sessions by default"
+                                   TextWrapping="Wrap" Foreground="#EDEDED"/>
+                    </CheckBox>
+                    <TextBlock Classes="hint"
+                               Text="Default: checked (enabled). Allows copying and pasting between the local machine and remote desktop. Can be changed or unchecked per connection profile."/>
+                </StackPanel>
+
+                <Border Height="1" Background="#1A1A1E"/>
+
                 <!-- ============ disk encryption ============ -->
                 <StackPanel Spacing="6">
                     <TextBlock Classes="h" Text="Disk encryption check"/>

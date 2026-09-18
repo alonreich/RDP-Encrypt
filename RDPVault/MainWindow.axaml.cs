@@ -24,7 +24,7 @@ public partial class MainWindow : Window
         mgr.UsbRemoved += OnUsbRemoved;          // issue #17: was never wired up
         mgr.VaultDestroyed += OnVaultDestroyed;
         mgr.Notice += SetStatus;
-        mgr.LaunchRequested += async p => await ValidateAndLaunchProfileAsync(p);
+        mgr.LaunchRequested += async (p, fromShortcut) => await ValidateAndLaunchProfileAsync(p, fromShortcut);
 
         RdpLauncher.SessionStarted += name => Dispatcher.UIThread.Post(() => SetStatus($"Connecting to {name}..."));
         RdpLauncher.SessionEnded += name => Dispatcher.UIThread.Post(() => SetStatus($"{name} closed - local traces cleaned."));
@@ -422,7 +422,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task ValidateAndLaunchProfileAsync(RdpProfile p)
+    private async Task ValidateAndLaunchProfileAsync(RdpProfile p, bool fromShortcut = false)
     {
         SessionManager.Current.Touch();
         var active = RdpLauncher.FindActiveSession(p);
@@ -449,7 +449,14 @@ public partial class MainWindow : Window
             await Task.Delay(500); // Allow mstsc process to terminate cleanly
         }
 
-        await RdpLauncher.LaunchAsync(p);
+        bool launched = await RdpLauncher.LaunchAsync(p);
+        if (launched && fromShortcut)
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                WindowState = WindowState.Minimized;
+            });
+        }
     }
 
     private async void BtnShortcut_Click(object? sender, RoutedEventArgs e)

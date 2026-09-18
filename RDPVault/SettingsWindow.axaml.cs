@@ -27,6 +27,7 @@ public partial class SettingsWindow : Window
             ChkSuppressCertWarnings.IsChecked = settings.SuppressCertWarnings;
             ChkDefaultFullScreen.IsChecked = settings.DefaultFullScreen;
             ChkDefaultMultiMon.IsChecked = settings.DefaultUseMultiMon;
+            ChkDefaultAllowClipboard.IsChecked = settings.DefaultAllowClipboard;
         }
 
         ChkSelfDestruct.IsChecked = policy.SelfDestructEnabled;
@@ -278,6 +279,7 @@ public partial class SettingsWindow : Window
         settings.SuppressCertWarnings = ChkSuppressCertWarnings.IsChecked == true;
         settings.DefaultFullScreen = ChkDefaultFullScreen.IsChecked == true;
         settings.DefaultUseMultiMon = ChkDefaultMultiMon.IsChecked == true;
+        settings.DefaultAllowClipboard = ChkDefaultAllowClipboard.IsChecked == true;
         settings.ForceMultiMon = settings.DefaultUseMultiMon;
 
         file.Policy.SelfDestructEnabled = armed;

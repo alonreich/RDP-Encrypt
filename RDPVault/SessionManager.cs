@@ -59,8 +59,8 @@ public sealed class SessionManager : IDisposable
     public event Action? VaultDestroyed;
     /// <summary>Human-readable one-liner for the status bar (issue #17).</summary>
     public event Action<string>? Notice;
-    /// <summary>Fired when an RDP profile launch is requested via shortcut, pipe, or pending launch.</summary>
-    public event Action<RdpProfile>? LaunchRequested;
+    /// <summary>Fired when an RDP profile launch is requested via shortcut, pipe, or pending launch. bool indicates fromShortcut.</summary>
+    public event Action<RdpProfile, bool>? LaunchRequested;
 
     private SessionManager()
     {
@@ -332,7 +332,7 @@ public sealed class SessionManager : IDisposable
             var p = Payload.Profiles.FirstOrDefault(x => x.Id == target);
             if (p != null)
             {
-                if (LaunchRequested != null) OnUi(() => LaunchRequested.Invoke(p));
+                if (LaunchRequested != null) OnUi(() => LaunchRequested.Invoke(p, true));
                 else OnUi(() => RdpLauncher.Launch(p));
             }
             else OnUi(() => Notice?.Invoke("That shortcut points at a profile that no longer exists."));
@@ -566,7 +566,7 @@ public sealed class SessionManager : IDisposable
                         var p = Payload.Profiles.FirstOrDefault(x => x.Id == target);
                         if (p != null)
                         {
-                            if (LaunchRequested != null) OnUi(() => LaunchRequested.Invoke(p));
+                            if (LaunchRequested != null) OnUi(() => LaunchRequested.Invoke(p, true));
                             else OnUi(() => RdpLauncher.Launch(p));
                         }
                         else OnUi(() => Notice?.Invoke("That shortcut points at a profile that no longer exists."));

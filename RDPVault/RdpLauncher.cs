@@ -310,7 +310,7 @@ public static class RdpLauncher
         sb.AppendLine("redirectprinters:i:" + (p.AllowPrinters ? 1 : 0));
         sb.AppendLine("redirectcomports:i:0");
         sb.AppendLine("redirectsmartcards:i:" + (p.AllowSmartCards ? 1 : 0));
-        sb.AppendLine("redirectclipboard:i:" + (p.AllowClipboard ? 1 : 0));
+        sb.AppendLine("redirectclipboard:i:" + (p.ResolveAllowClipboard(settings) ? 1 : 0));
         sb.AppendLine("redirectposdevices:i:0");
         sb.AppendLine("autoreconnection enabled:i:1");
         sb.AppendLine("authentication level:i:" + authLevel);

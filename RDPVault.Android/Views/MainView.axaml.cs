@@ -14,6 +14,10 @@ using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
+using Button = Avalonia.Controls.Button;
+using CheckBox = Avalonia.Controls.CheckBox;
+using ProgressBar = Avalonia.Controls.ProgressBar;
+using TextBox = Avalonia.Controls.TextBox;
 using RDPVault;
 using RDPVault.Android.Rdp;
 using RDPVault.Android.Security;
@@ -383,7 +387,7 @@ public partial class MainView : UserControl
     private void ShowRecoveryUnlock()
     {
         ShowPanel(PanelRecoveryUnlock);
-        TxtRecoveryCodeInput.Text = "";
+        TxtRecoveryInput.Text = "";
         TxtRecoveryNewPass.Text = "";
         TxtRecoveryConfirmPass.Text = "";
         TxtRecoveryUnlockError.IsVisible = false;
@@ -392,7 +396,7 @@ public partial class MainView : UserControl
 
     private async Task SubmitRecoveryUnlockAsync()
     {
-        string code = TxtRecoveryCodeInput.Text ?? "";
+        string code = TxtRecoveryInput.Text ?? "";
         string newPass = TxtRecoveryNewPass.Text ?? "";
         string confirmPass = TxtRecoveryConfirmPass.Text ?? "";
 

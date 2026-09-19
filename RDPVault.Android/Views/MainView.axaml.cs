@@ -3,12 +3,16 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
+using Button = Avalonia.Controls.Button;
+using TextBox = Avalonia.Controls.TextBox;
+using ProgressBar = Avalonia.Controls.ProgressBar;
 using RDPVault;
 using RDPVault.Android.Rdp;
 

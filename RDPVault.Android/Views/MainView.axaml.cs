@@ -125,6 +125,10 @@ public partial class MainView : UserControl
             PanelUnlocked.IsVisible = true;
         };
         BtnDeleteProfile.Click += (_, _) => DeleteProfile();
+        TxtProfileWolMac.GotFocus += (_, _) => TxtProfileWolMac.BringIntoView();
+        TxtProfileWolPort.GotFocus += (_, _) => TxtProfileWolPort.BringIntoView();
+        TxtProfileWolWait.GotFocus += (_, _) => TxtProfileWolWait.BringIntoView();
+        TxtProfileNotes.GotFocus += (_, _) => TxtProfileNotes.BringIntoView();
 
         // 7. Settings
         BtnToggleBiometrics.Click += async (_, _) => await ToggleBiometricsAsync();
@@ -224,16 +228,16 @@ public partial class MainView : UserControl
             {
                 try
                 {
-                    string keyId = Guid.NewGuid().ToString("N");
-                    AndroidHardwareKeyStore.GenerateHardwareKey(MainActivity.Instance, keyId, requireBiometrics: true);
-                    var cipher = AndroidHardwareKeyStore.GetInitializedCipher(keyId, (int)Javax.Crypto.CipherMode.EncryptMode);
+                    var (success, _) = await AndroidHardwareKeyStore.AuthenticateBiometricAsync(
+                        MainActivity.Instance, "Enroll Biometrics", "Confirm fingerprint or face to protect your master key", "Skip Biometrics");
 
-                    var (success, authedCipher, _) = await AndroidHardwareKeyStore.AuthenticatePromptAsync(
-                        MainActivity.Instance, cipher, "Enroll Biometrics", "Confirm fingerprint or face to protect your master key", "Skip Biometrics");
-
-                    if (success && authedCipher != null)
+                    if (success)
                     {
-                        string tpmBlob = AndroidHardwareKeyStore.SealMasterKey(keyId, masterKey, authedCipher);
+                        string keyId = Guid.NewGuid().ToString("N");
+                        AndroidHardwareKeyStore.GenerateHardwareKey(MainActivity.Instance, keyId, requireBiometrics: true);
+                        var cipher = AndroidHardwareKeyStore.GetInitializedCipher(keyId, (int)Javax.Crypto.CipherMode.EncryptMode);
+
+                        string tpmBlob = AndroidHardwareKeyStore.SealMasterKey(keyId, masterKey, cipher);
                         var seal = new SealEntry
                         {
                             MachineId = VaultCrypto.CurrentMachineId(),
@@ -336,16 +340,11 @@ public partial class MainView : UserControl
 
         try
         {
-            string[] parts = seal.TpmBlob.Split(':');
-            if (parts.Length != 2) throw new FormatException("Invalid seal format.");
-            byte[] iv = Convert.FromBase64String(parts[0]);
+            // 1. Authenticate user biometrically via native Android BiometricPrompt
+            var (success, error) = await AndroidHardwareKeyStore.AuthenticateBiometricAsync(
+                MainActivity.Instance, "Unlock RDP Vault", "Confirm fingerprint or face to unseal vault", "Use Master Password");
 
-            var cipher = AndroidHardwareKeyStore.GetInitializedCipher(seal.KeyId, (int)Javax.Crypto.CipherMode.DecryptMode, iv);
-
-            var (success, authedCipher, error) = await AndroidHardwareKeyStore.AuthenticatePromptAsync(
-                MainActivity.Instance, cipher, "Unlock RDP Vault", "Confirm fingerprint or face to unseal vault", "Use Master Password");
-
-            if (!success || authedCipher == null)
+            if (!success)
             {
                 if (!string.IsNullOrEmpty(error) && !error.Contains("cancel", StringComparison.OrdinalIgnoreCase))
                 {
@@ -355,7 +354,13 @@ public partial class MainView : UserControl
                 return;
             }
 
-            byte[] masterKey = AndroidHardwareKeyStore.UnsealMasterKey(seal.TpmBlob, authedCipher);
+            // 2. User verified! StrongBox/Keymaster authorizes operations within 30s window
+            string[] parts = seal.TpmBlob.Split(':');
+            if (parts.Length != 2) throw new FormatException("Invalid seal format.");
+            byte[] iv = Convert.FromBase64String(parts[0]);
+
+            var cipher = AndroidHardwareKeyStore.GetInitializedCipher(seal.KeyId, (int)Javax.Crypto.CipherMode.DecryptMode, iv);
+            byte[] masterKey = AndroidHardwareKeyStore.UnsealMasterKey(seal.TpmBlob, cipher);
             var payload = VaultCrypto.OpenPayload(_vaultFile, masterKey);
 
             _masterKey = masterKey;
@@ -365,7 +370,7 @@ public partial class MainView : UserControl
         }
         catch (Exception ex)
         {
-            TxtLockError.Text = "Biometric unlock failed: " + ex.Message + ". Unlock with Master Password.";
+            TxtLockError.Text = "Biometric unlock failed: " + ex.Message + ". Unlock with Master Password to re-enroll.";
             TxtLockError.IsVisible = true;
         }
     }
@@ -801,16 +806,16 @@ public partial class MainView : UserControl
             // Enroll seal
             try
             {
-                string keyId = Guid.NewGuid().ToString("N");
-                AndroidHardwareKeyStore.GenerateHardwareKey(MainActivity.Instance, keyId, requireBiometrics: true);
-                var cipher = AndroidHardwareKeyStore.GetInitializedCipher(keyId, (int)Javax.Crypto.CipherMode.EncryptMode);
+                var (success, err) = await AndroidHardwareKeyStore.AuthenticateBiometricAsync(
+                    MainActivity.Instance, "Enroll Biometrics", "Confirm fingerprint or face to protect your master key", "Cancel");
 
-                var (success, authedCipher, err) = await AndroidHardwareKeyStore.AuthenticatePromptAsync(
-                    MainActivity.Instance, cipher, "Enroll Biometrics", "Confirm fingerprint or face to protect your master key", "Cancel");
-
-                if (success && authedCipher != null)
+                if (success)
                 {
-                    string tpmBlob = AndroidHardwareKeyStore.SealMasterKey(keyId, _masterKey, authedCipher);
+                    string keyId = Guid.NewGuid().ToString("N");
+                    AndroidHardwareKeyStore.GenerateHardwareKey(MainActivity.Instance, keyId, requireBiometrics: true);
+                    var cipher = AndroidHardwareKeyStore.GetInitializedCipher(keyId, (int)Javax.Crypto.CipherMode.EncryptMode);
+
+                    string tpmBlob = AndroidHardwareKeyStore.SealMasterKey(keyId, _masterKey, cipher);
                     var seal = new SealEntry
                     {
                         MachineId = machineId,
@@ -824,6 +829,10 @@ public partial class MainView : UserControl
 
                     TxtBiometricStatus.Text = "StrongBox Biometrics: Active on this device";
                     BtnToggleBiometrics.Content = "Remove Biometric Seal";
+                }
+                else if (!string.IsNullOrEmpty(err) && !err.Contains("cancel", StringComparison.OrdinalIgnoreCase))
+                {
+                    TxtBiometricStatus.Text = "Enrollment: " + err;
                 }
             }
             catch (Exception ex)

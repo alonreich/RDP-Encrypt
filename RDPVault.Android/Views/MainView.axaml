@@ -7,7 +7,7 @@
     <Grid>
         <!-- ==================== 1. FIRST-TIME SETUP WIZARD ==================== -->
         <ScrollViewer Name="PanelFirstRun" IsVisible="False" HorizontalScrollBarVisibility="Disabled">
-            <StackPanel Margin="24,28,24,28" Spacing="16">
+            <StackPanel Margin="24,40,24,32" Spacing="16">
                 <StackPanel HorizontalAlignment="Center" Spacing="6" Margin="0,8,0,12">
                     <TextBlock Text="RDP VAULT" FontSize="26" FontWeight="Bold" Foreground="#FFFFFF" HorizontalAlignment="Center" LetterSpacing="2"/>
                     <TextBlock Text="Initial Vault Setup" FontSize="16" FontWeight="SemiBold" Foreground="#26A0DA" HorizontalAlignment="Center"/>
@@ -50,7 +50,7 @@
 
         <!-- ==================== 2. RECOVERY CODE DISPLAY PANEL ==================== -->
         <ScrollViewer Name="PanelRecoveryDisplay" IsVisible="False" HorizontalScrollBarVisibility="Disabled">
-            <StackPanel Margin="24,28,24,28" Spacing="16">
+            <StackPanel Margin="24,40,24,32" Spacing="16">
                 <StackPanel HorizontalAlignment="Center" Spacing="6" Margin="0,8,0,12">
                     <TextBlock Text="🔑" FontSize="32" HorizontalAlignment="Center"/>
                     <TextBlock Text="EMERGENCY RECOVERY CODE" FontSize="20" FontWeight="Bold" Foreground="#FFFFFF" HorizontalAlignment="Center" LetterSpacing="1"/>
@@ -84,7 +84,7 @@
 
         <!-- ==================== 3. LOCKED PANEL (VAULT EXISTS) ==================== -->
         <ScrollViewer Name="PanelLocked" IsVisible="False" HorizontalScrollBarVisibility="Disabled">
-            <StackPanel Margin="24,32,24,24" Spacing="16">
+            <StackPanel Margin="24,44,24,28" Spacing="16">
                 <StackPanel HorizontalAlignment="Center" Spacing="8" Margin="0,16,0,16">
                     <TextBlock Text="RDP VAULT" FontSize="26" FontWeight="Bold" Foreground="#FFFFFF" HorizontalAlignment="Center" LetterSpacing="2"/>
                     <TextBlock Text="Hardware-Encrypted Mobile Remote Desktop" FontSize="13" Foreground="#8A8A93" HorizontalAlignment="Center"/>
@@ -131,7 +131,7 @@
 
         <!-- ==================== 4. RECOVERY UNLOCK PANEL ==================== -->
         <ScrollViewer Name="PanelRecoveryUnlock" IsVisible="False" HorizontalScrollBarVisibility="Disabled">
-            <StackPanel Margin="24,28,24,28" Spacing="16">
+            <StackPanel Margin="24,40,24,32" Spacing="16">
                 <StackPanel HorizontalAlignment="Center" Spacing="6" Margin="0,8,0,12">
                     <TextBlock Text="VAULT RECOVERY" FontSize="20" FontWeight="Bold" Foreground="#FFFFFF" HorizontalAlignment="Center" LetterSpacing="1"/>
                     <TextBlock Text="Enter your 24-character recovery code to reset your master password."
@@ -169,9 +169,9 @@
         </ScrollViewer>
 
         <!-- ==================== 5. UNLOCKED PANEL ==================== -->
-        <Grid Name="PanelUnlocked" RowDefinitions="Auto,Auto,*,Auto" Margin="16,16,16,16" IsVisible="False">
-            <!-- Header Bar -->
-            <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto,Auto" Margin="0,0,0,12">
+        <Grid Name="PanelUnlocked" RowDefinitions="Auto,Auto,*,Auto" Margin="16,40,16,16" IsVisible="False">
+            <!-- Header Bar with safe margin below status bar -->
+            <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto,Auto" Margin="0,0,0,14">
                 <StackPanel Grid.Column="0" VerticalAlignment="Center">
                     <TextBlock Text="RDP VAULT" FontSize="20" FontWeight="Bold" Foreground="#FFFFFF"/>
                     <TextBlock Name="TxtUnlockedStatus" Text="Vault Unlocked (StrongBox Protected)" FontSize="11" Foreground="#2FBF71"/>
@@ -204,7 +204,7 @@
 
         <!-- ==================== 6. PROFILE EDITOR OVERLAY ==================== -->
         <ScrollViewer Name="PanelProfileEditor" IsVisible="False" HorizontalScrollBarVisibility="Disabled">
-            <StackPanel Margin="20,24,20,24" Spacing="14">
+            <StackPanel Margin="20,40,20,320" Spacing="14">
                 <TextBlock Name="TxtEditorTitle" Text="New Connection" FontSize="20" FontWeight="Bold" Foreground="#FFFFFF"/>
 
                 <Border Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16">
@@ -263,7 +263,7 @@
 
         <!-- ==================== 7. SETTINGS PANEL ==================== -->
         <ScrollViewer Name="PanelSettings" IsVisible="False" HorizontalScrollBarVisibility="Disabled">
-            <StackPanel Margin="20,24,20,24" Spacing="16">
+            <StackPanel Margin="20,40,20,180" Spacing="16">
                 <TextBlock Text="VAULT SETTINGS" FontSize="20" FontWeight="Bold" Foreground="#FFFFFF"/>
 
                 <!-- Biometric Hardware Card -->

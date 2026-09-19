@@ -54,7 +54,11 @@ public static class AndroidHardwareKeyStore
             builder.SetUserAuthenticationRequired(true);
             if (OperatingSystem.IsAndroidVersionAtLeast(30))
             {
-                builder.SetUserAuthenticationParameters(0, (int)KeyPropertiesAuthType.BiometricStrong);
+                builder.SetUserAuthenticationParameters(30, (int)KeyPropertiesAuthType.BiometricStrong);
+            }
+            else
+            {
+                builder.SetUserAuthenticationValidityDurationSeconds(30);
             }
         }
 
@@ -205,14 +209,54 @@ public static class AndroidHardwareKeyStore
         return tcs.Task;
     }
 
-    private class BiometricAuthCallback : BiometricPrompt.AuthenticationCallback
+    public static Task<(bool Success, string? ErrorMessage)> AuthenticateBiometricAsync(
+        MainActivity activity,
+        string title,
+        string subtitle,
+        string negativeButtonText)
     {
-        private readonly Action<BiometricPrompt.AuthenticationResult> _onSuccess;
+        var tcs = new TaskCompletionSource<(bool Success, string? ErrorMessage)>();
+
+        activity.RunOnUiThread(() =>
+        {
+            try
+            {
+                var executor = AndroidX.Core.Content.ContextCompat.GetMainExecutor(activity);
+                if (executor == null)
+                {
+                    tcs.TrySetResult((false, "Failed to obtain main executor."));
+                    return;
+                }
+
+                var callback = new BiometricSimpleAuthCallback(
+                    onSuccess: () => tcs.TrySetResult((true, null)),
+                    onError: (code, err) => tcs.TrySetResult((false, err)));
+
+                var prompt = new BiometricPrompt(activity, executor, callback);
+                var promptInfo = new BiometricPrompt.PromptInfo.Builder()
+                    .SetTitle(title)
+                    .SetSubtitle(subtitle)
+                    .SetNegativeButtonText(negativeButtonText)
+                    .SetAllowedAuthenticators((int)BiometricManager.Authenticators.BiometricStrong)
+                    .Build();
+
+                prompt.Authenticate(promptInfo);
+            }
+            catch (Exception ex)
+            {
+                tcs.TrySetResult((false, ex.Message));
+            }
+        });
+
+        return tcs.Task;
+    }
+
+    private class BiometricSimpleAuthCallback : BiometricPrompt.AuthenticationCallback
+    {
+        private readonly Action _onSuccess;
         private readonly Action<int, string> _onError;
 
-        public BiometricAuthCallback(
-            Action<BiometricPrompt.AuthenticationResult> onSuccess,
-            Action<int, string> onError)
+        public BiometricSimpleAuthCallback(Action onSuccess, Action<int, string> onError)
         {
             _onSuccess = onSuccess;
             _onError = onError;
@@ -221,7 +265,7 @@ public static class AndroidHardwareKeyStore
         public override void OnAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result)
         {
             base.OnAuthenticationSucceeded(result);
-            _onSuccess(result);
+            _onSuccess();
         }
 
         public override void OnAuthenticationError(int errorCode, Java.Lang.ICharSequence errString)

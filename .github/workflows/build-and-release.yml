@@ -55,16 +55,71 @@ jobs:
       - name: Install .NET Android Workload
         run: dotnet workload install android
 
-      - name: Build Android APK
+      - name: Build and Sign Android APK
         run: |
-          dotnet publish RDPVault.Android/RDPVault.Android.csproj -c Release -p:AndroidPackageFormat=apk
-          mkdir -p compiled
-          APK_PATH=$(find RDPVault.Android/bin/Release -type f -name "*.apk" | head -n 1)
-          if [ -z "$APK_PATH" ]; then
-            echo "No APK produced!"
-            exit 1
+          set -e
+          KEYSTORE_PATH="$(pwd)/RDPVault.Android/rdpvault-release.keystore"
+
+          if [ ! -f "$KEYSTORE_PATH" ] || ! keytool -list -keystore "$KEYSTORE_PATH" -storepass "RdpVaultReleasePass2026!" >/dev/null 2>&1; then
+            echo "Generating production release keystore with Java keytool..."
+            rm -f "$KEYSTORE_PATH"
+            keytool -genkeypair -v \
+              -keystore "$KEYSTORE_PATH" \
+              -alias rdpvault \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -storepass "RdpVaultReleasePass2026!" \
+              -keypass "RdpVaultReleasePass2026!" \
+              -dname "CN=RDPVault, OU=Security, O=OpenSource, L=Global, S=Global, C=US"
           fi
-          cp "$APK_PATH" compiled/RDPVault.apk
+
+          echo "Publishing Android APK with Release configuration..."
+          dotnet publish RDPVault.Android/RDPVault.Android.csproj -c Release \
+            -p:AndroidPackageFormat=apk \
+            -p:AndroidKeyStore=true \
+            -p:AndroidSigningKeyStore="$KEYSTORE_PATH" \
+            -p:AndroidSigningStorePass="RdpVaultReleasePass2026!" \
+            -p:AndroidSigningKeyAlias=rdpvault \
+            -p:AndroidSigningKeyPass="RdpVaultReleasePass2026!"
+
+          mkdir -p compiled
+
+          SIGNED_APK=$(find RDPVault.Android/bin/Release -type f -name "*-Signed.apk" | head -n 1)
+          if [ -n "$SIGNED_APK" ]; then
+            echo "Found dotnet-signed APK: $SIGNED_APK"
+            cp "$SIGNED_APK" compiled/RDPVault.apk
+          else
+            echo "Finding unsigned APK to align and sign manually..."
+            RAW_APK=$(find RDPVault.Android/bin/Release -type f -name "*.apk" | head -n 1)
+            if [ -z "$RAW_APK" ]; then
+              echo "Error: No APK file produced by dotnet publish!"
+              exit 1
+            fi
+
+            ZIPALIGN=$(find $ANDROID_HOME/build-tools -name zipalign | sort -V | tail -n 1)
+            APKSIGNER=$(find $ANDROID_HOME/build-tools -name apksigner | sort -V | tail -n 1)
+
+            echo "Aligning APK with $ZIPALIGN..."
+            $ZIPALIGN -p -f -v 4 "$RAW_APK" compiled/aligned.apk
+
+            echo "Signing APK with $APKSIGNER (v1, v2, v3 schemes)..."
+            $APKSIGNER sign \
+              --ks "$KEYSTORE_PATH" \
+              --ks-pass pass:"RdpVaultReleasePass2026!" \
+              --ks-key-alias rdpvault \
+              --key-pass pass:"RdpVaultReleasePass2026!" \
+              --v1-signing-enabled true \
+              --v2-signing-enabled true \
+              --v3-signing-enabled true \
+              --out compiled/RDPVault.apk \
+              compiled/aligned.apk
+          fi
+
+          APKSIGNER=$(find $ANDROID_HOME/build-tools -name apksigner | sort -V | tail -n 1)
+          echo "Verifying final APK signature using $APKSIGNER..."
+          $APKSIGNER verify --verbose --print-certs compiled/RDPVault.apk
+          echo "APK Verification SUCCESS: Package is signed and fully valid for installation."
 
       - name: Upload Android APK Artifact
         uses: actions/upload-artifact@v4

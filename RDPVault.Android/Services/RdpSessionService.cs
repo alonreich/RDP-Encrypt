@@ -89,12 +89,12 @@ public class RdpSessionService : Service
             launchIntent,
             PendingIntentFlags.UpdateCurrent | PendingIntentFlags.Immutable);
 
-        var builder = new NotificationCompat.Builder(this, ChannelId)
-            .SetContentTitle("RDP Vault Active Session")
-            .SetContentText(statusText)
-            .SetSmallIcon(global::Android.Resource.Drawable.IcMenuShare)
-            .SetOngoing(true)
-            .SetPriority(NotificationCompat.PriorityHigh);
+        var builder = new NotificationCompat.Builder(this, ChannelId);
+        builder.SetContentTitle("RDP Vault Active Session");
+        builder.SetContentText(statusText);
+        builder.SetSmallIcon(global::Android.Resource.Drawable.IcMenuShare);
+        builder.SetOngoing(true);
+        builder.SetPriority(NotificationCompat.PriorityHigh);
 
         if (pendingIntent != null)
         {

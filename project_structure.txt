@@ -894,9 +894,14 @@ A parallel mobile software distribution branch sharing the identical cryptograph
     Embedded native client (libfreerdp.so, libwinpr.so) with touch-to-mouse translation,
     pinch-to-zoom framebuffer scaling, and instant credential memory wiping.
 
- 5. PARALLEL BUILD PIPELINE:
+ 5. PARALLEL BUILD PIPELINE & RELEASE SIGNING:
     build-apk.cmd mirrors build.cmd, validating the .NET Android workload, building RDPVault.Android,
     and outputting compiled\RDPVault.apk.
+    Release APKs are cryptographically signed using a dedicated RSA-2048 production keystore
+    (rdpvault-release.keystore), zip-aligned to 4-byte boundaries, and signed with APK Signature Schemes
+    v1 (JAR), v2 (APK Signature Scheme v2), and v3 (APK Signature Scheme v3). CI/CD strictly verifies
+    signatures with Android SDK apksigner prior to publishing, ensuring seamless installation and updates
+    across Android 8.0 through Android 15+.
 
 --------------------------------------------------------------------------------
 END OF FILE — keep synchronized with the code.

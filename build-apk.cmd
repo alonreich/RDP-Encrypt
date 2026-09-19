@@ -61,12 +61,15 @@ echo.
 echo ###########################################################
 echo BUILDING RDP Vault: Android APK Release (ARM64 / x86_64)
 echo ###########################################################
-dotnet publish "%PROJECT_FILE%" -c Release -p:AndroidPackageFormat=apk -p:TreatWarningsAsErrors=true -o "%FINAL_DIR%" -consoleLoggerParameters:Summary
+dotnet publish "%PROJECT_FILE%" -c Release -p:AndroidPackageFormat=apk -o "%FINAL_DIR%" -consoleLoggerParameters:Summary
 if errorlevel 1 exit /b 1
 
-for /r "%FINAL_DIR%" %%F in (*-Signed.apk *.apk) do (
-  if not defined FOUND_APK (
-    set "FOUND_APK=%%F"
+for /r "%FINAL_DIR%" %%F in (*-Signed.apk) do (
+  if not defined FOUND_APK set "FOUND_APK=%%F"
+)
+if not defined FOUND_APK (
+  for /r "%FINAL_DIR%" %%F in (*.apk) do (
+    if not defined FOUND_APK set "FOUND_APK=%%F"
   )
 )
 

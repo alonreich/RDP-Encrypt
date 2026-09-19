@@ -26,7 +26,7 @@ public static class AndroidHardwareKeyStore
 
     public static bool HasStrongBoxSupport(Context context)
     {
-        if (Build.VERSION.SdkInt >= BuildVersionCodes.P)
+        if (OperatingSystem.IsAndroidVersionAtLeast(28))
         {
             return context.PackageManager?.HasSystemFeature(PackageManager.FeatureStrongboxKeystore) == true;
         }
@@ -52,14 +52,14 @@ public static class AndroidHardwareKeyStore
         if (requireBiometrics)
         {
             builder.SetUserAuthenticationRequired(true);
-            if (Build.VERSION.SdkInt >= BuildVersionCodes.R)
+            if (OperatingSystem.IsAndroidVersionAtLeast(30))
             {
                 builder.SetUserAuthenticationParameters(0, (int)KeyPropertiesAuthType.BiometricStrong);
             }
         }
 
         // Attempt StrongBox backing (dedicated HSM chip), fallback to TEE Keymaster if not supported
-        if (HasStrongBoxSupport(context))
+        if (OperatingSystem.IsAndroidVersionAtLeast(28) && HasStrongBoxSupport(context))
         {
             try
             {

@@ -207,7 +207,7 @@ public partial class MainView : UserControl
 
             _activeRdpContext = FreeRdpClient.Connect(profile, _payload?.Settings, width, height);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             DisconnectSession();
             // Handle connection error cleanly

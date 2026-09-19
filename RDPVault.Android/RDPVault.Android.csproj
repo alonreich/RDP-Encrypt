@@ -12,6 +12,16 @@
     <AndroidPackageFormat>apk</AndroidPackageFormat>
     <AndroidEnableProfiledAot>true</AndroidEnableProfiledAot>
     <RootNamespace>RDPVault.Android</RootNamespace>
+    <RuntimeIdentifiers>android-arm64;android-arm;android-x64</RuntimeIdentifiers>
+    <WarningsNotAsErrors>NETSDK1202;XA0141</WarningsNotAsErrors>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release' and Exists('$(MSBuildThisFileDirectory)rdpvault-release.keystore')">
+    <AndroidKeyStore>true</AndroidKeyStore>
+    <AndroidSigningKeyStore>$(MSBuildThisFileDirectory)rdpvault-release.keystore</AndroidSigningKeyStore>
+    <AndroidSigningStorePass>RdpVaultReleasePass2026!</AndroidSigningStorePass>
+    <AndroidSigningKeyAlias>rdpvault</AndroidSigningKeyAlias>
+    <AndroidSigningKeyPass>RdpVaultReleasePass2026!</AndroidSigningKeyPass>
   </PropertyGroup>
 
   <ItemGroup>

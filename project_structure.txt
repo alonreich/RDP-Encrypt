@@ -444,11 +444,19 @@ UTF-8 (no BOM) at %TEMP%\rdpv_{Id}.rdp. Notable settings:
         accepted cert thumbprints are pinned into vault.rdpv and restored before launch)
 
   Wake-on-LAN (WOL) Support & Live Progress:
-    When enabled on a profile, RdpLauncher.SendWakeOnLanAsync constructs and broadcasts
-    the 102-byte UDP magic packet (6x 0xFF followed by 16 repetitions of the 6-byte target MAC)
-    to the configured broadcast IP and UDP port (default: 9). If WolWaitSeconds > 0, the launcher
-    executes a deterministic 1-second interval countdown emitting LaunchProgressUpdate events
-    to the UI's tactical overlay modal with an active Cancel button before invoking mstsc.exe.
+    When enabled on a profile, RdpLauncher.SendWakeOnLanAsync constructs the 102-byte UDP
+    magic packet (6x 0xFF followed by 16 repetitions of the 6-byte target MAC) and dispatches it
+    concurrently across:
+      (a) bound sockets on every active local network interface (forcing packets onto each physical NIC,
+          bypassing Windows multi-NIC routing stalls and virtual adapter black holes),
+      (b) subnet-directed broadcasts calculated dynamically per interface (e.g. 192.168.1.255),
+      (c) the target Host IP or hostname (resolved via DNS for WAN/VPN/unicast WOL),
+      (d) global broadcast (255.255.255.255) and any custom broadcast IP,
+      (e) ports: configured WolPort (default: 9), alternative echo port (7), and the profile's
+          custom RDP port (e.g. 11), ensuring packets penetrate router port forwarding rules.
+    If WolWaitSeconds > 0, the launcher executes a deterministic 1-second interval countdown
+    emitting LaunchProgressUpdate events with detailed target/port telemetry to the UI's tactical
+    overlay modal with an active Cancel button before invoking mstsc.exe.
 
   Active Session Validator:
     RdpLauncher.FindActiveSession checks live mstsc processes against the target host:port.
@@ -894,14 +902,20 @@ A parallel mobile software distribution branch sharing the identical cryptograph
     Embedded native client (libfreerdp.so, libwinpr.so) with touch-to-mouse translation,
     pinch-to-zoom framebuffer scaling, and instant credential memory wiping.
 
- 5. PARALLEL BUILD PIPELINE & RELEASE SIGNING:
-    build-apk.cmd mirrors build.cmd, validating the .NET Android workload, building RDPVault.Android,
-    and outputting compiled\RDPVault.apk.
-    Release APKs are cryptographically signed using a dedicated RSA-2048 production keystore
-    (rdpvault-release.keystore), zip-aligned to 4-byte boundaries, and signed with APK Signature Schemes
-    v1 (JAR), v2 (APK Signature Scheme v2), and v3 (APK Signature Scheme v3). CI/CD strictly verifies
-    signatures with Android SDK apksigner prior to publishing, ensuring seamless installation and updates
-    across Android 8.0 through Android 15+.
+ 5. PARALLEL BUILD PIPELINE, RELEASE SIGNING & APP DRAWER / RUNTIME FIXES:
+    - build-apk.cmd mirrors build.cmd, validating the .NET Android workload, building RDPVault.Android,
+      and outputting compiled\RDPVault.apk.
+    - Release APKs are cryptographically signed using a dedicated RSA-2048 production keystore
+      (rdpvault-release.keystore), zip-aligned to 4-byte boundaries, and signed with APK Signature Schemes
+      v1 (JAR), v2 (APK Signature Scheme v2), and v3 (APK Signature Scheme v3).
+    - App Drawer Icon Fix: Removed duplicate <activity> and <service> tags from AndroidManifest.xml,
+      standardizing on [Activity(Name = "com.rdpvault.app.MainActivity", MainLauncher = true)] in C#.
+      Eliminates duplicate app drawer icons and prevents ClassNotFoundException crashes.
+    - Theme Fix: Created Resources/values/styles.xml with MainTheme inheriting from
+      Theme.AppCompat.DayNight.NoActionBar, strictly fulfilling AvaloniaMainActivity's AppCompatActivity
+      requirement and preventing IllegalStateException crashes on app startup.
+    - High-DPI Desktop Icon Assets: Embedded multi-density mipmap icons (mdpi, hdpi, xhdpi, xxhdpi,
+      xxxhdpi, and drawable) extracted directly from the Windows desktop icon.ico.
 
 --------------------------------------------------------------------------------
 END OF FILE — keep synchronized with the code.

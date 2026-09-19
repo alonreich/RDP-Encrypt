@@ -8,6 +8,7 @@ using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
+using System.Net.NetworkInformation;
 using Avalonia.Threading;
 using Microsoft.Win32;
 
@@ -89,27 +90,188 @@ public static class RdpLauncher
 
     // ---------------- Wake-on-LAN (WOL) ----------------
 
-    public static async Task<bool> SendWakeOnLanAsync(string macAddress, string broadcastIp = "255.255.255.255", int port = 9)
+    public struct WolDispatchReport
+    {
+        public int PacketsSent;
+        public List<string> TargetEndpoints;
+        public List<int> PortsUsed;
+    }
+
+    private static IPAddress? CalculateBroadcastAddress(IPAddress address, IPAddress mask)
     {
         try
         {
+            byte[] ipBytes = address.GetAddressBytes();
+            byte[] maskBytes = mask.GetAddressBytes();
+            if (ipBytes.Length != maskBytes.Length) return null;
+
+            byte[] broadcastBytes = new byte[ipBytes.Length];
+            for (int i = 0; i < ipBytes.Length; i++)
+            {
+                broadcastBytes[i] = (byte)(ipBytes[i] | (~maskBytes[i] & 0xFF));
+            }
+            return new IPAddress(broadcastBytes);
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Robust multi-interface, multi-target, multi-port Wake-on-LAN transmission.
+    /// Dispatches the 102-byte magic packet to:
+    /// 1. Target Host unicast IP/hostname (resolving DNS and penetrating WAN/VPN port forwards)
+    /// 2. Subnet-directed broadcasts across all active local network adapters
+    /// 3. Global broadcast (255.255.255.255)
+    /// 4. Configured broadcast IP (if customized)
+    /// Across configured WOL port (default: 9), alternative echo port (7), and custom RDP port (e.g. 11).
+    /// </summary>
+    public static async Task<(bool success, WolDispatchReport report)> SendWakeOnLanAsync(
+        string macAddress,
+        string? host = null,
+        string broadcastIp = "255.255.255.255",
+        int wolPort = 9,
+        int rdpPort = 3389)
+    {
+        var report = new WolDispatchReport
+        {
+            TargetEndpoints = new List<string>(),
+            PortsUsed = new List<int>()
+        };
+
+        try
+        {
             byte[]? macBytes = ParseMacAddress(macAddress);
-            if (macBytes == null || macBytes.Length != 6) return false;
+            if (macBytes == null || macBytes.Length != 6) return (false, report);
 
             byte[] packet = new byte[102];
             for (int i = 0; i < 6; i++) packet[i] = 0xFF;
             for (int i = 0; i < 16; i++)
                 Buffer.BlockCopy(macBytes, 0, packet, 6 + i * 6, 6);
 
-            using var client = new UdpClient();
-            client.EnableBroadcast = true;
-            IPAddress ip = IPAddress.TryParse(broadcastIp, out var parsed) ? parsed : IPAddress.Broadcast;
-            await client.SendAsync(packet, packet.Length, new IPEndPoint(ip, port));
-            return true;
+            // Target ports: configured WOL port (9), echo port (7), and custom RDP port (e.g. 11)
+            var ports = new HashSet<int> { wolPort > 0 ? wolPort : 9, 7 };
+            if (rdpPort > 0 && rdpPort != 3389 && rdpPort != wolPort && rdpPort != 7)
+            {
+                ports.Add(rdpPort);
+            }
+            report.PortsUsed = ports.ToList();
+
+            var targetIps = new HashSet<IPAddress>();
+
+            // 1. Global broadcast
+            targetIps.Add(IPAddress.Broadcast);
+
+            // 2. User-configured broadcast IP
+            if (!string.IsNullOrWhiteSpace(broadcastIp) &&
+                !string.Equals(broadcastIp.Trim(), "255.255.255.255", StringComparison.OrdinalIgnoreCase) &&
+                IPAddress.TryParse(broadcastIp.Trim(), out var customBcast))
+            {
+                targetIps.Add(customBcast);
+            }
+
+            // 3. Target Host IP or Hostname (Unicast WOL)
+            if (!string.IsNullOrWhiteSpace(host))
+            {
+                string cleanHost = host.Trim();
+                if (IPAddress.TryParse(cleanHost, out var hostIp))
+                {
+                    targetIps.Add(hostIp);
+                }
+                else
+                {
+                    try
+                    {
+                        var resolved = await Dns.GetHostAddressesAsync(cleanHost);
+                        foreach (var ip in resolved.Where(a => a.AddressFamily == AddressFamily.InterNetwork))
+                        {
+                            targetIps.Add(ip);
+                        }
+                    }
+                    catch { }
+                }
+            }
+
+            // 4. Local subnet directed broadcasts
+            var localInterfaces = new List<(IPAddress LocalIp, IPAddress? SubnetBroadcast)>();
+            try
+            {
+                foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+                {
+                    if (ni.OperationalStatus != OperationalStatus.Up ||
+                        ni.NetworkInterfaceType == NetworkInterfaceType.Loopback)
+                        continue;
+
+                    var ipProps = ni.GetIPProperties();
+                    foreach (var u in ipProps.UnicastAddresses)
+                    {
+                        if (u.Address.AddressFamily == AddressFamily.InterNetwork && u.IPv4Mask != null)
+                        {
+                            var subnetBcast = CalculateBroadcastAddress(u.Address, u.IPv4Mask);
+                            if (subnetBcast != null)
+                            {
+                                targetIps.Add(subnetBcast);
+                                localInterfaces.Add((u.Address, subnetBcast));
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            report.TargetEndpoints = targetIps.Select(ip => ip.ToString()).Distinct().ToList();
+
+            int sentCount = 0;
+
+            // Strategy A: Transmit from bound sockets on each local interface to ensure packets physical exit
+            foreach (var (localIp, subnetBcast) in localInterfaces)
+            {
+                try
+                {
+                    using var boundClient = new UdpClient(new IPEndPoint(localIp, 0));
+                    boundClient.EnableBroadcast = true;
+
+                    var destsForNic = new HashSet<IPAddress> { IPAddress.Broadcast };
+                    if (subnetBcast != null) destsForNic.Add(subnetBcast);
+
+                    foreach (var dest in destsForNic)
+                    {
+                        foreach (int port in ports)
+                        {
+                            try
+                            {
+                                await boundClient.SendAsync(packet, packet.Length, new IPEndPoint(dest, port));
+                                sentCount++;
+                            }
+                            catch { }
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            // Strategy B: Standard unbound socket sending to all collected targets (including Host unicast)
+            using (var generalClient = new UdpClient())
+            {
+                generalClient.EnableBroadcast = true;
+                foreach (var target in targetIps)
+                {
+                    foreach (int port in ports)
+                    {
+                        try
+                        {
+                            await generalClient.SendAsync(packet, packet.Length, new IPEndPoint(target, port));
+                            sentCount++;
+                        }
+                        catch { }
+                    }
+                }
+            }
+
+            report.PacketsSent = sentCount;
+            return (sentCount > 0, report);
         }
         catch
         {
-            return false;
+            return (false, report);
         }
     }
 
@@ -151,16 +313,33 @@ public static class RdpLauncher
             progress?.Invoke(new LaunchProgressUpdate
             {
                 Step = "Wake-on-LAN Dispatch",
-                Details = $"Broadcasting magic packet to {p.WolBroadcastIp}:{p.WolPort} (MAC: {p.WolMacAddress})...",
+                Details = $"Preparing magic packet for MAC {p.WolMacAddress} (Target Host: {p.Host})...",
                 IsIndeterminate = true
             });
 
-            bool wolOk = await SendWakeOnLanAsync(p.WolMacAddress, p.WolBroadcastIp, p.WolPort);
+            var (wolOk, report) = await SendWakeOnLanAsync(
+                p.WolMacAddress,
+                host: p.Host,
+                broadcastIp: p.WolBroadcastIp,
+                wolPort: p.WolPort,
+                rdpPort: p.Port);
+
             if (!wolOk)
             {
                 LaunchFailed?.Invoke("Could not send Wake-on-LAN magic packet. Verify the MAC address format.");
                 return false;
             }
+
+            string endpointsSummary = string.Join(", ", report.TargetEndpoints.Take(3)) +
+                (report.TargetEndpoints.Count > 3 ? $" (+{report.TargetEndpoints.Count - 3} more)" : "");
+            string portsSummary = string.Join(", ", report.PortsUsed);
+
+            progress?.Invoke(new LaunchProgressUpdate
+            {
+                Step = "Wake-on-LAN Broadcasted",
+                Details = $"Sent {report.PacketsSent} magic packet(s) to {endpointsSummary} (Ports: {portsSummary}).",
+                IsIndeterminate = true
+            });
 
             if (p.WolWaitSeconds > 0)
             {

@@ -35,10 +35,7 @@ public partial class MainView : UserControl
     {
         BtnUnlock.Click += async (_, _) => await UnlockWithPasswordAsync();
         BtnLock.Click += (_, _) => LockVault();
-        TxtSearch.PropertyChanged += (_, e) =>
-        {
-            if (e.Property.Name == nameof(TextBox.Text)) RefreshProfilesList();
-        };
+        TxtSearch.TextChanged += (_, _) => RefreshProfilesList();
         BtnClearSearch.Click += (_, _) =>
         {
             TxtSearch.Text = "";

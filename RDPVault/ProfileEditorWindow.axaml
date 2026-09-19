@@ -124,11 +124,13 @@
                     <Grid ColumnDefinitions="*,10,80,10,100">
                         <StackPanel Grid.Column="0" Spacing="4">
                             <TextBlock Text="Broadcast IP" FontSize="12" Foreground="#8A8A93"/>
-                            <TextBox Name="TxtWolBroadcast" Watermark="255.255.255.255"/>
+                            <TextBox Name="TxtWolBroadcast" Watermark="Auto (Host &amp; all subnets)"
+                                     ToolTip.Tip="Target IP or broadcast. Default sends to remote Host IP/hostname, all local network adapters, and 255.255.255.255."/>
                         </StackPanel>
                         <StackPanel Grid.Column="2" Spacing="4">
                             <TextBlock Text="Port" FontSize="12" Foreground="#8A8A93"/>
-                            <TextBox Name="TxtWolPort" Watermark="9"/>
+                            <TextBox Name="TxtWolPort" Watermark="9"
+                                     ToolTip.Tip="Primary UDP port (default: 9). Port 7 and custom RDP ports (e.g. port 11) are also automatically targeted."/>
                         </StackPanel>
                         <StackPanel Grid.Column="4" Spacing="4">
                             <TextBlock Text="Wait delay (sec)" FontSize="12" Foreground="#8A8A93"/>
@@ -136,6 +138,8 @@
                                      ToolTip.Tip="Seconds to wait after sending WOL magic packet before launching Remote Desktop (0-300)."/>
                         </StackPanel>
                     </Grid>
+                    <TextBlock Text="💡 Packets are automatically sent to the Host IP, local subnet broadcasts, and custom ports."
+                               FontSize="11" Foreground="#8A8A93" Margin="0,4,0,0"/>
                 </StackPanel>
             </StackPanel>
         </Border>

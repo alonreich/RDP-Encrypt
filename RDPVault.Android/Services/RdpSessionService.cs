@@ -14,7 +14,7 @@ namespace RDPVault.Android.Services;
 /// By anchoring connections in a Foreground Service rather than an Activity, screen rotations
 /// and temporary app backgrounding NEVER destroy the session or trigger re-authentication.
 /// </summary>
-[Service(Enabled = true, Exported = false, ForegroundServiceType = global::Android.Content.PM.ForegroundService.TypeRemoteMessaging)]
+[Service(Name = "com.rdpvault.app.services.RdpSessionService", Enabled = true, Exported = false, ForegroundServiceType = global::Android.Content.PM.ForegroundService.TypeRemoteMessaging)]
 public class RdpSessionService : Service
 {
     public const string ChannelId = "rdpvault_active_session";

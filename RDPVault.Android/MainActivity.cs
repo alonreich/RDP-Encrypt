@@ -13,16 +13,21 @@ using RDPVault.Android.Services;
 namespace RDPVault.Android;
 
 [Activity(
+    Name = "com.rdpvault.app.MainActivity",
     Label = "RDP Vault",
-    Theme = "@android:style/Theme.NoTitleBar",
-    Icon = "@android:drawable/sym_def_app_icon",
+    Theme = "@style/MainTheme",
+    Icon = "@mipmap/icon",
+    RoundIcon = "@mipmap/icon",
     MainLauncher = true,
+    Exported = true,
+    WindowSoftInputMode = SoftInput.AdjustResize,
     ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize | ConfigChanges.UiMode | ConfigChanges.SmallestScreenSize | ConfigChanges.ScreenLayout | ConfigChanges.Density)]
 public class MainActivity : AvaloniaMainActivity<App>
 {
     protected override AppBuilder CustomizeAppBuilder(AppBuilder builder)
     {
-        return base.CustomizeAppBuilder(builder);
+        return base.CustomizeAppBuilder(builder)
+            .WithInterFont();
     }
     private RdpSessionService? _sessionService;
     private bool _serviceBound;
@@ -53,10 +58,17 @@ public class MainActivity : AvaloniaMainActivity<App>
     {
         base.OnCreate(savedInstanceState);
 
-        // Bind to background session service
-        var serviceIntent = new Intent(this, typeof(RdpSessionService));
-        _serviceConnection = new ServiceConnection(this);
-        BindService(serviceIntent, _serviceConnection, Bind.AutoCreate);
+        try
+        {
+            // Bind to background session service
+            var serviceIntent = new Intent(this, typeof(RdpSessionService));
+            _serviceConnection = new ServiceConnection(this);
+            BindService(serviceIntent, _serviceConnection, Bind.AutoCreate);
+        }
+        catch (Exception ex)
+        {
+            global::Android.Util.Log.Warn("RDPVault", "Background service bind skipped: " + ex.Message);
+        }
     }
 
     /// <summary>

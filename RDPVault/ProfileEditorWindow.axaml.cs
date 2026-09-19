@@ -85,7 +85,7 @@ public partial class ProfileEditorWindow : Window
 
         ChkEnableWol.IsChecked = Profile.EnableWol;
         TxtWolMac.Text = Profile.WolMacAddress;
-        TxtWolBroadcast.Text = string.IsNullOrWhiteSpace(Profile.WolBroadcastIp) ? "255.255.255.255" : Profile.WolBroadcastIp;
+        TxtWolBroadcast.Text = (string.IsNullOrWhiteSpace(Profile.WolBroadcastIp) || Profile.WolBroadcastIp == "255.255.255.255") ? "" : Profile.WolBroadcastIp;
         TxtWolPort.Text = Profile.WolPort > 0 ? Profile.WolPort.ToString() : "9";
         TxtWolWait.Text = Profile.WolWaitSeconds >= 0 ? Profile.WolWaitSeconds.ToString() : "5";
         PnlWolDetails.IsEnabled = Profile.EnableWol;

@@ -165,50 +165,6 @@ public static class AndroidHardwareKeyStore
         catch { }
     }
 
-    public static Task<(bool Success, Cipher? Cipher, string? ErrorMessage)> AuthenticatePromptAsync(
-        MainActivity activity,
-        Cipher cipher,
-        string title,
-        string subtitle,
-        string negativeButtonText)
-    {
-        var tcs = new TaskCompletionSource<(bool Success, Cipher? Cipher, string? ErrorMessage)>();
-
-        activity.RunOnUiThread(() =>
-        {
-            try
-            {
-                var executor = AndroidX.Core.Content.ContextCompat.GetMainExecutor(activity);
-                if (executor == null)
-                {
-                    tcs.TrySetResult((false, null, "Failed to obtain main executor."));
-                    return;
-                }
-
-                var callback = new BiometricAuthCallback(
-                    onSuccess: res => tcs.TrySetResult((true, res.CryptoObject?.Cipher, null)),
-                    onError: (code, err) => tcs.TrySetResult((false, null, err)));
-
-                var prompt = new BiometricPrompt(activity, executor, callback);
-                var promptInfo = new BiometricPrompt.PromptInfo.Builder()
-                    .SetTitle(title)
-                    .SetSubtitle(subtitle)
-                    .SetNegativeButtonText(negativeButtonText)
-                    .SetAllowedAuthenticators((int)BiometricManager.Authenticators.BiometricStrong)
-                    .Build();
-
-                var cryptoObject = new BiometricPrompt.CryptoObject(cipher);
-                prompt.Authenticate(promptInfo, cryptoObject);
-            }
-            catch (Exception ex)
-            {
-                tcs.TrySetResult((false, null, ex.Message));
-            }
-        });
-
-        return tcs.Task;
-    }
-
     public static Task<(bool Success, string? ErrorMessage)> AuthenticateBiometricAsync(
         MainActivity activity,
         string title,

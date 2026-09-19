@@ -32,6 +32,7 @@ public partial class MainView : UserControl
     private RdpProfile? _editingProfile;
     private string _activeRecoveryCode = "";
     private IntPtr _activeRdpContext = IntPtr.Zero;
+    private System.Threading.CancellationTokenSource? _connectCts;
 
     private static string ResolveVaultPath()
     {
@@ -908,21 +909,64 @@ public partial class MainView : UserControl
 
     // ==================== RDP SESSION & WAKE-ON-LAN ====================
 
+    private void BtnCancelLaunch_Click(object? sender, RoutedEventArgs e)
+    {
+        _connectCts?.Cancel();
+        OverlayLaunch.IsVisible = false;
+    }
+
     private async Task StartSessionAsync(RdpProfile profile)
     {
-        // 1. Wake-on-LAN dispatch if enabled
-        if (profile.EnableWol && !string.IsNullOrWhiteSpace(profile.WolMacAddress))
-        {
-            await DispatchWolAsync(profile);
-            if (profile.WolWaitSeconds > 0)
-            {
-                await Task.Delay(profile.WolWaitSeconds * 1000);
-            }
-        }
+        _connectCts = new System.Threading.CancellationTokenSource();
+        var ct = _connectCts.Token;
 
-        // 2. Launch RDP Session
+        TxtLaunchTitle.Text = profile.EnableWol ? "WAKE-ON-LAN & CONNECT" : "CONNECTING TO REMOTE DESKTOP";
+        TxtLaunchTarget.Text = $"{profile.Name}  •  {profile.Host}:{profile.Port}";
+        ProgLaunch.IsIndeterminate = true;
+        ProgLaunch.Value = 0;
+        TxtLaunchCountdown.IsVisible = false;
+        TxtLaunchStep.Text = "Initializing connection...";
+        TxtLaunchSubStatus.Text = "";
+        BtnCancelLaunch.IsEnabled = true;
+        OverlayLaunch.IsVisible = true;
+
         try
         {
+            // 1. Wake-on-LAN dispatch if enabled
+            if (profile.EnableWol && !string.IsNullOrWhiteSpace(profile.WolMacAddress))
+            {
+                TxtLaunchSubStatus.Text = "Broadcasting magic packet";
+                TxtLaunchStep.Text = $"Transmitting WOL packet to {profile.WolMacAddress} (Port: {profile.WolPort})...";
+                await DispatchWolAsync(profile);
+
+                if (profile.WolWaitSeconds > 0)
+                {
+                    int total = profile.WolWaitSeconds;
+                    for (int s = total; s > 0; s--)
+                    {
+                        if (ct.IsCancellationRequested) return;
+
+                        double percent = 100.0 * (total - s) / total;
+                        ProgLaunch.IsIndeterminate = false;
+                        ProgLaunch.Value = percent;
+                        TxtLaunchCountdown.Text = $"{s}s remaining";
+                        TxtLaunchCountdown.IsVisible = true;
+                        TxtLaunchSubStatus.Text = "Waking Remote Host";
+                        TxtLaunchStep.Text = $"Wake packet broadcasted. Waiting for remote host to boot ({s}s remaining)...";
+
+                        await Task.Delay(1000, ct);
+                    }
+                }
+            }
+
+            if (ct.IsCancellationRequested) return;
+
+            ProgLaunch.IsIndeterminate = true;
+            TxtLaunchCountdown.IsVisible = false;
+            TxtLaunchSubStatus.Text = "Establishing session";
+            TxtLaunchStep.Text = $"Connecting to {profile.Host}:{profile.Port}...";
+
+            // 2. Launch RDP Session
             PanelUnlocked.IsVisible = false;
             PanelSession.IsVisible = true;
 
@@ -931,9 +975,19 @@ public partial class MainView : UserControl
 
             _activeRdpContext = FreeRdpClient.Connect(profile, _payload?.Settings, width, height);
         }
+        catch (OperationCanceledException)
+        {
+            // Aborted by user
+        }
         catch (Exception)
         {
             DisconnectSession();
+        }
+        finally
+        {
+            OverlayLaunch.IsVisible = false;
+            _connectCts?.Dispose();
+            _connectCts = null;
         }
     }
 

@@ -935,6 +935,9 @@ A parallel mobile software distribution branch sharing the identical cryptograph
       margins (40dp) preventing camera punch-hole/notch overlap on title bars and action buttons. Implemented
       generous 320px bottom scroll padding with GotFocus -> BringIntoView() on connection editor inputs
       (WOL MAC, ports, notes) preventing virtual keyboard occlusion.
+    - Tactical Launch & WOL Progress Overlay (OverlayLaunch): Modal overlay during connection and Wake-on-LAN
+      execution displaying real-time step notifications, countdown timer, visual progress bar, and user
+      cancellation button, preventing user uncertainty during remote host boot.
     - Full Mobile Profile Editor & Settings: Embedded UserControl panels for adding/editing/deleting connections
       (with custom RDP ports and Wake-on-LAN configuration) and managing hardware biometric seals.
 

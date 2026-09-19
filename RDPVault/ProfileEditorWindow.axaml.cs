@@ -104,6 +104,59 @@ public partial class ProfileEditorWindow : Window
         ChkPrinters.IsChecked = Profile.AllowPrinters;
         ChkSmartCards.IsChecked = Profile.AllowSmartCards;
         ChkAllowUnverified.IsChecked = Profile.AllowUnverifiedServer;
+
+        bool updatingResolutionUi = false;
+        CmbResolution.SelectionChanged += (_, _) =>
+        {
+            if (updatingResolutionUi) return;
+            updatingResolutionUi = true;
+            try
+            {
+                int idx = CmbResolution.SelectedIndex;
+                if (idx >= 2)
+                {
+                    // Fixed resolution preset selected: user explicitly chooses windowed mode
+                    CmbFullScreen.SelectedIndex = (int)TriStateOverride.Disabled;
+                    CmbMultiMon.SelectedIndex = (int)TriStateOverride.Disabled;
+                }
+                else if (idx == 0) // Full Screen
+                {
+                    if (CmbFullScreen.SelectedIndex == (int)TriStateOverride.Disabled)
+                        CmbFullScreen.SelectedIndex = (int)TriStateOverride.Enabled;
+                    CmbMultiMon.SelectedIndex = (int)TriStateOverride.Disabled;
+                }
+                else if (idx == 1) // Multi-monitor
+                {
+                    CmbFullScreen.SelectedIndex = (int)TriStateOverride.Enabled;
+                    CmbMultiMon.SelectedIndex = (int)TriStateOverride.Enabled;
+                }
+            }
+            finally
+            {
+                updatingResolutionUi = false;
+            }
+        };
+
+        CmbFullScreen.SelectionChanged += (_, _) =>
+        {
+            if (updatingResolutionUi) return;
+            updatingResolutionUi = true;
+            try
+            {
+                if (CmbFullScreen.SelectedIndex == (int)TriStateOverride.Enabled)
+                {
+                    if (CmbResolution.SelectedIndex >= 2) CmbResolution.SelectedIndex = 0;
+                }
+                else if (CmbFullScreen.SelectedIndex == (int)TriStateOverride.Disabled)
+                {
+                    if (CmbResolution.SelectedIndex is 0 or 1) CmbResolution.SelectedIndex = 2; // 1920x1080 default
+                }
+            }
+            finally
+            {
+                updatingResolutionUi = false;
+            }
+        };
     }
 
     /// <summary>Issue #14: the password was displayed in clear text in a plain TextBox.</summary>
@@ -206,7 +259,9 @@ public partial class ProfileEditorWindow : Window
             _ => (Profile.Width, Profile.Height)
         };
 
-        Profile.FullScreenOverride = (TriStateOverride)Math.Clamp(CmbFullScreen.SelectedIndex, 0, 2);
+        Profile.FullScreenOverride = idx >= 2
+            ? TriStateOverride.Disabled
+            : (TriStateOverride)Math.Clamp(CmbFullScreen.SelectedIndex, 0, 2);
         Profile.MultiMonOverride = (TriStateOverride)Math.Clamp(CmbMultiMon.SelectedIndex, 0, 2);
         Profile.SuppressCertWarningsOverride = (TriStateOverride)Math.Clamp(CmbCertWarnings.SelectedIndex, 0, 2);
 

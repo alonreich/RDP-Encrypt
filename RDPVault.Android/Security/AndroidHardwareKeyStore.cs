@@ -1,0 +1,134 @@
+using System;
+using System.IO;
+using System.Security.Cryptography;
+using Android.Content;
+using Android.Content.PM;
+using Android.OS;
+using Android.Security.Keystore;
+using AndroidX.Biometric;
+using Javax.Crypto;
+using Javax.Crypto.Spec;
+using Java.Security;
+using RDPVault;
+
+namespace RDPVault.Android.Security;
+
+/// <summary>
+/// Mobile hardware security provider: Android Keystore / StrongBox Keymaster.
+/// Equivalent to PC TPM 2.0 / Windows Hello.
+/// Keys are generated directly inside the dedicated Hardware Security Module (StrongBox/TEE)
+/// and require Class 3 Strong Biometrics (Fingerprint/3D Face) to authorize cryptographic operations.
+/// </summary>
+public static class AndroidHardwareKeyStore
+{
+    private const string KeyStoreProvider = "AndroidKeyStore";
+    private const string KeyAliasPrefix = "RDPVault_MasterWrap_";
+
+    public static bool HasStrongBoxSupport(Context context)
+    {
+        if (Build.VERSION.SdkInt >= BuildVersionCodes.P)
+        {
+            return context.PackageManager?.HasSystemFeature(PackageManager.FeatureStrongboxKeystore) == true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Generates a hardware-isolated 256-bit AES-GCM key inside the device Secure Element / StrongBox.
+    /// The private key material NEVER enters application memory.
+    /// </summary>
+    public static void GenerateHardwareKey(Context context, string keyId, bool requireBiometrics = true)
+    {
+        string alias = KeyAliasPrefix + keyId;
+        var keyGenerator = KeyGenerator.GetInstance(KeyProperties.KeyAlgorithmAes, KeyStoreProvider);
+        if (keyGenerator == null) throw new InvalidOperationException("AndroidKeyStore AES generator not available.");
+
+        int purposes = (int)(KeyStorePurpose.Encrypt | KeyStorePurpose.Decrypt);
+        var builder = new KeyGenParameterSpec.Builder(alias, (KeyStorePurpose)purposes)
+            .SetBlockModes(KeyProperties.BlockModeGcm)
+            .SetEncryptionPaddings(KeyProperties.EncryptionPaddingNone)
+            .SetKeySize(256);
+
+        if (requireBiometrics)
+        {
+            builder.SetUserAuthenticationRequired(true);
+            if (Build.VERSION.SdkInt >= BuildVersionCodes.R)
+            {
+                builder.SetUserAuthenticationParameters(0, KeyProperties.AuthBiometricStrong);
+            }
+        }
+
+        // Attempt StrongBox backing (dedicated HSM chip), fallback to TEE Keymaster if not supported
+        if (HasStrongBoxSupport(context))
+        {
+            try
+            {
+                builder.SetIsStrongBoxBacked(true);
+                keyGenerator.Init(builder.Build());
+                keyGenerator.GenerateKey();
+                return;
+            }
+            catch
+            {
+                // Fall back to standard TEE Keymaster
+                builder.SetIsStrongBoxBacked(false);
+            }
+        }
+
+        keyGenerator.Init(builder.Build());
+        keyGenerator.GenerateKey();
+    }
+
+    /// <summary>
+    /// Encrypts the 32-byte master key using the hardware-bound AES-GCM key.
+    /// Returns the TPM-compatible seal payload (nonce:ciphertext).
+    /// </summary>
+    public static string SealMasterKey(string keyId, byte[] masterKey, Cipher cipher)
+    {
+        byte[] iv = cipher.GetIV() ?? throw new InvalidOperationException("Cipher IV was null.");
+        byte[] encrypted = cipher.DoFinal(masterKey) ?? throw new InvalidOperationException("Cipher encryption produced null.");
+
+        return $"{Convert.ToBase64String(iv)}:{Convert.ToBase64String(encrypted)}";
+    }
+
+    /// <summary>
+    /// Decrypts the master key using the authorized biometric Cipher.
+    /// </summary>
+    public static byte[] UnsealMasterKey(string tpmBlob, Cipher cipher)
+    {
+        string[] parts = tpmBlob.Split(':');
+        if (parts.Length != 2) throw new FormatException("Invalid seal format; expected nonce:ciphertext.");
+
+        byte[] ciphertext = Convert.FromBase64String(parts[1]);
+        return cipher.DoFinal(ciphertext) ?? throw new CryptographicException("Failed to unseal master key.");
+    }
+
+    /// <summary>
+    /// Prepares an initialized Cipher instance for wrapping with BiometricPrompt.CryptoObject.
+    /// </summary>
+    public static Cipher GetInitializedCipher(string keyId, int opMode, byte[]? iv = null)
+    {
+        string alias = KeyAliasPrefix + keyId;
+        var keyStore = KeyStore.GetInstance(KeyStoreProvider);
+        keyStore?.Load(null);
+
+        var key = keyStore?.GetKey(alias, null);
+        if (key == null) throw new KeyNotFoundException($"Hardware key {alias} not found.");
+
+        var cipher = Cipher.GetInstance($"{KeyProperties.KeyAlgorithmAes}/{KeyProperties.BlockModeGcm}/{KeyProperties.EncryptionPaddingNone}");
+        if (cipher == null) throw new InvalidOperationException("AES/GCM cipher unavailable.");
+
+        if (opMode == (int)CipherMode.EncryptMode)
+        {
+            cipher.Init((CipherMode)opMode, key);
+        }
+        else
+        {
+            if (iv == null) throw new ArgumentNullException(nameof(iv), "IV required for decryption.");
+            var gcmSpec = new GCMParameterSpec(128, iv);
+            cipher.Init((CipherMode)opMode, key, gcmSpec);
+        }
+
+        return cipher;
+    }
+}

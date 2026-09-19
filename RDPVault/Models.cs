@@ -1,8 +1,58 @@
 using System;
 using System.Collections.Generic;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json.Serialization;
 
 namespace RDPVault;
+
+/// <summary>
+/// Cryptographically protects passwords residing in memory using ephemeral session keys (AES-256-GCM).
+/// Eliminates long-lived managed string credentials scattered across the GC heap.
+/// </summary>
+public static class VaultMemoryGuard
+{
+    private static readonly byte[] SessionKey = RandomNumberGenerator.GetBytes(32);
+
+    public static (byte[]? ct, byte[]? nonce, byte[]? tag) ProtectString(string? plaintext)
+    {
+        if (string.IsNullOrEmpty(plaintext)) return (null, null, null);
+        byte[] pt = Encoding.UTF8.GetBytes(plaintext);
+        byte[] nonce = RandomNumberGenerator.GetBytes(12);
+        byte[] ct = new byte[pt.Length];
+        byte[] tag = new byte[16];
+        try
+        {
+            using var aes = new AesGcm(SessionKey, 16);
+            aes.Encrypt(nonce, pt, ct, tag);
+            return (ct, nonce, tag);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(pt);
+        }
+    }
+
+    public static string UnprotectString(byte[]? ct, byte[]? nonce, byte[]? tag)
+    {
+        if (ct == null || nonce == null || tag == null || ct.Length == 0) return "";
+        byte[] pt = new byte[ct.Length];
+        try
+        {
+            using var aes = new AesGcm(SessionKey, 16);
+            aes.Decrypt(nonce, ct, tag, pt);
+            return Encoding.UTF8.GetString(pt);
+        }
+        catch
+        {
+            return "";
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(pt);
+        }
+    }
+}
 
 public enum TriStateOverride
 {
@@ -18,7 +68,18 @@ public class RdpProfile
     public string Host { get; set; } = "";
     public int Port { get; set; } = 3389;
     public string Username { get; set; } = "";
-    public string Password { get; set; } = "";
+
+    private byte[]? _encPassword;
+    private byte[]? _passwordNonce;
+    private byte[]? _passwordTag;
+
+    [JsonPropertyName("Password")]
+    public string Password
+    {
+        get => VaultMemoryGuard.UnprotectString(_encPassword, _passwordNonce, _passwordTag);
+        set => (_encPassword, _passwordNonce, _passwordTag) = VaultMemoryGuard.ProtectString(value);
+    }
+
     public bool UseMultiMon { get; set; } = false;
     public string GatewayHost { get; set; } = "";
     public bool FullScreen { get; set; } = true;
@@ -31,9 +92,9 @@ public class RdpProfile
 
     /// <summary>
     /// Per-profile override for certificate warnings.
-    /// InheritGlobal = follow global setting (default: suppress).
+    /// InheritGlobal = follow global setting (default: verify).
     /// Enabled = suppress certificate warnings for this host.
-    /// Disabled = show certificate warnings.
+    /// Disabled = show certificate warnings / verify.
     /// </summary>
     public TriStateOverride SuppressCertWarningsOverride { get; set; } = TriStateOverride.InheritGlobal;
 
@@ -69,13 +130,14 @@ public class RdpProfile
     {
         if (SuppressCertWarningsOverride == TriStateOverride.Enabled) return true;
         if (SuppressCertWarningsOverride == TriStateOverride.Disabled) return false;
-        return settings?.SuppressCertWarnings ?? true;
+        return settings?.SuppressCertWarnings ?? false;
     }
 
     public bool ResolveFullScreen(VaultSettings? settings)
     {
         if (FullScreenOverride == TriStateOverride.Enabled) return true;
         if (FullScreenOverride == TriStateOverride.Disabled) return false;
+        if (!FullScreen) return false; // Explicitly configured windowed resolution
         return settings?.DefaultFullScreen ?? FullScreen;
     }
 
@@ -83,6 +145,7 @@ public class RdpProfile
     {
         if (MultiMonOverride == TriStateOverride.Enabled) return true;
         if (MultiMonOverride == TriStateOverride.Disabled) return false;
+        if (!UseMultiMon) return false;
         return settings?.DefaultUseMultiMon ?? UseMultiMon;
     }
 
@@ -111,8 +174,8 @@ public class VaultSettings
     public bool KillSessionsOnUsbRemoval { get; set; } = true;
     public bool ForceMultiMon { get; set; } = false;
 
-    /// <summary>Global default: ignore errors and warnings for certificates or identities.</summary>
-    public bool SuppressCertWarnings { get; set; } = true;
+    /// <summary>Global default: ignore errors and warnings for certificates or identities (default false: verify server identity).</summary>
+    public bool SuppressCertWarnings { get; set; } = false;
 
     /// <summary>Global default: launch connections in full screen by default.</summary>
     public bool DefaultFullScreen { get; set; } = true;

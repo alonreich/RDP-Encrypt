@@ -42,6 +42,15 @@ public sealed class ActiveSessionInfo
     }
 }
 
+public sealed class LaunchProgressUpdate
+{
+    public string Step { get; init; } = "";
+    public string Details { get; init; } = "";
+    public int? SecondsRemaining { get; init; }
+    public double? ProgressPercent { get; init; }
+    public bool IsIndeterminate { get; init; } = true;
+}
+
 /// <summary>
 /// Launches mstsc.exe from a generated temp .rdp file and scrubs everything when it closes.
 /// If a password is saved, it is placed in Windows Credential Manager as a SESSION
@@ -125,7 +134,13 @@ public static class RdpLauncher
     }
 
     /// <summary>Start one RDP session for the profile with WOL and async monitoring.</summary>
-    public static async Task<bool> LaunchAsync(RdpProfile p)
+    public static Task<bool> LaunchAsync(RdpProfile p) => LaunchAsync(p, null, System.Threading.CancellationToken.None);
+
+    /// <summary>Start one RDP session for the profile with tactical progress updates and cancellation support.</summary>
+    public static async Task<bool> LaunchAsync(
+        RdpProfile p,
+        Action<LaunchProgressUpdate>? progress,
+        System.Threading.CancellationToken ct = default)
     {
         SessionManager.Current.Touch();   // issue #11: connecting is activity
 
@@ -133,12 +148,66 @@ public static class RdpLauncher
         if (p.EnableWol && !string.IsNullOrWhiteSpace(p.WolMacAddress))
         {
             SessionStarted?.Invoke($"{p.Name} (Sending Wake-on-LAN magic packet...)");
-            await SendWakeOnLanAsync(p.WolMacAddress, p.WolBroadcastIp, p.WolPort);
+            progress?.Invoke(new LaunchProgressUpdate
+            {
+                Step = "Wake-on-LAN Dispatch",
+                Details = $"Broadcasting magic packet to {p.WolBroadcastIp}:{p.WolPort} (MAC: {p.WolMacAddress})...",
+                IsIndeterminate = true
+            });
+
+            bool wolOk = await SendWakeOnLanAsync(p.WolMacAddress, p.WolBroadcastIp, p.WolPort);
+            if (!wolOk)
+            {
+                LaunchFailed?.Invoke("Could not send Wake-on-LAN magic packet. Verify the MAC address format.");
+                return false;
+            }
+
             if (p.WolWaitSeconds > 0)
             {
-                await Task.Delay(p.WolWaitSeconds * 1000);
+                int total = p.WolWaitSeconds;
+                for (int s = total; s > 0; s--)
+                {
+                    if (ct.IsCancellationRequested)
+                    {
+                        LaunchFailed?.Invoke("Connection cancelled by user during Wake-on-LAN wait.");
+                        return false;
+                    }
+
+                    double percent = 100.0 * (total - s) / total;
+                    progress?.Invoke(new LaunchProgressUpdate
+                    {
+                        Step = "Waking Remote Host",
+                        Details = $"Wake packet broadcasted. Waiting for remote host to boot ({s}s remaining)...",
+                        SecondsRemaining = s,
+                        ProgressPercent = percent,
+                        IsIndeterminate = false
+                    });
+
+                    try
+                    {
+                        await Task.Delay(1000, ct);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        LaunchFailed?.Invoke("Connection cancelled by user during Wake-on-LAN wait.");
+                        return false;
+                    }
+                }
             }
         }
+
+        if (ct.IsCancellationRequested)
+        {
+            LaunchFailed?.Invoke("Connection cancelled by user.");
+            return false;
+        }
+
+        progress?.Invoke(new LaunchProgressUpdate
+        {
+            Step = "Preparing Connection",
+            Details = $"Configuring temporary connection profile for {p.DisplayHost}...",
+            IsIndeterminate = true
+        });
 
         string tempRdp = Path.Combine(Path.GetTempPath(), $"rdpv_{p.Id}.rdp");
         try
@@ -155,6 +224,12 @@ public static class RdpLauncher
         var credTargets = new List<string>();
         if (p.HasPassword && !string.IsNullOrEmpty(p.Username))
         {
+            progress?.Invoke(new LaunchProgressUpdate
+            {
+                Step = "Session Credentials",
+                Details = "Writing session-scoped credentials to Windows Credential Manager...",
+                IsIndeterminate = true
+            });
             foreach (string target in CredentialTargets(p))
             {
                 if (SessionCredentialCoordinator.Acquire(target, p.Username, p.Password))
@@ -164,6 +239,13 @@ public static class RdpLauncher
 
         // Certificate pinning replay if warnings are enabled
         RestoreCertPin(p);
+
+        progress?.Invoke(new LaunchProgressUpdate
+        {
+            Step = "Starting Remote Desktop",
+            Details = "Spawning mstsc.exe process...",
+            IsIndeterminate = true
+        });
 
         var psi = new ProcessStartInfo
         {
@@ -200,6 +282,14 @@ public static class RdpLauncher
         }
         SessionStarted?.Invoke(p.Name);
 
+        progress?.Invoke(new LaunchProgressUpdate
+        {
+            Step = "Connected",
+            Details = $"Remote Desktop window opened for {p.Name}.",
+            IsIndeterminate = false,
+            ProgressPercent = 100
+        });
+
         string profileName = p.Name;
         string targetHost = p.Host;
 
@@ -225,7 +315,7 @@ public static class RdpLauncher
             foreach (string t in credTargets) SessionCredentialCoordinator.Release(t);
 
             // Issue #1: deterministic host cleanup even if vault locked during session
-            TraceCleaner.SweepHosts(new[] { targetHost });
+            var report = TraceCleaner.SweepHosts(new[] { targetHost });
             TraceCleaner.Sweep();
 
             lock (Gate)
@@ -235,7 +325,10 @@ public static class RdpLauncher
 
             try { proc.Dispose(); } catch { }
 
-            SessionEnded?.Invoke(profileName);
+            string sweepStatus = report.ItemsLocked > 0
+                ? $"{profileName} closed - traces cleaned ({report.ItemsLocked} locked file queued for next sweep)."
+                : $"{profileName} closed - local traces cleaned.";
+            SessionEnded?.Invoke(sweepStatus);
         });
 
         return true;
@@ -275,7 +368,7 @@ public static class RdpLauncher
         bool useMulti = p.ResolveUseMultiMon(settings);
         bool fullScreen = p.ResolveFullScreen(settings);
 
-        // Certificate warning suppression: default is to suppress (authLevel 0), can be unchecked globally or overridden per-profile
+        // Certificate warning suppression: default is to verify (authLevel 2), can be suppressed globally or overridden per-profile
         bool suppressWarnings = p.ResolveSuppressCertWarnings(settings);
         int authLevel = suppressWarnings ? 0 : 2;
 

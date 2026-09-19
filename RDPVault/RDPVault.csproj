@@ -11,6 +11,7 @@
 
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 
     <!--
       ISSUE #16 - honest build settings.

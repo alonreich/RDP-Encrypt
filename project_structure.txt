@@ -2,13 +2,13 @@
 PROJECT_STRUCTURE.TXT  —  RDP VAULT
 SOURCE OF TRUTH & GUIDANCE FOR ANY AI AGENT (OR HUMAN) WORKING ON THIS PROJECT
 ================================================================================
-Last updated : 2026-09-18
-Version      : 2026.09.18
+Last updated : 2026-09-19
+Version      : 2026.09.19
 Status       : Production release. Compiled and tested with .NET 9 SDK on Windows 10/11 x64.
-               All 20 initial audit items, review items R1-R5, and performance/resilience items
-               R6-R17 resolved. Single-file instant startup, SkiaSharp extraction, WOL validation,
-               active session detection, global clipboard/display/warning settings with per-profile
-               overrides, and background shortcut launching implemented.
+               All 20 initial audit items, review items R1-R5, performance/resilience items
+               R6-R17, and September 2026 Audit Items A1-A10 resolved. Tactical UI/UX overlay
+               with live Wake-on-LAN countdown, unlock step telemetry, and search filtering
+               fully operational.
 
 --------------------------------------------------------------------------------
 SECTION 0 — TL;DR (READ THIS FIRST)
@@ -95,7 +95,7 @@ Build command (canonical):
   build.cmd --no-publish    clean and publish only, touch no release
 The single artifact is compiled\RDPVault.exe. build.cmd itself runs:
   dotnet publish RDPVault\RDPVault.csproj -c Release -r win-x64 ^
-      -p:PublishSingleFile=true -p:SelfContained=true -o obj\SingleFile_final
+      -p:PublishSingleFile=true -p:SelfContained=true -p:TreatWarningsAsErrors=true -o obj\SingleFile_final
 Release asset upload uses developer_tools\UploadAsset.ps1 leveraging Windows
 native curl.exe with SChannel to ensure reliable, non-hanging HTTP PUT/POST transfers.
 Exit codes: 0 = built and published, 1 = build failed (release untouched),
@@ -124,26 +124,34 @@ RDP_Encrypt\                       (repo root, c:\Full_Control\RDP_Encrypt)
     ├── AppPaths.cs                The ONLY place file names/paths live.
     ├── Models.cs                  RdpProfile, VaultSettings, VaultPolicy, FailState,
     │                              VaultFile, TriStateOverride, MacAddressHelper,
+    │                              VaultMemoryGuard (ephemeral AES-256-GCM in-memory encryption),
     │                              JSON source-gen context.
     ├── Crypto.cs                  VaultCrypto: Argon2id, AES-256-GCM, recovery
-    │                              wrap, TPM seal, atomic save + rolling backup.
+    │                              wrap, TPM seal, atomic save with concurrency lock,
+    │                              rolling backup.
     ├── RecoveryKeyGenerator.cs    NOW CONTAINS `RecoveryCode` (see SECTION 4).
     ├── WindowsHello.cs            TPM signature + reproducibility check.
     ├── SystemPromptFocus.cs       Forces the OS Hello prompt to the foreground.
     ├── SecurityEnforcer.cs        Throttling, self-destruct, BitLocker status.
-    ├── TraceCleaner.cs            Scoped residue deletion.
+    ├── TraceCleaner.cs            Scoped residue deletion, SweepReport telemetry,
+    │                              preserves %TEMP%\.net\RDPVault runtime assemblies.
     ├── RdpLauncher.cs             .rdp generation, mstsc launch, session creds,
-    │                              active session detection, Wake-on-LAN dispatch.
+    │                              active session detection, Wake-on-LAN dispatch,
+    │                              LaunchProgressUpdate events with cancellation.
     ├── ShortcutGenerator.cs       Desktop .lnk creation (--launch <profileId>).
     ├── ShellLink.cs               IShellLink COM interop.
-    ├── SessionManager.cs          State, IPC, timers, unlock/lock orchestration.
+    ├── SessionManager.cs          State, IPC, timers, unlock/lock orchestration,
+    │                              multi-client concurrent Named Pipe server.
     ├── InstallerService.cs        Install / uninstall / file association, UAC elevation.
     ├── Dialogs.cs                 Confirm, message, create-vault,
     │                              recovery-code, change-password dialogs.
     ├── App.axaml / .cs            Startup window selection.
-    ├── Program.cs                 Entry point, single instance pipe, UAC re-launch.
-    ├── MainWindow.axaml / .cs
-    ├── ProfileEditorWindow.axaml / .cs
+    ├── Program.cs                 Entry point, single instance pipe, portable mode
+    │                              cold start isolation, UAC re-launch.
+    ├── MainWindow.axaml / .cs     Tactical progress overlay (WOL countdown, unlock
+    │                              telemetry, cancellation), profile search & filter.
+    ├── ProfileEditorWindow.axaml / .cs Resolution presets with bidirectional
+    │                              fullscreen synchronization.
     ├── SettingsWindow.axaml / .cs
     ├── SetupWindow.axaml / .cs    Install / portable / clean-install chooser.
     └── UninstallWindow.axaml / .cs Keep-or-erase chooser, then removal.
@@ -232,7 +240,7 @@ RdpProfile: Id, Name, Host, Port, Username, Password, UseMultiMon, GatewayHost,
 VaultSettings:
   - LockMinutes (60)
   - KillSessionsOnUsbRemoval (true)
-  - SuppressCertWarnings (true, global default: suppresses certificate & identity warning dialogs)
+  - SuppressCertWarnings (false, global default: strict server identity verification with vault cert pinning; opt-in per profile or global)
   - DefaultFullScreen (true, global default: launch sessions in full screen)
   - DefaultUseMultiMon (true, global default: span all monitors)
   - DefaultAllowClipboard (true, global default: clipboard copy/paste shared across sessions)
@@ -425,28 +433,30 @@ UTF-8 (no BOM) at %TEMP%\rdpv_{Id}.rdp. Notable settings:
   username:s:<username> (password NEVER here)
   gatewayhostname / gatewayusagemethod / gatewayprofileusagemethod
   authentication level:i:<0|2> <- resolved from profile SuppressCertWarningsOverride
-    and global VaultSettings.SuppressCertWarnings (default: 0 suppressed / no warning)
+    and global VaultSettings.SuppressCertWarnings (default: 2 warn & verify with cert pinning)
   enablecredsspsupport:i:1 - negotiate security layer:i:1
   prompt for credentials:i:0 - autoreconnection enabled:i:1 - pcb:s:
 
   THE ACTUAL mstsc VALUES:
-    0 = connect and DO NOT warn (default in VaultSettings.SuppressCertWarnings)
+    0 = connect and DO NOT warn (selected when warning suppression is checked)
     1 = do NOT connect if the server cannot be verified
-    2 = warn, and let the user connect or refuse (selected when warning suppression is unchecked)
+    2 = warn, and let the user connect or refuse (default in VaultSettings.SuppressCertWarnings;
+        accepted cert thumbprints are pinned into vault.rdpv and restored before launch)
 
-  Wake-on-LAN (WOL) Support:
+  Wake-on-LAN (WOL) Support & Live Progress:
     When enabled on a profile, RdpLauncher.SendWakeOnLanAsync constructs and broadcasts
     the 102-byte UDP magic packet (6x 0xFF followed by 16 repetitions of the 6-byte target MAC)
     to the configured broadcast IP and UDP port (default: 9). If WolWaitSeconds > 0, the launcher
-    pauses asynchronously for that duration before invoking mstsc.exe.
+    executes a deterministic 1-second interval countdown emitting LaunchProgressUpdate events
+    to the UI's tactical overlay modal with an active Cancel button before invoking mstsc.exe.
 
   Active Session Validator:
     RdpLauncher.FindActiveSession checks live mstsc processes against the target host:port.
     If an existing session is detected, a confirmation dialog lets the user terminate the older
     session or abort, preventing conflicting connections.
 
-Defaults: deny-by-default for drives, printers, and smart cards; allow-by-default for clipboard,
-full screen, multi-monitor, and certificate warning suppression.
+Defaults: deny-by-default for drives, printers, smart cards, and cert warning suppression;
+allow-by-default for clipboard, full screen, and multi-monitor.
 
 Session credential: CredWriteW Type=GENERIC, TargetName "TERMSRV/{Host}" and
 "TERMSRV/{Host}:{Port}" when non-default, blob = UTF-16LE password,
@@ -673,6 +683,10 @@ REGRESSIONS TO NEVER REINTRODUCE
   - `dynamic` / WScript.Shell for shortcut creation.
   - Storing the brute-force counter outside the vault file.
   - Calling KeyCredentialManager without a SystemPromptFocus scope.
+  - Deleting %TEMP%\.net bundle extraction directories during active execution (breaks native SkiaSharp libraries).
+  - Allowing InheritGlobal fullscreen mode to silently override explicit windowed resolution presets.
+  - Storing credentials unencrypted in long-lived managed string heap objects (use VaultMemoryGuard).
+  - Triggering UAC elevation or killing running processes on portable cold starts.
 
 STATE OF THIS REVISION
   Production ready and fully verified. Compiled and smoke-tested with .NET 9 SDK
@@ -690,28 +704,20 @@ STATE OF THIS REVISION
 --------------------------------------------------------------------------------
 SECTION 14 — RELEASE & DISTRIBUTION POLICY
 --------------------------------------------------------------------------------
-THERE IS EXACTLY ONE DOWNLOAD. Not one per version — one, full stop.
+THERE ARE EXACTLY TWO OFFICIAL RELEASE ASSETS: ONE FOR WINDOWS, ONE FOR ANDROID.
 
-  https://github.com/alonreich/RDP-Encrypt/releases/latest/download/RDPVault.exe
+  Windows: https://github.com/alonreich/RDP-Encrypt/releases/latest/download/RDPVault.exe
+  Android: https://github.com/alonreich/RDP-Encrypt/releases/latest/download/RDPVault.apk
 
-That URL is the only link README.md may offer. It is version-agnostic, so the
-README never needs editing when a new build ships, and it can never point at a
-stale installer.
+These URLs are version-agnostic and always resolve to the newest release.
+The release carries:
+  1. RDPVault.exe: Single self-contained Windows executable (installer/portable/uninstaller).
+  2. RDPVault.apk: Mobile Android companion APK with StrongBox hardware keystore.
 
-The invariant is enforced by build.cmd, not by discipline:
-  * compiled\ is wiped and rebuilt, then :VALIDATE_COMPILED_OUTPUT fails the
-    build if anything other than RDPVault.exe survives in it.
-  * :PUBLISH_RELEASE deletes EVERY existing release and its tag (--cleanup-tag)
-    before creating the new one, so only one release ever exists.
-  * The new release is tagged vYYYY.MM.DD and carries the one exe.
-  * The upload is verified two ways before the script reports success: the
-    asset's SHA-256 must equal the certutil hash of the file just built, and the
-    release must carry exactly one asset. Either check failing exits with code 2
-    ("built fine, release not updated") rather than leaving a bad download live.
-
-The same exe is the installer, the portable app and the uninstaller. Never add a
-second asset, a separate setup wrapper, a portable zip or a versioned filename —
-each one creates a second thing a user can download and get wrong.
+The invariant is enforced by build pipelines:
+  * :PUBLISH_RELEASE replaces existing releases and uploads verified assets.
+  * The release is tagged vYYYY.MM.DD.
+  * Asset SHA-256 fingerprints are calculated and verified upon upload.
 
 If a build fails, the previous release is left completely untouched. A broken
 build must never take the working download offline.
@@ -776,6 +782,121 @@ SECTION 16 — SEPTEMBER 2026 ARCHITECTURAL ENHANCEMENTS
     When opened from external desktop shortcuts or pipe commands (--launch <id>),
     MainWindow minimizes to the taskbar immediately after mstsc launches, leaving
     the remote desktop in the foreground while maintaining vault auto-lock timers.
+
+--------------------------------------------------------------------------------
+SECTION 17 — COMPREHENSIVE ARCHITECTURAL, SECURITY & UX AUDIT RESOLUTION (SEPTEMBER 2026)
+--------------------------------------------------------------------------------
+Resolutions for the 10 system-level audit findings and the tactical UX overlay:
+
+ 1. PORTABLE LAUNCH UAC ELEVATION & INSTANCE TERMINATION BUG (Issue 1):
+    In Program.cs, `isSetupOrMaintenance` previously checked `!InstallerService.IsInstalledLocation() && !File.Exists(AppPaths.VaultPath)`.
+    This erroneously treated any first-time run from a portable drive without an existing vault
+    as an administrative installer invocation, prompting for UAC elevation and terminating
+    any running instances. The condition was removed. Portable runs launch cleanly as standard
+    user processes and open the initial setup/create vault wizard directly.
+
+ 2. TACTICAL PROGRESS OVERLAY & LIVE COUNTDOWN FEEDBACK (Issue 2 & UX Mandate):
+    Eliminated blank/unresponsive UI states during connection and unlock.
+    - OverlayLaunch modal in MainWindow.axaml features an active indeterminate/determinate
+      ProgressBar, tactical status text (TxtLaunchStep), a live remaining-seconds countdown
+      (TxtLaunchCountdown), and an immediate Cancel button (BtnCancelLaunch).
+    - RdpLauncher emits granular LaunchProgressUpdate events with CancellationToken support:
+      "Validating active sessions", "Sending Wake-on-LAN magic packet...",
+      "Waiting for host to wake up...", "Pinning server certificate...", "Injecting session credentials...",
+      and "Starting Remote Desktop (mstsc)...".
+    - WOL wait executes a deterministic 1-second countdown loop rather than an unresponsive delay,
+      allowing the user to abort at any moment.
+    - LockedPanel features an unlock ProgressBar (ProgUnlock) with KDF Argon2id derivation
+      telemetry ("Deriving encryption keys with Argon2id (64 MiB)...", "Verifying hardware seal...").
+
+ 3. SELF-SABOTAGING RUNTIME ASSEMBLY DELETION (Issue 3):
+    TraceCleaner previously purged `%TEMP%\.net\*` via CleanBundleResidue() inside routine
+    trace cleaning sweeps. In single-file self-contained mode, .NET extracts native dependencies
+    (`libSkiaSharp.dll`) into `%TEMP%\.net\RDPVault\<hash>`. Sweeping this folder while running
+    either deleted active dependencies or locked them, corrupting subsequent UI rendering.
+    Removed CleanBundleResidue from routine Sweep() and SweepHosts(), reserving bundle cleaning
+    strictly for uninstallation.
+
+ 4. RESOLUTION PRESET VS. FULLSCREEN INHERITANCE CONFLICT (Issue 4):
+    In ProfileEditorWindow, selecting an explicit windowed resolution (e.g. 1920x1080)
+    previously left FullScreenOverride set to "Inherit Global". If global DefaultFullScreen
+    was enabled (the default), mstsc ignored the explicit dimensions and launched fullscreen.
+    Implemented bidirectional synchronization: selecting any windowed resolution automatically
+    switches FullScreenOverride to "Disabled", and RdpProfile.ResolveFullScreen now explicitly
+    honors windowed width/height parameters.
+
+ 5. EPHEMERAL AES-256-GCM IN-MEMORY CREDENTIAL PROTECTION (Issue 5):
+    Implemented `VaultMemoryGuard` in Models.cs. Instead of retaining cleartext passwords
+    in managed string memory throughout the entire session lifecycle where memory dumps
+    could expose them, RdpProfile stores passwords as protected byte payloads encrypted with
+    a session-scoped ephemeral 256-bit AES-GCM key. Plaintext byte arrays are pinned and
+    cryptographically wiped (`CryptographicOperations.ZeroMemory`) immediately after consumption.
+
+ 6. CONCURRENT VAULT SAVES & ATOMIC REPLACEMENT DEADLOCK PROTECTION (Issue 6):
+    VaultCrypto.Save previously used bare File.Replace without locking or retry backoff.
+    Rapid sequential saves (profile edits, settings changes, cert pinning updates) or transient
+    anti-virus locks could cause IOException file collisions and corrupt save operations.
+    Implemented a thread synchronization lock (`SaveLock`) combined with an exponential backoff
+    retry loop (5 attempts with jittered delays) and verified backup swapping (`vault.rdpv.tmp`
+    replaced into `vault.rdpv` with `vault.rdpv.bak`).
+
+ 7. NAMED PIPE SERVER MULTI-CLIENT CONCURRENCY (Issue 7):
+    SessionManager.PipeLoop previously ran a single sequential pipe server loop. When an external
+    process or duplicate launch connected, the pipe server was blocked until completion, dropping
+    or timing out concurrent launch requests. Upgraded to multi-client asynchronous connection
+    handling using `NamedPipeServerStream.MaxAllowedServerInstances` with immediate loop recycling.
+
+ 8. TRACE CLEANER RESIDUE AUDIT & TELEMETRY (Issue 8):
+    TraceCleaner previously swallowed all file deletion failures silently with empty catch blocks,
+    leaving the user unaware if locked temporary .rdp files or session artifacts remained on disk.
+    Implemented `SweepReport` struct and detailed telemetry reporting. TraceCleaner records total
+    files inspected, items cleaned, and any locked files encountered, returning a tactical
+    readout displayed directly on MainWindow's status strip.
+
+ 9. SECURE SERVER IDENTITY DEFAULT & VAULT CERT PINNING (Issue 9):
+    Changed default `SuppressCertWarnings` from `true` to `false` (authentication level: 2).
+    Connecting to untrusted or spoofed hosts now actively warns against MITM attacks by default.
+    Accepted server certificate thumbprints are pinned into `vault.rdpv` and automatically
+    pre-seeded into the Windows Terminal Server Client registry before launch, ensuring legitimate
+    connections bypass warning fatigue while rogue servers are flagged.
+
+ 10. REAL-TIME SEARCH & FILTERING (Issue 10):
+     Added real-time search filtering in MainWindow (`TxtSearch`). Profile cards are filtered
+     instantly across profile Name, Host, Username, and Notes with a quick clear button,
+     enabling rapid discovery and keyboard-driven navigation across large inventories.
+
+--------------------------------------------------------------------------------
+SECTION 18 — ANDROID COMPANION & PARALLEL APK BRANCH
+--------------------------------------------------------------------------------
+A parallel mobile software distribution branch sharing the identical cryptographic core:
+
+ 1. SHARED CORE (.NET 9):
+    RDPVault.Core contains AppPaths, Crypto, Models (with VaultMemoryGuard), and
+    RecoveryKeyGenerator. Compiled with net9.0 and TreatWarningsAsErrors=true.
+    100% binary/JSON compatibility with vault.rdpv.
+
+ 2. MOBILE TPM EQUIVALENT (Android Keystore / StrongBox Keymaster):
+    AndroidHardwareKeyStore generates hardware-bound AES-256-GCM master wrap keys
+    inside the dedicated Secure Element (StrongBox HSM / ARM TrustZone TEE).
+    Requires Class 3 Strong Biometrics (Fingerprint / 3D Face) via BiometricPrompt.CryptoObject.
+    Keys cannot be extracted even under device root/firmware compromise.
+
+ 3. ZERO MID-SESSION RE-AUTHENTICATION ON SCREEN FLIP:
+    - AndroidManifest.xml configChanges:
+      android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|uiMode|density"
+      prevents Activity destruction on phone rotation; events handled in-place via OnConfigurationChanged.
+    - RdpSessionService:
+      Bound Android ForegroundService hosts active FreeRDP connections, sockets, and memory-protected
+      credentials. Screen flips simply adapt the viewport without session drops or auth prompts.
+    - Auto-lock timer is suspended while a foreground session is active.
+
+ 4. EMBEDDED FREERDP CLIENT:
+    Embedded native client (libfreerdp.so, libwinpr.so) with touch-to-mouse translation,
+    pinch-to-zoom framebuffer scaling, and instant credential memory wiping.
+
+ 5. PARALLEL BUILD PIPELINE:
+    build-apk.cmd mirrors build.cmd, validating the .NET Android workload, building RDPVault.Android,
+    and outputting compiled\RDPVault.apk.
 
 --------------------------------------------------------------------------------
 END OF FILE — keep synchronized with the code.

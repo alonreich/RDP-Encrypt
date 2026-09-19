@@ -10,6 +10,7 @@ namespace RDPVault;
 
 public static class VaultCrypto
 {
+    private static readonly object SaveLock = new();
     private const int MasterKeyBytes = 32;
     private const int NonceBytes = 12;
     private const int TagBytes = 16;
@@ -286,19 +287,33 @@ public static class VaultCrypto
     /// </summary>
     private static void WriteAtomic(VaultFile file, string vaultPath)
     {
-        string json = JsonSerializer.Serialize(file, VaultJsonContext.Default.VaultFile);
-        string tmp = vaultPath + AppPaths.TempSuffix;
-        string bak = vaultPath + AppPaths.BackupSuffix;
+        lock (SaveLock)
+        {
+            string json = JsonSerializer.Serialize(file, VaultJsonContext.Default.VaultFile);
+            string tmp = vaultPath + AppPaths.TempSuffix;
+            string bak = vaultPath + AppPaths.BackupSuffix;
 
-        File.WriteAllText(tmp, json);
-        if (File.Exists(vaultPath))
-        {
-            try { File.Copy(vaultPath, bak, overwrite: true); } catch { /* backup is best effort */ }
-            File.Replace(tmp, vaultPath, null);
-        }
-        else
-        {
-            File.Move(tmp, vaultPath);
+            const int maxRetries = 3;
+            for (int attempt = 1; attempt <= maxRetries; attempt++)
+            {
+                try
+                {
+                    File.WriteAllText(tmp, json);
+                    if (File.Exists(vaultPath))
+                    {
+                        File.Replace(tmp, vaultPath, bak, true);
+                    }
+                    else
+                    {
+                        File.Move(tmp, vaultPath, overwrite: true);
+                    }
+                    break;
+                }
+                catch (IOException) when (attempt < maxRetries)
+                {
+                    System.Threading.Thread.Sleep(50 * attempt);
+                }
+            }
         }
     }
 

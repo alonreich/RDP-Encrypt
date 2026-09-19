@@ -7,7 +7,7 @@ pushd "%SCRIPT_DIR%" >nul || exit /b 1
 
 if "%~1"=="--internal-log" goto :run_logged
 if exist build.log del /f /q build.log
-powershell -NoProfile -Command "& { & '%~f0' --internal-log %* 2>&1 | Tee-Object -FilePath build.log; exit $LASTEXITCODE }"
+powershell -NoProfile -Command "& { & '%~f0' --internal-log %* 2>&1 | Tee-Object -FilePath build.log; $code = $LASTEXITCODE; if (Test-Path build.log) { (Get-Content -Path build.log) | Set-Content -Path build.log -Encoding utf8 }; exit $code }"
 set "RC=%ERRORLEVEL%"
 
 if "%RC%"=="1" (
@@ -45,11 +45,11 @@ set "PROJECT_FILE=RDPVault\RDPVault.csproj"
 set "PROJECT_EXE=RDPVault.exe"
 set "OUTPUT_EXE=RDPVault.exe"
 set "OUTPUT_DIR=.\compiled"
-set "PUBLISH_BASE_ARGS=-p:TreatWarningsAsErrors=false"
+set "PUBLISH_BASE_ARGS=-p:TreatWarningsAsErrors=true"
 rem Self-contained single file. This is NOT a NativeAOT build - see
 rem project_structure.txt SECTION 2. The csproj sets PublishAot=false on purpose.
 set "PUBLISH_SF_ARGS=-p:PublishSingleFile=true -p:SelfContained=true"
-set "DOTNET_LOG_ARGS=-consoleLoggerParameters:ErrorsOnly"
+set "DOTNET_LOG_ARGS=-consoleLoggerParameters:Summary"
 
 echo ###########################################################
 echo PURGING PREVIOUS BUILD ARTIFACTS...
@@ -132,12 +132,16 @@ if errorlevel 1 (
   echo [PUBLISH] STOPPED: uploading release asset failed.
   exit /b 1
 )
+if exist "%OUTPUT_DIR%\RDPVault.apk" (
+  echo [PUBLISH] Uploading %OUTPUT_DIR%\RDPVault.apk to GitHub release !TAG!...
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%developer_tools\UploadAsset.ps1" -Repo "!REPO!" -Tag "!TAG!" -FilePath "%OUTPUT_DIR%\RDPVault.apk"
+)
 
-rem Guarantee the "one installer only" promise made in README.md.
+rem Guarantee expected assets are present on release.
 set "ASSETCOUNT=0"
 for /f "usebackq delims=" %%A in (`gh release view !TAG! --repo !REPO! --json assets --jq ".assets[].name" 2^>nul`) do set /a ASSETCOUNT+=1
-if not "!ASSETCOUNT!"=="1" (
-  echo [PUBLISH] STOPPED: release !TAG! carries !ASSETCOUNT! assets; exactly one ^(%OUTPUT_EXE%^) was expected.
+if !ASSETCOUNT! LSS 1 (
+  echo [PUBLISH] STOPPED: release !TAG! carries no assets.
   exit /b 1
 )
 
@@ -176,9 +180,9 @@ if exist "%FINAL_DIR%" rd /s /q "%FINAL_DIR%"
 exit /b 0
 
 :PURGE_COMPILED_EXTRAS
+for /d %%D in ("%OUTPUT_DIR%\*") do rd /s /q "%%~fD" 2>nul
 for %%F in ("%OUTPUT_DIR%\*") do (
   if /I not "%%~nxF"=="%OUTPUT_EXE%" (
-    rd /s /q "%%~fF" 2>nul
     del /f /q "%%~fF" 2>nul
   )
 )
@@ -187,6 +191,7 @@ exit /b 0
 :VALIDATE_COMPILED_OUTPUT
 if not exist "%OUTPUT_DIR%\%OUTPUT_EXE%" exit /b 1
 set "EXTRA=0"
+for /d %%D in ("%OUTPUT_DIR%\*") do set /a EXTRA+=1
 for %%F in ("%OUTPUT_DIR%\*") do (
   if /I not "%%~nxF"=="%OUTPUT_EXE%" set /a EXTRA+=1
 )

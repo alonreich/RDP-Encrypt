@@ -118,13 +118,14 @@
 
                 <TextBlock Name="TxtLockStatus" Foreground="#26A0DA" FontSize="13" HorizontalAlignment="Center"
                            IsVisible="False" TextWrapping="Wrap" TextAlignment="Center"/>
+                <ProgressBar Name="ProgUnlock" IsIndeterminate="True" Height="4" Margin="0,4,0,0" IsVisible="False" Foreground="#005FB8"/>
                 <TextBlock Name="TxtLockError" Foreground="#E83030" FontSize="13" HorizontalAlignment="Center"
                            IsVisible="False" TextWrapping="Wrap" TextAlignment="Center"/>
             </StackPanel>
         </Border>
 
         <!-- ================= MAIN PANEL ================= -->
-        <Grid Name="MainPanel" IsVisible="False" RowDefinitions="Auto,Auto,*,Auto" Margin="20">
+        <Grid Name="MainPanel" IsVisible="False" RowDefinitions="Auto,Auto,Auto,*,Auto" Margin="20">
             <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,14">
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10">
                     <TextBlock Text="RDP VAULT" FontSize="20" FontWeight="Bold" VerticalAlignment="Center" LetterSpacing="1"/>
@@ -140,13 +141,16 @@
                 </StackPanel>
             </Grid>
 
+            <!-- Search bar (issue #10) -->
+            <TextBox Grid.Row="1" Name="TxtSearch" Watermark="Search profiles (name, host, username)..." Margin="0,0,0,10"/>
+
             <!-- Honest warning strip (issue #7 / #17) -->
-            <Border Grid.Row="1" Name="WarnBar" IsVisible="False" Background="#2A1F0A" BorderBrush="#5A431A"
+            <Border Grid.Row="2" Name="WarnBar" IsVisible="False" Background="#2A1F0A" BorderBrush="#5A431A"
                     BorderThickness="1" CornerRadius="4" Padding="12,8" Margin="0,0,0,12">
                 <TextBlock Name="TxtWarn" Foreground="#E8A030" FontSize="12" TextWrapping="Wrap"/>
             </Border>
 
-            <ScrollViewer Grid.Row="2">
+            <ScrollViewer Grid.Row="3">
                 <StackPanel>
                     <TextBlock Name="TxtEmpty" IsVisible="False" Foreground="#6A6A73" FontSize="13"
                                Margin="4,20,0,0"
@@ -176,11 +180,49 @@
                 </StackPanel>
             </ScrollViewer>
 
-            <Grid Grid.Row="3" Margin="0,16,0,0" ColumnDefinitions="Auto,*">
+            <Grid Grid.Row="4" Margin="0,16,0,0" ColumnDefinitions="Auto,*">
                 <Button Grid.Column="0" Name="BtnAddProfile" Content="+ Add Profile" Click="BtnAddProfile_Click"/>
                 <TextBlock Grid.Column="1" Name="TxtStatus" Text="" FontSize="12" Foreground="#6A6A73"
                            HorizontalAlignment="Right" VerticalAlignment="Center" TextWrapping="NoWrap"/>
             </Grid>
         </Grid>
+
+        <!-- ================= TACTICAL LAUNCH & WOL PROGRESS OVERLAY ================= -->
+        <Border Name="OverlayLaunch" Background="#E00A0A0C" IsVisible="False" ZIndex="200">
+            <Border Background="#141417" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="8"
+                    Width="460" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="24">
+                <StackPanel Spacing="16">
+                    <StackPanel Spacing="4">
+                        <TextBlock Name="TxtLaunchTitle" Text="CONNECTING TO REMOTE HOST" FontSize="16" FontWeight="Bold"
+                                   Foreground="#EDEDED" LetterSpacing="1"/>
+                        <TextBlock Name="TxtLaunchTarget" Text="Target Host" FontSize="13" Foreground="#8A8A93"/>
+                    </StackPanel>
+
+                    <!-- Progress Bar (supports both indeterminate and deterministic countdown) -->
+                    <StackPanel Spacing="6">
+                        <ProgressBar Name="ProgLaunch" Height="6" CornerRadius="3" Foreground="#005FB8" Background="#24242A"
+                                     IsIndeterminate="True" Minimum="0" Maximum="100"/>
+                        <TextBlock Name="TxtLaunchCountdown" Text="" FontSize="11" Foreground="#8AB4F8"
+                                   HorizontalAlignment="Right" IsVisible="False"/>
+                    </StackPanel>
+
+                    <!-- Tactical step details -->
+                    <Border Background="#0E0E10" BorderBrush="#24242A" BorderThickness="1" CornerRadius="4" Padding="12,10">
+                        <Grid ColumnDefinitions="Auto,*">
+                            <TextBlock Text="▶ " FontSize="12" Foreground="#007AE8" VerticalAlignment="Top"/>
+                            <TextBlock Grid.Column="1" Name="TxtLaunchStep" Text="Initializing connection..."
+                                       FontSize="12" Foreground="#EDEDED" TextWrapping="Wrap"/>
+                        </Grid>
+                    </Border>
+
+                    <!-- Action buttons -->
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Name="TxtLaunchSubStatus" Grid.Column="0" Text="" FontSize="11" Foreground="#6A6A73"
+                                   VerticalAlignment="Center" TextWrapping="Wrap"/>
+                        <Button Grid.Column="1" Name="BtnCancelLaunch" Content="Cancel" Click="BtnCancelLaunch_Click"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
+        </Border>
     </Grid>
 </Window>

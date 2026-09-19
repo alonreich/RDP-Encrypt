@@ -29,8 +29,7 @@ internal static class Program
                 args.Any(a => string.Equals(a, "--install", StringComparison.OrdinalIgnoreCase) ||
                               string.Equals(a, "--setup", StringComparison.OrdinalIgnoreCase) ||
                               string.Equals(a, "--upgrade", StringComparison.OrdinalIgnoreCase) ||
-                              string.Equals(a, "--uninstall", StringComparison.OrdinalIgnoreCase))
-                || (!InstallerService.IsInstalledLocation() && !File.Exists(AppPaths.VaultPath));
+                              string.Equals(a, "--uninstall", StringComparison.OrdinalIgnoreCase));
 
             if (isSetupOrMaintenance)
             {

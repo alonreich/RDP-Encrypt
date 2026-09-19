@@ -12,6 +12,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _uiTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private bool _busy;
     private bool _closing;
+    private System.Threading.CancellationTokenSource? _connectCts;
 
     public MainWindow()
     {
@@ -27,8 +28,10 @@ public partial class MainWindow : Window
         mgr.LaunchRequested += async (p, fromShortcut) => await ValidateAndLaunchProfileAsync(p, fromShortcut);
 
         RdpLauncher.SessionStarted += name => Dispatcher.UIThread.Post(() => SetStatus($"Connecting to {name}..."));
-        RdpLauncher.SessionEnded += name => Dispatcher.UIThread.Post(() => SetStatus($"{name} closed - local traces cleaned."));
+        RdpLauncher.SessionEnded += status => Dispatcher.UIThread.Post(() => SetStatus(status));
         RdpLauncher.LaunchFailed += msg => Dispatcher.UIThread.Post(() => SetStatus(msg));
+
+        TxtSearch.TextChanged += (_, _) => RefreshProfiles();
 
         // Issue #11: real user activity postpones the auto-lock. The old code hooked
         // input into a private field that was never read, so simply using the app did
@@ -79,6 +82,7 @@ public partial class MainWindow : Window
             TxtPassword.Text = "";
             TxtLockError.IsVisible = false;
             TxtLockStatus.IsVisible = false;
+            ProgUnlock.IsVisible = false;
             BtnHello.IsVisible = vaultExists && mgr.HelloSealAvailable();
             BtnRecovery.IsVisible = vaultExists;
             if (vaultExists) TxtPassword.Focus();
@@ -97,11 +101,31 @@ public partial class MainWindow : Window
     {
         var profiles = SessionManager.Current.Payload?.Profiles;
         if (profiles == null) return;
+
+        string query = (TxtSearch?.Text ?? "").Trim();
+        var filtered = string.IsNullOrEmpty(query)
+            ? profiles
+            : profiles.Where(p =>
+                p.Name.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                p.Host.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                p.Username.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                p.Notes.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
+
         LstProfiles.ItemsSource = null;
-        LstProfiles.ItemsSource = profiles;
-        LstProfiles.IsVisible = profiles.Count > 0;
-        TxtEmpty.IsVisible = profiles.Count == 0;
-        TxtCount.Text = $"{profiles.Count} profile{(profiles.Count != 1 ? "s" : "")}";
+        LstProfiles.ItemsSource = filtered;
+        LstProfiles.IsVisible = filtered.Count > 0;
+        TxtEmpty.IsVisible = filtered.Count == 0;
+
+        if (string.IsNullOrEmpty(query))
+        {
+            TxtEmpty.Text = "No profiles yet. Use \"Add Profile\" to store your first connection.";
+            TxtCount.Text = $"{profiles.Count} profile{(profiles.Count != 1 ? "s" : "")}";
+        }
+        else
+        {
+            TxtEmpty.Text = $"No profiles matching \"{query}\".";
+            TxtCount.Text = $"{filtered.Count} of {profiles.Count} profile{(profiles.Count != 1 ? "s" : "")}";
+        }
     }
 
     /// <summary>Issue #17: the status line used to be the hard-coded lie "Connected to Hardware TPM."</summary>
@@ -172,7 +196,7 @@ public partial class MainWindow : Window
         string pwd = TxtPassword.Text ?? "";
         if (pwd.Length == 0) return;
 
-        SetBusy(true, "Decrypting the vault...");
+        SetBusy(true, "Deriving encryption key via Argon2id (64 MiB RAM, 3 iterations)...");
         try
         {
             await Task.Run(() => mgr.UnlockWithPassword(pwd));
@@ -197,7 +221,7 @@ public partial class MainWindow : Window
         string? password = await Dialogs.CreateVaultAsync(this);
         if (string.IsNullOrEmpty(password)) return;
 
-        SetBusy(true, "Generating encryption keys...");
+        SetBusy(true, "Generating encryption keys via Argon2id & AES-256-GCM...");
         string recoveryCode;
         try
         {
@@ -222,7 +246,7 @@ public partial class MainWindow : Window
         string? code = await Dialogs.AskRecoveryCodeAsync(this);
         if (string.IsNullOrWhiteSpace(code)) return;
 
-        SetBusy(true, "Checking your Recovery Code...");
+        SetBusy(true, "Verifying Crockford-Base32 Recovery Code via Argon2id...");
         try
         {
             bool ok = await Task.Run(() => SessionManager.Current.UnlockWithRecoveryCode(code));
@@ -312,7 +336,7 @@ public partial class MainWindow : Window
         Show();
         Activate();
 
-        SetBusy(true, "Waiting for Windows Hello...");
+        SetBusy(true, "Awaiting Windows Hello biometric/PIN signature verification...");
         try
         {
             bool ok = await SessionManager.Current.UnlockWithHelloAsync();
@@ -337,6 +361,7 @@ public partial class MainWindow : Window
         BtnHello.IsEnabled = !busy;
         BtnRecovery.IsEnabled = !busy;
         BtnCreateVault.IsEnabled = !busy;
+        ProgUnlock.IsVisible = busy;
 
         if (status != null)
         {
@@ -424,7 +449,9 @@ public partial class MainWindow : Window
 
     private async Task ValidateAndLaunchProfileAsync(RdpProfile p, bool fromShortcut = false)
     {
+        if (_busy) return;
         SessionManager.Current.Touch();
+
         var active = RdpLauncher.FindActiveSession(p);
         if (active != null)
         {
@@ -449,7 +476,68 @@ public partial class MainWindow : Window
             await Task.Delay(500); // Allow mstsc process to terminate cleanly
         }
 
-        bool launched = await RdpLauncher.LaunchAsync(p);
+        _connectCts?.Dispose();
+        _connectCts = new System.Threading.CancellationTokenSource();
+
+        TxtLaunchTitle.Text = p.EnableWol ? "WAKE-ON-LAN & CONNECT" : "CONNECTING TO REMOTE DESKTOP";
+        TxtLaunchTarget.Text = $"{p.Name}  ·  {p.DisplayHost}";
+        ProgLaunch.IsIndeterminate = true;
+        ProgLaunch.Value = 0;
+        TxtLaunchCountdown.IsVisible = false;
+        TxtLaunchStep.Text = "Initializing connection...";
+        TxtLaunchSubStatus.Text = "";
+        BtnCancelLaunch.IsEnabled = true;
+        OverlayLaunch.IsVisible = true;
+        _busy = true;
+
+        void OnProgress(LaunchProgressUpdate u)
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                TxtLaunchStep.Text = u.Details;
+                TxtLaunchSubStatus.Text = u.Step;
+                if (u.IsIndeterminate)
+                {
+                    ProgLaunch.IsIndeterminate = true;
+                    TxtLaunchCountdown.IsVisible = false;
+                }
+                else
+                {
+                    ProgLaunch.IsIndeterminate = false;
+                    ProgLaunch.Value = u.ProgressPercent ?? 0;
+                    if (u.SecondsRemaining.HasValue)
+                    {
+                        TxtLaunchCountdown.Text = $"{u.SecondsRemaining.Value}s remaining";
+                        TxtLaunchCountdown.IsVisible = true;
+                    }
+                    else
+                    {
+                        TxtLaunchCountdown.IsVisible = false;
+                    }
+                }
+            });
+        }
+
+        bool launched = false;
+        try
+        {
+            launched = await RdpLauncher.LaunchAsync(p, OnProgress, _connectCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            SetStatus($"Connection to {p.Name} cancelled.");
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Connection failed: {ex.Message}");
+        }
+        finally
+        {
+            _busy = false;
+            await Task.Delay(350); // brief confirmation
+            OverlayLaunch.IsVisible = false;
+        }
+
         if (launched && fromShortcut)
         {
             Dispatcher.UIThread.Post(() =>
@@ -457,6 +545,13 @@ public partial class MainWindow : Window
                 WindowState = WindowState.Minimized;
             });
         }
+    }
+
+    private void BtnCancelLaunch_Click(object? sender, RoutedEventArgs e)
+    {
+        BtnCancelLaunch.IsEnabled = false;
+        TxtLaunchStep.Text = "Cancelling connection...";
+        _connectCts?.Cancel();
     }
 
     private async void BtnShortcut_Click(object? sender, RoutedEventArgs e)

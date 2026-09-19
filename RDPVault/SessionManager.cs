@@ -552,8 +552,29 @@ public sealed class SessionManager : IDisposable
         {
             try
             {
-                using var server = new NamedPipeServerStream("RDPVault_Show", PipeDirection.In);
+                var server = new NamedPipeServerStream(
+                    "RDPVault_Show",
+                    PipeDirection.In,
+                    NamedPipeServerStream.MaxAllowedServerInstances,
+                    PipeTransmissionMode.Byte,
+                    PipeOptions.Asynchronous);
+
                 await server.WaitForConnectionAsync();
+                _ = Task.Run(() => HandlePipeClientAsync(server));
+            }
+            catch
+            {
+                if (!_exiting) await Task.Delay(200);
+            }
+        }
+    }
+
+    private async Task HandlePipeClientAsync(NamedPipeServerStream server)
+    {
+        using (server)
+        {
+            try
+            {
                 using var r = new StreamReader(server);
                 string msg = (await r.ReadToEndAsync() ?? "").Trim();
 
@@ -582,10 +603,7 @@ public sealed class SessionManager : IDisposable
                     OnUi(() => ShowRequested?.Invoke());
                 }
             }
-            catch
-            {
-                if (!_exiting) await Task.Delay(200);
-            }
+            catch { }
         }
     }
 

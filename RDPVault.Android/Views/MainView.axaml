@@ -1,0 +1,96 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="RDPVault.Android.Views.MainView"
+             Background="#0E0E10"
+             Foreground="#EDEDED">
+
+    <Grid>
+        <!-- ==================== LOCKED PANEL ==================== -->
+        <Grid Name="PanelLocked" RowDefinitions="Auto,Auto,Auto,Auto,*,Auto" Margin="24,32,24,24" IsVisible="True">
+            <StackPanel Grid.Row="0" HorizontalAlignment="Center" Spacing="8" Margin="0,16,0,24">
+                <TextBlock Text="RDP VAULT" FontSize="26" FontWeight="Bold" Foreground="#FFFFFF" HorizontalAlignment="Center" LetterSpacing="2"/>
+                <TextBlock Text="Hardware-Encrypted Mobile Remote Desktop" FontSize="13" Foreground="#8A8A93" HorizontalAlignment="Center"/>
+            </StackPanel>
+
+            <!-- Hardware Quick Unlock (Biometric / StrongBox) -->
+            <Border Grid.Row="1" Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16" Margin="0,0,0,16">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="HARDWARE ROOT OF TRUST" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
+                    <Button Name="BtnBiometricUnlock" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                            Background="#005FB8" Foreground="White" Height="48" CornerRadius="6" FontSize="15" FontWeight="SemiBold">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="🔒" VerticalAlignment="Center"/>
+                            <TextBlock Text="Unlock with Biometrics (StrongBox)" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </Border>
+
+            <!-- Master Password Unlock -->
+            <Border Grid.Row="2" Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16" Margin="0,0,0,16">
+                <StackPanel Spacing="12">
+                    <TextBlock Text="MASTER PASSWORD" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
+                    <TextBox Name="TxtPassword" PasswordChar="●" Watermark="Enter master password..."
+                             Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="44" FontSize="15"/>
+                    <Button Name="BtnUnlock" Content="Unlock Vault" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                            Background="#2E2E35" Foreground="#EDEDED" Height="44" CornerRadius="6" FontSize="15"/>
+
+                    <!-- Tactical progress bar for Argon2id KDF derivation -->
+                    <StackPanel Name="PnlUnlockProgress" Spacing="6" Margin="0,4,0,0" IsVisible="False">
+                        <ProgressBar Name="ProgUnlock" IsIndeterminate="True" Height="4" Foreground="#005FB8" Background="#1C1C21"/>
+                        <TextBlock Name="TxtUnlockStatus" Text="Deriving encryption keys with Argon2id (64 MiB)..." FontSize="12" Foreground="#8A8A93" HorizontalAlignment="Center"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Recovery Code link -->
+            <Button Grid.Row="3" Name="BtnShowRecovery" Content="Forgot Master Password? Use Recovery Code"
+                    Background="Transparent" Foreground="#8A8A93" FontSize="13" HorizontalAlignment="Center"/>
+        </Grid>
+
+        <!-- ==================== UNLOCKED PANEL ==================== -->
+        <Grid Name="PanelUnlocked" RowDefinitions="Auto,Auto,*,Auto" Margin="16,16,16,16" IsVisible="False">
+            <!-- Header Bar -->
+            <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,12">
+                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                    <TextBlock Text="RDP VAULT" FontSize="20" FontWeight="Bold" Foreground="#FFFFFF"/>
+                    <TextBlock Text="Vault Unlocked (StrongBox Protected)" FontSize="11" Foreground="#2FBF71"/>
+                </StackPanel>
+                <Button Grid.Column="1" Name="BtnAddProfile" Content="+ Add" Background="#005FB8" Foreground="White"
+                        Margin="0,0,8,0" CornerRadius="4" Height="36" Padding="14,0"/>
+                <Button Grid.Column="2" Name="BtnLock" Content="Lock" Background="#2E2E35" Foreground="#EDEDED"
+                        CornerRadius="4" Height="36" Padding="14,0"/>
+            </Grid>
+
+            <!-- Search / Filter Bar -->
+            <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Margin="0,0,0,12">
+                <TextBox Grid.Column="0" Name="TxtSearch" Watermark="Search profiles (name, host, user, notes)..."
+                         Background="#141417" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="40" FontSize="14"/>
+                <Button Grid.Column="1" Name="BtnClearSearch" Content="✕" Background="#141417" Foreground="#8A8A93"
+                        BorderBrush="#2E2E35" Height="40" Width="40" Margin="4,0,0,0"/>
+            </Grid>
+
+            <!-- Profiles List -->
+            <ScrollViewer Grid.Row="2">
+                <StackPanel Name="PnlProfilesList" Spacing="10"/>
+            </ScrollViewer>
+        </Grid>
+
+        <!-- ==================== ACTIVE RDP SESSION VIEWPORT ==================== -->
+        <Grid Name="PanelSession" IsVisible="False" Background="#000000">
+            <!-- Canvas where FreeRDP renders frames -->
+            <Canvas Name="RdpCanvas" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="#000000"/>
+
+            <!-- Floating Overlay Control Bar (Collapsible) -->
+            <Border HorizontalAlignment="Center" VerticalAlignment="Top" Background="#E6141417"
+                    CornerRadius="0,0,8,8" BorderBrush="#2E2E35" BorderThickness="1,0,1,1" Padding="12,6" Margin="0,0,0,0">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Name="BtnDisconnectSession" Content="Disconnect" Background="#B80000" Foreground="White" Height="32" Padding="10,0" CornerRadius="4"/>
+                    <Button Name="BtnToggleKeyboard" Content="Keyboard" Background="#2E2E35" Foreground="#EDEDED" Height="32" Padding="8,0" CornerRadius="4"/>
+                    <Button Name="BtnCtrlAltDel" Content="Ctrl+Alt+Del" Background="#2E2E35" Foreground="#EDEDED" Height="32" Padding="8,0" CornerRadius="4"/>
+                    <Button Name="BtnWinKey" Content="Win" Background="#2E2E35" Foreground="#EDEDED" Height="32" Padding="8,0" CornerRadius="4"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>

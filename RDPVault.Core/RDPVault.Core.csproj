@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>12</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <RootNamespace>RDPVault</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Isopoh.Cryptography.Argon2" Version="2.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\RDPVault\AppPaths.cs" Link="AppPaths.cs" />
+    <Compile Include="..\RDPVault\Crypto.cs" Link="Crypto.cs" />
+    <Compile Include="..\RDPVault\Models.cs" Link="Models.cs" />
+    <Compile Include="..\RDPVault\RecoveryKeyGenerator.cs" Link="RecoveryKeyGenerator.cs" />
+  </ItemGroup>
+</Project>

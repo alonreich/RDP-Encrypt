@@ -25,11 +25,20 @@ namespace RDPVault;
 ///
 /// Every step is wrapped so cleanup can never crash or block the app.
 /// </summary>
+public readonly struct SweepReport
+{
+    public int ItemsCleaned { get; init; }
+    public int ItemsLocked { get; init; }
+    public bool AllClean => ItemsLocked == 0;
+}
+
 public static class TraceCleaner
 {
     private static readonly object Gate = new();
     private static SweepScope _scope = SweepScope.OwnHostsOnly;
     private static string[] _hosts = Array.Empty<string>();
+    private static int _itemsCleaned;
+    private static int _itemsLocked;
 
     public static void Configure(SweepScope scope, IEnumerable<string> hosts)
     {
@@ -70,27 +79,31 @@ public static class TraceCleaner
     // ---------------- public entry points ----------------
 
     /// <summary>Standard sweep: everything except other saved TERMSRV credentials.</summary>
-    public static void Sweep()
+    public static SweepReport Sweep()
     {
+        _itemsCleaned = 0;
+        _itemsLocked = 0;
         RegistryHistory();
         DefaultRdpFile();
         JumpLists();
         RecentItems();
         TempLaunchers();
-        CleanBundleResidue();
         if (Everything) { UserAssist(); Prefetch(); }
+        return new SweepReport { ItemsCleaned = _itemsCleaned, ItemsLocked = _itemsLocked };
     }
 
     /// <summary>
     /// Issue #1: Cleans specific target hosts deterministically, even if ForgetHosts() was called when the vault locked.
     /// </summary>
-    public static void SweepHosts(IEnumerable<string> hosts)
+    public static SweepReport SweepHosts(IEnumerable<string> hosts)
     {
+        _itemsCleaned = 0;
+        _itemsLocked = 0;
         string[] targetHosts = hosts.Where(h => !string.IsNullOrWhiteSpace(h))
                                     .Select(h => h.Trim())
                                     .Distinct(StringComparer.OrdinalIgnoreCase)
                                     .ToArray();
-        if (targetHosts.Length == 0) return;
+        if (targetHosts.Length == 0) return new SweepReport();
 
         RegistryHistory(targetHosts);
         DefaultRdpFile(targetHosts);
@@ -98,14 +111,15 @@ public static class TraceCleaner
         RecentItems(targetHosts);
         TempLaunchers();
         DeleteSavedRdpCredentials(targetHosts);
-        CleanBundleResidue();
+        return new SweepReport { ItemsCleaned = _itemsCleaned, ItemsLocked = _itemsLocked };
     }
 
     /// <summary>Sweep + delete every saved RDP credential on this PC.</summary>
-    public static void DeepSweep()
+    public static SweepReport DeepSweep()
     {
-        Sweep();
+        var report = Sweep();
         DeleteSavedRdpCredentials();
+        return report;
     }
 
     // ---------------- registry history ----------------
@@ -169,15 +183,9 @@ public static class TraceCleaner
                          Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Documents", "Default.rdp")
                      })
             {
-                try
-                {
-                    if (!File.Exists(path)) continue;
-                    // Scoped: Default.rdp records the LAST host used. Only remove it
-                    // when that host is one of ours.
-                    if (!Everything && !MentionsTargetHost(File.ReadAllText(path), explicitHosts)) continue;
-                    File.Delete(path);
-                }
-                catch { }
+                if (!File.Exists(path)) continue;
+                if (!Everything && !MentionsTargetHost(File.ReadAllText(path), explicitHosts)) continue;
+                TryDeleteFile(path);
             }
         });
     }
@@ -203,9 +211,9 @@ public static class TraceCleaner
                         string asText = Encoding.Unicode.GetString(data);
                         if (!MentionsTargetHost(asText, explicitHosts)) continue;
                     }
-                    File.Delete(file);
+                    TryDeleteFile(file);
                 }
-                catch { /* locked by Explorer - skipped this round */ }
+                catch { _itemsLocked++; }
             }
         });
     }
@@ -220,14 +228,10 @@ public static class TraceCleaner
 
             foreach (string file in Directory.GetFiles(dir, "*.rdp*"))
             {
-                try
-                {
-                    string name = Path.GetFileName(file);
-                    bool ours = name.StartsWith("rdpv_", StringComparison.OrdinalIgnoreCase) || MentionsTargetHost(name, explicitHosts);
-                    if (!Everything && !ours) continue;
-                    File.Delete(file);
-                }
-                catch { }
+                string name = Path.GetFileName(file);
+                bool ours = name.StartsWith("rdpv_", StringComparison.OrdinalIgnoreCase) || MentionsTargetHost(name, explicitHosts);
+                if (!Everything && !ours) continue;
+                TryDeleteFile(file);
             }
         });
     }
@@ -239,7 +243,7 @@ public static class TraceCleaner
         {
             foreach (string file in Directory.GetFiles(Path.GetTempPath(), "rdpv_*.rdp"))
             {
-                try { File.Delete(file); } catch { }
+                TryDeleteFile(file);
             }
         });
     }
@@ -327,6 +331,27 @@ public static class TraceCleaner
     private static void TryRun(Action a)
     {
         try { a(); } catch { /* never let cleanup crash the app */ }
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+                _itemsCleaned++;
+            }
+        }
+        catch (IOException)
+        {
+            _itemsLocked++;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            _itemsLocked++;
+        }
+        catch { }
     }
 
     private static string Rot13(string s)

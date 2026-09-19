@@ -20,7 +20,7 @@ namespace RDPVault.Android;
     RoundIcon = "@mipmap/icon",
     MainLauncher = true,
     Exported = true,
-    WindowSoftInputMode = SoftInput.AdjustResize,
+    WindowSoftInputMode = global::Android.Views.SoftInput.AdjustResize,
     ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize | ConfigChanges.UiMode | ConfigChanges.SmallestScreenSize | ConfigChanges.ScreenLayout | ConfigChanges.Density)]
 public class MainActivity : AvaloniaMainActivity<App>
 {

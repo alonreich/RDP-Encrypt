@@ -15,7 +15,7 @@ namespace RDPVault.Android;
 [Activity(
     Label = "RDP Vault",
     Theme = "@android:style/Theme.NoTitleBar",
-    Icon = "@mipmap/ic_launcher",
+    Icon = "@android:drawable/sym_def_app_icon",
     MainLauncher = true,
     ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize | ConfigChanges.UiMode | ConfigChanges.SmallestScreenSize | ConfigChanges.ScreenLayout | ConfigChanges.Density)]
 public class MainActivity : AvaloniaMainActivity<App>

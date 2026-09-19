@@ -57,7 +57,7 @@ jobs:
 
       - name: Build Android APK
         run: |
-          dotnet build RDPVault.Android/RDPVault.Android.csproj -c Release -p:AndroidPackageFormat=apk
+          dotnet publish RDPVault.Android/RDPVault.Android.csproj -c Release -p:AndroidPackageFormat=apk
           mkdir -p compiled
           APK_PATH=$(find RDPVault.Android/bin/Release -type f -name "*.apk" | head -n 1)
           if [ -z "$APK_PATH" ]; then

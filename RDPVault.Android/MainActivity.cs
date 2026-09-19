@@ -18,8 +18,12 @@ namespace RDPVault.Android;
     Icon = "@mipmap/ic_launcher",
     MainLauncher = true,
     ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize | ConfigChanges.UiMode | ConfigChanges.SmallestScreenSize | ConfigChanges.ScreenLayout | ConfigChanges.Density)]
-public class MainActivity : AvaloniaMainActivity
+public class MainActivity : AvaloniaMainActivity<App>
 {
+    protected override AppBuilder CustomizeAppBuilder(AppBuilder builder)
+    {
+        return base.CustomizeAppBuilder(builder);
+    }
     private RdpSessionService? _sessionService;
     private bool _serviceBound;
     private ServiceConnection? _serviceConnection;

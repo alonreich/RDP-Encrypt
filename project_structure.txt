@@ -917,6 +917,22 @@ A parallel mobile software distribution branch sharing the identical cryptograph
     - High-DPI Desktop Icon Assets: Embedded multi-density mipmap icons (mdpi, hdpi, xhdpi, xxhdpi,
       xxxhdpi, and drawable) extracted directly from the Windows desktop icon.ico.
 
+ 6. ANDROID FIRST-TIME SETUP WIZARD & BIOMETRIC AUTH LIFECYCLE:
+    - First-Time Setup Wizard (PanelFirstRun): Automatically detects when no vault exists on the device
+      (!File.Exists(VaultPath)). Displays welcome screen with dual password fields (min 8 chars), match
+      validation, and hardware StrongBox biometric enrollment toggle.
+    - Recovery Code Display (PanelRecoveryDisplay): Generates 24-character Crockford-Base32 emergency code,
+      formatted into 4-character blocks (XXXX-XXXX-XXXX-XXXX-XXXX-XXXX). Provides one-tap clipboard copy
+      and requires explicit confirmation checkbox before granting vault access.
+    - Biometric & Password Unlock (PanelLocked): Employs BiometricPrompt with CryptoObject AES-GCM cipher
+      unsealing master key directly from AndroidKeyStore / StrongBox HSM. When unlocking with master password,
+      runs Argon2id KDF off the UI thread with tactical progress indication and explicit failure diagnostics.
+    - Emergency Recovery Flow (PanelRecoveryUnlock): Accessible via "Forgot Master Password? Use Recovery Code".
+      Unseals vault using recovery key, resets master password, and generates fresh recovery code.
+    - Full Mobile Profile Editor & Settings: Embedded UserControl panels for adding/editing/deleting connections
+      (with custom RDP ports and Wake-on-LAN configuration) and managing hardware biometric seals.
+
 --------------------------------------------------------------------------------
 END OF FILE — keep synchronized with the code.
 ================================================================================
+

@@ -54,8 +54,11 @@ public class MainActivity : AvaloniaMainActivity<App>
         }
     }
 
+    public static MainActivity? Instance { get; private set; }
+
     protected override void OnCreate(Bundle? savedInstanceState)
     {
+        Instance = this;
         base.OnCreate(savedInstanceState);
 
         try
@@ -90,6 +93,7 @@ public class MainActivity : AvaloniaMainActivity<App>
 
     protected override void OnDestroy()
     {
+        if (Instance == this) Instance = null;
         if (_serviceBound && _serviceConnection != null)
         {
             UnbindService(_serviceConnection);

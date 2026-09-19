@@ -131,4 +131,108 @@ public static class AndroidHardwareKeyStore
 
         return cipher;
     }
+
+    public static bool IsBiometricAvailable(Context? context)
+    {
+        if (context == null) return false;
+        try
+        {
+            var bm = BiometricManager.From(context);
+            return bm.CanAuthenticate((int)BiometricManager.Authenticators.BiometricStrong) == BiometricManager.BiometricSuccess;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public static void DeleteHardwareKey(string keyId)
+    {
+        try
+        {
+            string alias = KeyAliasPrefix + keyId;
+            var keyStore = KeyStore.GetInstance(KeyStoreProvider);
+            keyStore?.Load(null);
+            if (keyStore?.ContainsAlias(alias) == true)
+            {
+                keyStore.DeleteEntry(alias);
+            }
+        }
+        catch { }
+    }
+
+    public static Task<(bool Success, Cipher? Cipher, string? ErrorMessage)> AuthenticatePromptAsync(
+        MainActivity activity,
+        Cipher cipher,
+        string title,
+        string subtitle,
+        string negativeButtonText)
+    {
+        var tcs = new TaskCompletionSource<(bool Success, Cipher? Cipher, string? ErrorMessage)>();
+
+        activity.RunOnUiThread(() =>
+        {
+            try
+            {
+                var executor = AndroidX.Core.Content.ContextCompat.GetMainExecutor(activity);
+                if (executor == null)
+                {
+                    tcs.TrySetResult((false, null, "Failed to obtain main executor."));
+                    return;
+                }
+
+                var callback = new BiometricAuthCallback(
+                    onSuccess: res => tcs.TrySetResult((true, res.CryptoObject?.Cipher, null)),
+                    onError: (code, err) => tcs.TrySetResult((false, null, err)));
+
+                var prompt = new BiometricPrompt(activity, executor, callback);
+                var promptInfo = new BiometricPrompt.PromptInfo.Builder()
+                    .SetTitle(title)
+                    .SetSubtitle(subtitle)
+                    .SetNegativeButtonText(negativeButtonText)
+                    .SetAllowedAuthenticators((int)BiometricManager.Authenticators.BiometricStrong)
+                    .Build();
+
+                var cryptoObject = new BiometricPrompt.CryptoObject(cipher);
+                prompt.Authenticate(promptInfo, cryptoObject);
+            }
+            catch (Exception ex)
+            {
+                tcs.TrySetResult((false, null, ex.Message));
+            }
+        });
+
+        return tcs.Task;
+    }
+
+    private class BiometricAuthCallback : BiometricPrompt.AuthenticationCallback
+    {
+        private readonly Action<BiometricPrompt.AuthenticationResult> _onSuccess;
+        private readonly Action<int, string> _onError;
+
+        public BiometricAuthCallback(
+            Action<BiometricPrompt.AuthenticationResult> onSuccess,
+            Action<int, string> onError)
+        {
+            _onSuccess = onSuccess;
+            _onError = onError;
+        }
+
+        public override void OnAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result)
+        {
+            base.OnAuthenticationSucceeded(result);
+            _onSuccess(result);
+        }
+
+        public override void OnAuthenticationError(int errorCode, Java.Lang.ICharSequence errString)
+        {
+            base.OnAuthenticationError(errorCode, errString);
+            _onError(errorCode, errString?.ToString() ?? "Authentication cancelled");
+        }
+
+        public override void OnAuthenticationFailed()
+        {
+            base.OnAuthenticationFailed();
+        }
+    }
 }

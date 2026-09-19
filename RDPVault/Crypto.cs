@@ -289,6 +289,12 @@ public static class VaultCrypto
     {
         lock (SaveLock)
         {
+            string? dir = Path.GetDirectoryName(vaultPath);
+            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+
             string json = JsonSerializer.Serialize(file, VaultJsonContext.Default.VaultFile);
             string tmp = vaultPath + AppPaths.TempSuffix;
             string bak = vaultPath + AppPaths.BackupSuffix;

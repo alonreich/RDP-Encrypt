@@ -33,9 +33,41 @@ public partial class MainView : UserControl
     private string _activeRecoveryCode = "";
     private IntPtr _activeRdpContext = IntPtr.Zero;
 
-    private string VaultPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.Personal),
-        AppPaths.VaultFileName);
+    private static string ResolveVaultPath()
+    {
+        string baseDir = global::Android.App.Application.Context?.FilesDir?.AbsolutePath
+            ?? Environment.GetFolderPath(Environment.SpecialFolder.Personal);
+
+        if (!Directory.Exists(baseDir))
+        {
+            Directory.CreateDirectory(baseDir);
+        }
+
+        string standardPath = Path.Combine(baseDir, AppPaths.VaultFileName);
+        if (File.Exists(standardPath)) return standardPath;
+
+        // Legacy migration check: if an earlier version wrote to Documents subfolder, migrate it forward
+        try
+        {
+            string legacyDir = Environment.GetFolderPath(Environment.SpecialFolder.Personal);
+            string legacyPath = Path.Combine(legacyDir, AppPaths.VaultFileName);
+            if (File.Exists(legacyPath))
+            {
+                File.Move(legacyPath, standardPath, overwrite: true);
+                string legacyBak = legacyPath + AppPaths.BackupSuffix;
+                if (File.Exists(legacyBak))
+                {
+                    File.Move(legacyBak, standardPath + AppPaths.BackupSuffix, overwrite: true);
+                }
+                return standardPath;
+            }
+        }
+        catch { }
+
+        return standardPath;
+    }
+
+    private string VaultPath => ResolveVaultPath();
 
     public MainView()
     {

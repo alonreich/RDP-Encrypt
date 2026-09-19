@@ -82,7 +82,7 @@ public class RdpSessionService : Service
 
     private Notification BuildNotification(string statusText)
     {
-        var launchIntent = PackageManager?.GetLaunchIntentForPackage(PackageName ?? "");
+        var launchIntent = PackageManager?.GetLaunchIntentForPackage(PackageName ?? "") ?? new Intent(this, typeof(MainActivity));
         var pendingIntent = PendingIntent.GetActivity(
             this,
             0,

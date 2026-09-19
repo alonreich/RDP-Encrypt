@@ -58,18 +58,23 @@ public partial class MainView : UserControl
             // If vault doesn't exist yet on device, initialize fresh vault
             if (!File.Exists(vaultPath))
             {
-                var (file, key, recCode) = VaultCrypto.CreateVault(password);
+                var payload = new VaultPayload();
+                var file = VaultCrypto.CreateVault(password, payload, vaultPath, out string _);
+                var (master, _) = VaultCrypto.Open(file, password);
                 _vaultFile = file;
-                _masterKey = key;
-                _payload = new VaultPayload();
-                VaultCrypto.Save(file, vaultPath);
+                _masterKey = master;
+                _payload = payload;
             }
             else
             {
                 // Run Argon2id KDF off UI thread to keep mobile UI responsive
-                var (payload, key) = await Task.Run(() => VaultCrypto.Open(vaultPath, password));
+                var file = System.Text.Json.JsonSerializer.Deserialize(
+                    File.ReadAllText(vaultPath), VaultJsonContext.Default.VaultFile)
+                    ?? throw new InvalidDataException("Vault file is empty or corrupted.");
+                var (master, payload) = await Task.Run(() => VaultCrypto.Open(file, password));
+                _vaultFile = file;
+                _masterKey = master;
                 _payload = payload;
-                _masterKey = key;
             }
 
             // Successfully unlocked

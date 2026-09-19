@@ -54,7 +54,7 @@ public static class AndroidHardwareKeyStore
             builder.SetUserAuthenticationRequired(true);
             if (Build.VERSION.SdkInt >= BuildVersionCodes.R)
             {
-                builder.SetUserAuthenticationParameters(0, KeyProperties.AuthBiometricStrong);
+                builder.SetUserAuthenticationParameters(0, (int)KeyPropertiesAuthType.BiometricStrong);
             }
         }
 
@@ -118,15 +118,15 @@ public static class AndroidHardwareKeyStore
         var cipher = Cipher.GetInstance($"{KeyProperties.KeyAlgorithmAes}/{KeyProperties.BlockModeGcm}/{KeyProperties.EncryptionPaddingNone}");
         if (cipher == null) throw new InvalidOperationException("AES/GCM cipher unavailable.");
 
-        if (opMode == (int)CipherMode.EncryptMode)
+        if (opMode == (int)Javax.Crypto.CipherMode.EncryptMode)
         {
-            cipher.Init((CipherMode)opMode, key);
+            cipher.Init((Javax.Crypto.CipherMode)opMode, key);
         }
         else
         {
             if (iv == null) throw new ArgumentNullException(nameof(iv), "IV required for decryption.");
             var gcmSpec = new GCMParameterSpec(128, iv);
-            cipher.Init((CipherMode)opMode, key, gcmSpec);
+            cipher.Init((Javax.Crypto.CipherMode)opMode, key, gcmSpec);
         }
 
         return cipher;

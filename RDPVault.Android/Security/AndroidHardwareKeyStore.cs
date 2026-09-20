@@ -49,19 +49,6 @@ public static class AndroidHardwareKeyStore
             .SetEncryptionPaddings(KeyProperties.EncryptionPaddingNone)
             .SetKeySize(256);
 
-        if (requireBiometrics)
-        {
-            builder.SetUserAuthenticationRequired(true);
-            if (OperatingSystem.IsAndroidVersionAtLeast(30))
-            {
-                builder.SetUserAuthenticationParameters(30, (int)KeyPropertiesAuthType.BiometricStrong);
-            }
-            else
-            {
-                builder.SetUserAuthenticationValidityDurationSeconds(30);
-            }
-        }
-
         // Attempt StrongBox backing (dedicated HSM chip), fallback to TEE Keymaster if not supported
         if (OperatingSystem.IsAndroidVersionAtLeast(28) && HasStrongBoxSupport(context))
         {

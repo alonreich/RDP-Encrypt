@@ -5,5 +5,9 @@
 
     <Application.Styles>
         <FluentTheme />
+        <Style Selector="Button">
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        </Style>
     </Application.Styles>
 </Application>

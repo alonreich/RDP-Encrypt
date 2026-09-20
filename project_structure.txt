@@ -924,17 +924,20 @@ A parallel mobile software distribution branch sharing the identical cryptograph
     - Recovery Code Display (PanelRecoveryDisplay): Generates 24-character Crockford-Base32 emergency code,
       formatted into 4-character blocks (XXXX-XXXX-XXXX-XXXX-XXXX-XXXX). Provides one-tap clipboard copy
       and requires explicit confirmation checkbox before granting vault access.
-    - Biometric & Password Unlock (PanelLocked): Resolves Android KeyStore's DECRYPT_MODE unauthenticated
-      cipher initialization exception by establishing a 30-second biometric authorization window
-      (SetUserAuthenticationParameters(30, BiometricStrong)). Authenticates user via native BiometricPrompt
-      first, allowing subsequent cipher.Init and unsealing to execute with zero Java security exceptions.
-      When unlocking with master password, runs Argon2id KDF off UI thread with tactical progress overlay.
+    - Biometric & Password Unlock (PanelLocked): Hardware-binds 256-bit AES-GCM master wrap keys inside
+      device StrongBox HSM / ARM TrustZone TEE while BiometricPrompt enforces Class 3 strong biometric presence
+      gates. Automatic biometric seal migration & repair occurs seamlessly on Master Password unlock, eliminating
+      KeyStore AuthToken circular deadlocks and Java exceptions.
     - Emergency Recovery Flow (PanelRecoveryUnlock): Accessible via "Forgot Master Password? Use Recovery Code".
       Unseals vault using recovery key, resets master password, and generates fresh recovery code.
-    - UI/UX & Soft-Keyboard Handling: Configured fitsSystemWindows="true", dark status-bar tint, and safe top
-      margins (40dp) preventing camera punch-hole/notch overlap on title bars and action buttons. Implemented
-      generous 320px bottom scroll padding with GotFocus -> BringIntoView() on connection editor inputs
-      (WOL MAC, ports, notes) preventing virtual keyboard occlusion.
+    - Mobile UI/UX & Soft-Keyboard Architecture:
+      * Button Text Centering: Configured global Button style with VerticalContentAlignment="Center" and
+        HorizontalContentAlignment="Center" eliminating top-aligned text metrics on mobile.
+      * Header Safe Clearance: Implemented 48-52dp safe top margins and 2-row header hierarchy with full-width
+        subtitle row, guaranteeing zero overlap with camera punch-holes, status bars, and action buttons.
+      * Sticky Profile Editor Header: Profile editor uses a docked top bar (Cancel / Title / Save) with 400px
+        bottom scroll padding and programmatic focus scroll offsets, ensuring Save/Cancel and WOL fields
+        remain permanently accessible and never occluded by virtual soft keyboards.
     - Tactical Launch & WOL Progress Overlay (OverlayLaunch): Modal overlay during connection and Wake-on-LAN
       execution displaying real-time step notifications, countdown timer, visual progress bar, and user
       cancellation button, preventing user uncertainty during remote host boot.

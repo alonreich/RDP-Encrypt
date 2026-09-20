@@ -118,18 +118,39 @@ public partial class MainView : UserControl
             RefreshProfilesList();
         };
 
-        // 6. Profile Editor
+        // 6. Profile Editor (Both Sticky Top Header and Bottom Buttons)
         BtnSaveProfile.Click += (_, _) => SaveProfile();
+        BtnTopSaveProfile.Click += (_, _) => SaveProfile();
         BtnCancelProfile.Click += (_, _) =>
         {
             PanelProfileEditor.IsVisible = false;
             PanelUnlocked.IsVisible = true;
         };
+        BtnTopCancelProfile.Click += (_, _) =>
+        {
+            PanelProfileEditor.IsVisible = false;
+            PanelUnlocked.IsVisible = true;
+        };
         BtnDeleteProfile.Click += (_, _) => DeleteProfile();
-        TxtProfileWolMac.GotFocus += (_, _) => TxtProfileWolMac.BringIntoView();
-        TxtProfileWolPort.GotFocus += (_, _) => TxtProfileWolPort.BringIntoView();
-        TxtProfileWolWait.GotFocus += (_, _) => TxtProfileWolWait.BringIntoView();
-        TxtProfileNotes.GotFocus += (_, _) => TxtProfileNotes.BringIntoView();
+        BtnTopDeleteProfile.Click += (_, _) => DeleteProfile();
+
+        void ScrollToWol()
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                ScrollProfileEditor.Offset = new Vector(0, 260);
+            });
+        }
+        TxtProfileWolMac.GotFocus += (_, _) => ScrollToWol();
+        TxtProfileWolPort.GotFocus += (_, _) => ScrollToWol();
+        TxtProfileWolWait.GotFocus += (_, _) => ScrollToWol();
+        TxtProfileNotes.GotFocus += (_, _) =>
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                ScrollProfileEditor.Offset = new Vector(0, 420);
+            });
+        };
 
         // 7. Settings
         BtnToggleBiometrics.Click += async (_, _) => await ToggleBiometricsAsync();
@@ -371,7 +392,7 @@ public partial class MainView : UserControl
         }
         catch (Exception ex)
         {
-            TxtLockError.Text = "Biometric unlock failed: " + ex.Message + ". Unlock with Master Password to re-enroll.";
+            TxtLockError.Text = "Biometric seal outdated or invalid. Please unlock with Master Password once to automatically repair.";
             TxtLockError.IsVisible = true;
         }
     }
@@ -406,6 +427,34 @@ public partial class MainView : UserControl
             _vaultFile = file;
             _masterKey = master;
             _payload = payload;
+
+            // Auto-repair biometric seal if previously enrolled on this device
+            string machineId = VaultCrypto.CurrentMachineId();
+            if (file.Seals?.Any(s => s.MachineId == machineId) == true && MainActivity.Instance != null)
+            {
+                try
+                {
+                    string newKeyId = Guid.NewGuid().ToString("N");
+                    AndroidHardwareKeyStore.GenerateHardwareKey(MainActivity.Instance, newKeyId);
+                    var cipher = AndroidHardwareKeyStore.GetInitializedCipher(newKeyId, (int)Javax.Crypto.CipherMode.EncryptMode);
+                    string tpmBlob = AndroidHardwareKeyStore.SealMasterKey(newKeyId, master, cipher);
+
+                    var newSeals = file.Seals.Where(s => s.MachineId != machineId).ToList();
+                    newSeals.Add(new SealEntry
+                    {
+                        MachineId = machineId,
+                        KeyId = newKeyId,
+                        TpmBlob = tpmBlob
+                    });
+
+                    VaultCrypto.Save(file, master, payload, VaultPath, newSeals: newSeals);
+                    _vaultFile = file;
+                }
+                catch
+                {
+                    // Non-fatal if hardware key repair fails
+                }
+            }
 
             TxtPassword.Text = "";
             SwitchToUnlocked();
@@ -588,7 +637,8 @@ public partial class MainView : UserControl
             Text = profile.Name,
             FontSize = 16,
             FontWeight = FontWeight.Bold,
-            Foreground = new SolidColorBrush(Color.Parse("#FFFFFF"))
+            Foreground = new SolidColorBrush(Color.Parse("#FFFFFF")),
+            TextTrimming = TextTrimming.CharacterEllipsis
         });
 
         string wolBadge = profile.EnableWol ? "  •  WOL" : "";
@@ -596,7 +646,8 @@ public partial class MainView : UserControl
         {
             Text = $"{profile.Host}:{profile.Port}  •  {profile.Username}{wolBadge}",
             FontSize = 12,
-            Foreground = new SolidColorBrush(Color.Parse("#8A8A93"))
+            Foreground = new SolidColorBrush(Color.Parse("#8A8A93")),
+            TextTrimming = TextTrimming.CharacterEllipsis
         });
 
         var btnEdit = new Button
@@ -607,7 +658,9 @@ public partial class MainView : UserControl
             CornerRadius = new CornerRadius(4),
             Height = 36,
             Padding = new Thickness(12, 0),
-            VerticalAlignment = VerticalAlignment.Center
+            VerticalAlignment = VerticalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            HorizontalContentAlignment = HorizontalAlignment.Center
         };
         btnEdit.Click += (_, _) => ShowProfileEditor(profile);
 
@@ -620,6 +673,8 @@ public partial class MainView : UserControl
             Height = 36,
             Padding = new Thickness(14, 0),
             VerticalAlignment = VerticalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
             FontWeight = FontWeight.SemiBold
         };
         btnConnect.Click += async (_, _) => await StartSessionAsync(profile);
@@ -655,6 +710,7 @@ public partial class MainView : UserControl
             TxtProfileWolWait.Text = "5";
             TxtProfileNotes.Text = "";
             BtnDeleteProfile.IsVisible = false;
+            BtnTopDeleteProfile.IsVisible = false;
         }
         else
         {
@@ -671,8 +727,10 @@ public partial class MainView : UserControl
             TxtProfileWolWait.Text = profile.WolWaitSeconds.ToString();
             TxtProfileNotes.Text = profile.Notes;
             BtnDeleteProfile.IsVisible = true;
+            BtnTopDeleteProfile.IsVisible = true;
         }
 
+        ScrollProfileEditor.Offset = new Vector(0, 0);
         ShowPanel(PanelProfileEditor);
     }
 

@@ -7,7 +7,7 @@
     <Grid>
         <!-- ==================== 1. FIRST-TIME SETUP WIZARD ==================== -->
         <ScrollViewer Name="PanelFirstRun" IsVisible="False" HorizontalScrollBarVisibility="Disabled">
-            <StackPanel Margin="24,40,24,32" Spacing="16">
+            <StackPanel Margin="24,48,24,32" Spacing="16">
                 <StackPanel HorizontalAlignment="Center" Spacing="6" Margin="0,8,0,12">
                     <TextBlock Text="RDP VAULT" FontSize="26" FontWeight="Bold" Foreground="#FFFFFF" HorizontalAlignment="Center" LetterSpacing="2"/>
                     <TextBlock Text="Initial Vault Setup" FontSize="16" FontWeight="SemiBold" Foreground="#26A0DA" HorizontalAlignment="Center"/>
@@ -50,7 +50,7 @@
 
         <!-- ==================== 2. RECOVERY CODE DISPLAY PANEL ==================== -->
         <ScrollViewer Name="PanelRecoveryDisplay" IsVisible="False" HorizontalScrollBarVisibility="Disabled">
-            <StackPanel Margin="24,40,24,32" Spacing="16">
+            <StackPanel Margin="24,48,24,32" Spacing="16">
                 <StackPanel HorizontalAlignment="Center" Spacing="6" Margin="0,8,0,12">
                     <TextBlock Text="🔑" FontSize="32" HorizontalAlignment="Center"/>
                     <TextBlock Text="EMERGENCY RECOVERY CODE" FontSize="20" FontWeight="Bold" Foreground="#FFFFFF" HorizontalAlignment="Center" LetterSpacing="1"/>
@@ -84,7 +84,7 @@
 
         <!-- ==================== 3. LOCKED PANEL (VAULT EXISTS) ==================== -->
         <ScrollViewer Name="PanelLocked" IsVisible="False" HorizontalScrollBarVisibility="Disabled">
-            <StackPanel Margin="24,44,24,28" Spacing="16">
+            <StackPanel Margin="24,52,24,28" Spacing="16">
                 <StackPanel HorizontalAlignment="Center" Spacing="8" Margin="0,16,0,16">
                     <TextBlock Text="RDP VAULT" FontSize="26" FontWeight="Bold" Foreground="#FFFFFF" HorizontalAlignment="Center" LetterSpacing="2"/>
                     <TextBlock Text="Hardware-Encrypted Mobile Remote Desktop" FontSize="13" Foreground="#8A8A93" HorizontalAlignment="Center"/>
@@ -131,7 +131,7 @@
 
         <!-- ==================== 4. RECOVERY UNLOCK PANEL ==================== -->
         <ScrollViewer Name="PanelRecoveryUnlock" IsVisible="False" HorizontalScrollBarVisibility="Disabled">
-            <StackPanel Margin="24,40,24,32" Spacing="16">
+            <StackPanel Margin="24,48,24,32" Spacing="16">
                 <StackPanel HorizontalAlignment="Center" Spacing="6" Margin="0,8,0,12">
                     <TextBlock Text="VAULT RECOVERY" FontSize="20" FontWeight="Bold" Foreground="#FFFFFF" HorizontalAlignment="Center" LetterSpacing="1"/>
                     <TextBlock Text="Enter your 24-character recovery code to reset your master password."
@@ -169,19 +169,23 @@
         </ScrollViewer>
 
         <!-- ==================== 5. UNLOCKED PANEL ==================== -->
-        <Grid Name="PanelUnlocked" RowDefinitions="Auto,Auto,*,Auto" Margin="16,40,16,16" IsVisible="False">
-            <!-- Header Bar with safe margin below status bar -->
-            <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto,Auto" Margin="0,0,0,14">
-                <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                    <TextBlock Text="RDP VAULT" FontSize="20" FontWeight="Bold" Foreground="#FFFFFF"/>
-                    <TextBlock Name="TxtUnlockedStatus" Text="Vault Unlocked (StrongBox Protected)" FontSize="11" Foreground="#2FBF71"/>
-                </StackPanel>
-                <Button Grid.Column="1" Name="BtnAddProfile" Content="+ Add" Background="#005FB8" Foreground="White"
-                        Margin="0,0,6,0" CornerRadius="4" Height="36" Padding="12,0"/>
-                <Button Grid.Column="2" Name="BtnSettings" Content="⚙" Background="#1C1C21" Foreground="#EDEDED"
-                        Margin="0,0,6,0" CornerRadius="4" Height="36" Width="36" HorizontalContentAlignment="Center"/>
-                <Button Grid.Column="3" Name="BtnLock" Content="Lock" Background="#2E2E35" Foreground="#EDEDED"
-                        CornerRadius="4" Height="36" Padding="12,0"/>
+        <Grid Name="PanelUnlocked" RowDefinitions="Auto,Auto,*,Auto" Margin="16,48,16,16" IsVisible="False">
+            <!-- Header Bar with safe margin below status bar and separate subtitle row -->
+            <Grid Grid.Row="0" RowDefinitions="Auto,Auto" Margin="0,0,0,14">
+                <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto,Auto">
+                    <TextBlock Grid.Column="0" Text="RDP VAULT" FontSize="20" FontWeight="Bold" Foreground="#FFFFFF" VerticalAlignment="Center"/>
+                    <Button Grid.Column="1" Name="BtnAddProfile" Content="+ Add" Background="#005FB8" Foreground="White"
+                            Margin="0,0,6,0" CornerRadius="4" Height="36" Padding="12,0"
+                            VerticalContentAlignment="Center" HorizontalContentAlignment="Center"/>
+                    <Button Grid.Column="2" Name="BtnSettings" Content="⚙" Background="#1C1C21" Foreground="#EDEDED"
+                            Margin="0,0,6,0" CornerRadius="4" Height="36" Width="36"
+                            VerticalContentAlignment="Center" HorizontalContentAlignment="Center"/>
+                    <Button Grid.Column="3" Name="BtnLock" Content="Lock" Background="#2E2E35" Foreground="#EDEDED"
+                            CornerRadius="4" Height="36" Padding="12,0"
+                            VerticalContentAlignment="Center" HorizontalContentAlignment="Center"/>
+                </Grid>
+                <TextBlock Grid.Row="1" Name="TxtUnlockedStatus" Text="Vault Unlocked (StrongBox Protected)"
+                           FontSize="11" Foreground="#2FBF71" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/>
             </Grid>
 
             <!-- Search / Filter Bar -->
@@ -189,7 +193,8 @@
                 <TextBox Grid.Column="0" Name="TxtSearch" Watermark="Search profiles (name, host, user, notes)..."
                          Background="#141417" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="40" FontSize="14"/>
                 <Button Grid.Column="1" Name="BtnClearSearch" Content="✕" Background="#141417" Foreground="#8A8A93"
-                        BorderBrush="#2E2E35" Height="40" Width="40" Margin="4,0,0,0"/>
+                        BorderBrush="#2E2E35" Height="40" Width="40" Margin="4,0,0,0"
+                        VerticalContentAlignment="Center" HorizontalContentAlignment="Center"/>
             </Grid>
 
             <!-- Profiles List -->
@@ -203,67 +208,83 @@
         </Grid>
 
         <!-- ==================== 6. PROFILE EDITOR OVERLAY ==================== -->
-        <ScrollViewer Name="PanelProfileEditor" IsVisible="False" HorizontalScrollBarVisibility="Disabled">
-            <StackPanel Margin="20,40,20,320" Spacing="14">
-                <TextBlock Name="TxtEditorTitle" Text="New Connection" FontSize="20" FontWeight="Bold" Foreground="#FFFFFF"/>
+        <Grid Name="PanelProfileEditor" RowDefinitions="Auto,*" Margin="16,48,16,16" IsVisible="False">
+            <!-- Sticky Header Bar: Actions always visible even when soft keyboard is up -->
+            <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto,Auto" Margin="0,0,0,12">
+                <Button Grid.Column="0" Name="BtnTopCancelProfile" Content="Cancel" Background="#2E2E35" Foreground="#EDEDED"
+                        Height="36" Padding="14,0" CornerRadius="4" VerticalContentAlignment="Center" HorizontalContentAlignment="Center"/>
+                <TextBlock Grid.Column="1" Name="TxtEditorTitle" Text="New Connection" FontSize="18" FontWeight="Bold"
+                           Foreground="#FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                <Button Grid.Column="2" Name="BtnTopDeleteProfile" Content="Delete" Background="#B80000" Foreground="White"
+                        Height="36" Padding="10,0" CornerRadius="4" Margin="0,0,6,0" IsVisible="False"
+                        VerticalContentAlignment="Center" HorizontalContentAlignment="Center"/>
+                <Button Grid.Column="3" Name="BtnTopSaveProfile" Content="Save" Background="#005FB8" Foreground="White"
+                        Height="36" Padding="16,0" CornerRadius="4" FontWeight="SemiBold"
+                        VerticalContentAlignment="Center" HorizontalContentAlignment="Center"/>
+            </Grid>
 
-                <Border Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16">
-                    <StackPanel Spacing="10">
-                        <TextBlock Text="CONNECTION NAME" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
-                        <TextBox Name="TxtProfileName" Watermark="e.g. Work PC" Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="40"/>
+            <!-- Scrollable Form with generous 400px bottom padding so keyboard NEVER occludes fields -->
+            <ScrollViewer Grid.Row="1" Name="ScrollProfileEditor" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Margin="0,0,0,400" Spacing="14">
+                    <Border Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16">
+                        <StackPanel Spacing="10">
+                            <TextBlock Text="CONNECTION NAME" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
+                            <TextBox Name="TxtProfileName" Watermark="e.g. Work PC" Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="40"/>
 
-                        <TextBlock Text="HOST / IP ADDRESS" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
-                        <TextBox Name="TxtProfileHost" Watermark="e.g. 192.168.1.50 or myhost.dyndns.org" Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="40"/>
+                            <TextBlock Text="HOST / IP ADDRESS" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
+                            <TextBox Name="TxtProfileHost" Watermark="e.g. 192.168.1.50 or myhost.dyndns.org" Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="40"/>
 
-                        <TextBlock Text="PORT (DEFAULT 3389)" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
-                        <TextBox Name="TxtProfilePort" Text="3389" Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="40"/>
+                            <TextBlock Text="PORT (DEFAULT 3389)" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
+                            <TextBox Name="TxtProfilePort" Text="3389" Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="40"/>
 
-                        <TextBlock Text="USERNAME" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
-                        <TextBox Name="TxtProfileUser" Watermark="e.g. Administrator" Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="40"/>
+                            <TextBlock Text="USERNAME" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
+                            <TextBox Name="TxtProfileUser" Watermark="e.g. Administrator" Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="40"/>
 
-                        <TextBlock Text="PASSWORD" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
-                        <TextBox Name="TxtProfilePass" PasswordChar="●" Watermark="Remote desktop password" Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="40"/>
+                            <TextBlock Text="PASSWORD" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
+                            <TextBox Name="TxtProfilePass" PasswordChar="●" Watermark="Remote desktop password" Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="40"/>
 
-                        <TextBlock Text="DOMAIN (OPTIONAL)" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
-                        <TextBox Name="TxtProfileDomain" Watermark="e.g. CONTOSO" Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="40"/>
-                    </StackPanel>
-                </Border>
+                            <TextBlock Text="DOMAIN (OPTIONAL)" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
+                            <TextBox Name="TxtProfileDomain" Watermark="e.g. CONTOSO" Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="40"/>
+                        </StackPanel>
+                    </Border>
 
-                <!-- Wake-on-LAN Settings Card -->
-                <Border Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16">
-                    <StackPanel Spacing="10">
-                        <TextBlock Text="WAKE-ON-LAN (WOL)" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
-                        <CheckBox Name="ChkProfileEnableWol" Content="Send WOL packet before connecting" Foreground="#EDEDED"/>
-                        <TextBox Name="TxtProfileWolMac" Watermark="MAC Address (e.g. AA:BB:CC:DD:EE:FF)" Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="40"/>
-                        <TextBox Name="TxtProfileWolPort" Text="9" Watermark="WOL Port (default 9)" Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="40"/>
-                        <TextBox Name="TxtProfileWolWait" Text="5" Watermark="Wait seconds (default 5)" Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="40"/>
-                    </StackPanel>
-                </Border>
+                    <!-- Wake-on-LAN Settings Card -->
+                    <Border Name="CardWol" Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16">
+                        <StackPanel Spacing="10">
+                            <TextBlock Text="WAKE-ON-LAN (WOL)" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
+                            <CheckBox Name="ChkProfileEnableWol" Content="Send WOL packet before connecting" Foreground="#EDEDED"/>
+                            <TextBox Name="TxtProfileWolMac" Watermark="MAC Address (e.g. AA:BB:CC:DD:EE:FF)" Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="40"/>
+                            <TextBox Name="TxtProfileWolPort" Text="9" Watermark="WOL Port (default 9)" Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="40"/>
+                            <TextBox Name="TxtProfileWolWait" Text="5" Watermark="Wait seconds (default 5)" Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="40"/>
+                        </StackPanel>
+                    </Border>
 
-                <Border Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16">
-                    <StackPanel Spacing="6">
-                        <TextBlock Text="NOTES" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
-                        <TextBox Name="TxtProfileNotes" Watermark="Optional connection notes..." AcceptsReturn="True" Height="60"
-                                 Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35"/>
-                    </StackPanel>
-                </Border>
+                    <Border Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16">
+                        <StackPanel Spacing="6">
+                            <TextBlock Text="NOTES" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
+                            <TextBox Name="TxtProfileNotes" Watermark="Optional connection notes..." AcceptsReturn="True" Height="60"
+                                     Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35"/>
+                        </StackPanel>
+                    </Border>
 
-                <TextBlock Name="TxtProfileError" Foreground="#E83030" FontSize="13" HorizontalAlignment="Center" IsVisible="False" TextWrapping="Wrap"/>
+                    <TextBlock Name="TxtProfileError" Foreground="#E83030" FontSize="13" HorizontalAlignment="Center" IsVisible="False" TextWrapping="Wrap"/>
 
-                <Grid ColumnDefinitions="*,8,*,8,Auto">
-                    <Button Grid.Column="0" Name="BtnSaveProfile" Content="Save" Background="#005FB8" Foreground="White"
-                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Height="44" CornerRadius="6" FontWeight="SemiBold"/>
-                    <Button Grid.Column="2" Name="BtnCancelProfile" Content="Cancel" Background="#2E2E35" Foreground="#EDEDED"
-                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Height="44" CornerRadius="6"/>
-                    <Button Grid.Column="4" Name="BtnDeleteProfile" Content="Delete" Background="#B80000" Foreground="White"
-                            Height="44" Padding="14,0" CornerRadius="6" IsVisible="False"/>
-                </Grid>
-            </StackPanel>
-        </ScrollViewer>
+                    <!-- Bottom Action Buttons -->
+                    <Grid ColumnDefinitions="*,8,*,8,Auto">
+                        <Button Grid.Column="0" Name="BtnSaveProfile" Content="Save" Background="#005FB8" Foreground="White"
+                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Height="44" CornerRadius="6" FontWeight="SemiBold"/>
+                        <Button Grid.Column="2" Name="BtnCancelProfile" Content="Cancel" Background="#2E2E35" Foreground="#EDEDED"
+                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Height="44" CornerRadius="6"/>
+                        <Button Grid.Column="4" Name="BtnDeleteProfile" Content="Delete" Background="#B80000" Foreground="White"
+                                Height="44" Padding="14,0" CornerRadius="6" IsVisible="False" VerticalContentAlignment="Center" HorizontalContentAlignment="Center"/>
+                    </Grid>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
 
         <!-- ==================== 7. SETTINGS PANEL ==================== -->
         <ScrollViewer Name="PanelSettings" IsVisible="False" HorizontalScrollBarVisibility="Disabled">
-            <StackPanel Margin="20,40,20,180" Spacing="16">
+            <StackPanel Margin="20,48,20,180" Spacing="16">
                 <TextBlock Text="VAULT SETTINGS" FontSize="20" FontWeight="Bold" Foreground="#FFFFFF"/>
 
                 <!-- Biometric Hardware Card -->

@@ -156,6 +156,14 @@ public partial class MainView : UserControl
         BtnToggleBiometrics.Click += async (_, _) => await ToggleBiometricsAsync();
         BtnViewRecoveryCode.Click += (_, _) => ViewCurrentRecoveryCode();
         BtnChangeMasterPassword.Click += async (_, _) => await ChangeMasterPasswordAsync();
+        ChkSettingsSuppressCert.IsCheckedChanged += (_, _) =>
+        {
+            if (_payload?.Settings != null && _vaultFile != null && _masterKey != null)
+            {
+                _payload.Settings.SuppressCertWarnings = ChkSettingsSuppressCert.IsChecked == true;
+                VaultCrypto.Save(_vaultFile, _masterKey, _payload, VaultPath);
+            }
+        };
         BtnCloseSettings.Click += (_, _) =>
         {
             PanelSettings.IsVisible = false;
@@ -235,6 +243,7 @@ public partial class MainView : UserControl
 
         string recoveryCode = "";
         var payload = new VaultPayload();
+        payload.Settings.SuppressCertWarnings = true;
 
         try
         {
@@ -709,6 +718,7 @@ public partial class MainView : UserControl
             TxtProfileWolPort.Text = "9";
             TxtProfileWolWait.Text = "5";
             TxtProfileNotes.Text = "";
+            ChkProfileSuppressCert.IsChecked = _payload?.Settings?.SuppressCertWarnings ?? true;
             BtnDeleteProfile.IsVisible = false;
             BtnTopDeleteProfile.IsVisible = false;
         }
@@ -726,6 +736,12 @@ public partial class MainView : UserControl
             TxtProfileWolPort.Text = profile.WolPort.ToString();
             TxtProfileWolWait.Text = profile.WolWaitSeconds.ToString();
             TxtProfileNotes.Text = profile.Notes;
+            ChkProfileSuppressCert.IsChecked = profile.SuppressCertWarningsOverride switch
+            {
+                TriStateOverride.Enabled => true,
+                TriStateOverride.Disabled => false,
+                _ => _payload?.Settings?.SuppressCertWarnings ?? true
+            };
             BtnDeleteProfile.IsVisible = true;
             BtnTopDeleteProfile.IsVisible = true;
         }
@@ -782,7 +798,8 @@ public partial class MainView : UserControl
                 WolMacAddress = TxtProfileWolMac.Text?.Trim() ?? "",
                 WolPort = wolPort > 0 ? wolPort : 9,
                 WolWaitSeconds = wolWait > 0 ? wolWait : 5,
-                Notes = TxtProfileNotes.Text?.Trim() ?? ""
+                Notes = TxtProfileNotes.Text?.Trim() ?? "",
+                SuppressCertWarningsOverride = ChkProfileSuppressCert.IsChecked == true ? TriStateOverride.Enabled : TriStateOverride.Disabled
             };
             _payload.Profiles.Add(p);
         }
@@ -799,6 +816,7 @@ public partial class MainView : UserControl
             _editingProfile.WolPort = wolPort > 0 ? wolPort : 9;
             _editingProfile.WolWaitSeconds = wolWait > 0 ? wolWait : 5;
             _editingProfile.Notes = TxtProfileNotes.Text?.Trim() ?? "";
+            _editingProfile.SuppressCertWarningsOverride = ChkProfileSuppressCert.IsChecked == true ? TriStateOverride.Enabled : TriStateOverride.Disabled;
         }
 
         VaultCrypto.Save(_vaultFile, _masterKey, _payload, VaultPath);
@@ -831,6 +849,7 @@ public partial class MainView : UserControl
         TxtSettingsConfirmPass.Text = "";
         TxtChangePasswordError.IsVisible = false;
         PnlChangePassProgress.IsVisible = false;
+        ChkSettingsSuppressCert.IsChecked = _payload?.Settings?.SuppressCertWarnings ?? true;
 
         string machineId = VaultCrypto.CurrentMachineId();
         bool enrolled = _vaultFile?.Seals?.Any(s => s.MachineId == machineId && !string.IsNullOrEmpty(s.KeyId) && !string.IsNullOrEmpty(s.TpmBlob)) == true;
@@ -1026,7 +1045,7 @@ public partial class MainView : UserControl
 
             // 2. Launch RDP via Mobile Intent handoff
             var context = (global::Android.Content.Context?)MainActivity.Instance ?? global::Android.App.Application.Context;
-            var result = RdpLauncher.LaunchRdp(context, profile, out string message);
+            var result = RdpLauncher.LaunchRdp(context, profile, _payload?.Settings, out string message);
 
             ProgLaunch.IsIndeterminate = false;
             ProgLaunch.Value = 100;

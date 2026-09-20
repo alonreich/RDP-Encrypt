@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Threading.Tasks;
 using Android.App;
 using Android.Content;
 using Android.Content.PM;
@@ -20,10 +19,12 @@ public static class RdpLauncher
 {
     /// <summary>
     /// Launches an RDP connection session via standard Android intent handoff.
-    /// Securely copies the password to clipboard with Android 13+ IS_SENSITIVE flag and 30-second auto-wipe.
+    /// Strictly protects password hygiene: credentials are NEVER exposed to the system clipboard,
+    /// preventing cloud sync or predictive text ingestion by external apps.
+    /// Configures authentication level 0 by default to suppress untrusted certificate warnings.
     /// Falls back to Google Play Store if no compatible RDP client is installed.
     /// </summary>
-    public static RdpLaunchStatus LaunchRdp(Context context, RdpProfile profile, out string message)
+    public static RdpLaunchStatus LaunchRdp(Context context, RdpProfile profile, VaultSettings? settings, out string message)
     {
         if (profile == null)
         {
@@ -31,10 +32,7 @@ public static class RdpLauncher
             return RdpLaunchStatus.Failed;
         }
 
-        // 1. Copy password to clipboard with 30-second auto-wipe
-        CopyPasswordWithAutoWipe(context, profile.Password);
-
-        // 2. Resolve host and port
+        // 1. Resolve host and port
         string host = profile.Host.Trim();
         int port = profile.Port > 0 ? profile.Port : 3389;
 
@@ -50,14 +48,25 @@ public static class RdpLauncher
 
         string fullAddress = port == 3389 ? host : $"{host}:{port}";
 
+        // 2. Resolve certificate warning suppression (default to true on Android)
+        bool suppressCert = profile.SuppressCertWarningsOverride switch
+        {
+            TriStateOverride.Enabled => true,
+            TriStateOverride.Disabled => false,
+            _ => settings?.SuppressCertWarnings ?? true
+        };
+
+        // authentication level:i:0 suppresses certificate/identity verification warnings in Microsoft Remote Desktop
+        int authLevel = suppressCert ? 0 : 2;
+
         // 3. Construct standard Microsoft Remote Desktop URI
-        // Format: rdp://full%20address=s:{host}:{port}&username=s:{username}
+        // Format: rdp://full%20address=s:{host}:{port}&authentication%20level=i:{authLevel}&promptcredentialonce=i:1&username=s:{username}
         string encodedAddress = global::Android.Net.Uri.Encode(fullAddress) ?? fullAddress;
         string encodedUser = string.IsNullOrWhiteSpace(profile.Username) ? "" : (global::Android.Net.Uri.Encode(profile.Username) ?? profile.Username);
 
         string uriString = string.IsNullOrEmpty(encodedUser)
-            ? $"rdp://full%20address=s:{encodedAddress}"
-            : $"rdp://full%20address=s:{encodedAddress}&username=s:{encodedUser}";
+            ? $"rdp://full%20address=s:{encodedAddress}&authentication%20level=i:{authLevel}&promptcredentialonce=i:1"
+            : $"rdp://full%20address=s:{encodedAddress}&authentication%20level=i:{authLevel}&promptcredentialonce=i:1&username=s:{encodedUser}";
 
         var rdpUri = global::Android.Net.Uri.Parse(uriString);
 
@@ -73,7 +82,7 @@ public static class RdpLauncher
             if (activities != null && activities.Count > 0)
             {
                 context.StartActivity(intent);
-                message = "Remote Desktop launched! Password copied to clipboard (clears in 30s).";
+                message = "Remote Desktop client launched.";
                 return RdpLaunchStatus.Success;
             }
         }
@@ -101,7 +110,7 @@ public static class RdpLauncher
                     launchIntent.SetData(rdpUri);
                     launchIntent.AddFlags(ActivityFlags.NewTask);
                     context.StartActivity(launchIntent);
-                    message = "Remote Desktop launched! Password copied to clipboard (clears in 30s).";
+                    message = "Remote Desktop client launched.";
                     return RdpLaunchStatus.Success;
                 }
             }
@@ -115,7 +124,7 @@ public static class RdpLauncher
         try
         {
             context.StartActivity(intent);
-            message = "Remote Desktop launched! Password copied to clipboard (clears in 30s).";
+            message = "Remote Desktop client launched.";
             return RdpLaunchStatus.Success;
         }
         catch (ActivityNotFoundException)
@@ -150,57 +159,6 @@ public static class RdpLauncher
         {
             message = "Unexpected error launching RDP client: " + ex.Message;
             return RdpLaunchStatus.Failed;
-        }
-    }
-
-    private static void CopyPasswordWithAutoWipe(Context context, string password)
-    {
-        if (string.IsNullOrEmpty(password)) return;
-
-        try
-        {
-            var clipboard = (ClipboardManager?)context.GetSystemService(Context.ClipboardService);
-            if (clipboard == null) return;
-
-            var clip = ClipData.NewPlainText("RDP Password", password);
-            if (Build.VERSION.SdkInt >= BuildVersionCodes.Tiramisu)
-            {
-                clip.Description?.Extras?.PutBoolean(ClipDescription.ExtraIsSensitive, true);
-            }
-            clipboard.PrimaryClip = clip;
-
-            // 30-second self-destruct background wipe
-            var mainHandler = new Handler(Looper.MainLooper!);
-            _ = Task.Run(async () =>
-            {
-                await Task.Delay(30000);
-                mainHandler.Post(() =>
-                {
-                    try
-                    {
-                        if (clipboard.HasPrimaryClip && clipboard.PrimaryClip?.ItemCount > 0)
-                        {
-                            var item = clipboard.PrimaryClip.GetItemAt(0);
-                            if (item?.Text == password)
-                            {
-                                if (Build.VERSION.SdkInt >= BuildVersionCodes.P)
-                                {
-                                    clipboard.ClearPrimaryClip();
-                                }
-                                else
-                                {
-                                    clipboard.PrimaryClip = ClipData.NewPlainText("", "");
-                                }
-                            }
-                        }
-                    }
-                    catch { }
-                });
-            });
-        }
-        catch (Exception ex)
-        {
-            global::Android.Util.Log.Warn("RDPVault", "Failed to copy password to clipboard: " + ex.Message);
         }
     }
 }

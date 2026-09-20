@@ -898,15 +898,17 @@ A parallel mobile software distribution branch sharing the identical cryptograph
       credentials. Screen flips simply adapt the viewport without session drops or auth prompts.
     - Auto-lock timer is suspended while a foreground session is active.
 
- 4. MOBILE RDP CLIENT INTENT HANDOFF & CREDENTIAL HYGIENE:
+ 4. MOBILE RDP CLIENT INTENT HANDOFF & STRICT CREDENTIAL ISOLATION:
     - RdpLauncher (RDPVault.Android.Rdp): Handles RDP connections via standard Android Intent handoff
-      (rdp://full%20address=s:{host}:{port}&username=s:{user}).
+      (rdp://full%20address=s:{host}:{port}&authentication%20level=i:{authLevel}&promptcredentialonce=i:1&username=s:{user}).
+    - Zero Clipboard Exposure (No Password Leakage): Passwords NEVER touch the system clipboard during connection
+      launch. Eliminates automated ingestion by keyboards (e.g. SwiftKey, Gboard), clipboard loggers, and cloud sync services.
+    - Automatic Certificate Warning Suppression: Resolves SuppressCertWarnings (defaulting to true on Android in
+      General Settings and Profile Editor) and appends authentication level=i:0 to the launch URI, eliminating
+      untrusted certificate warning dialogs in Microsoft Remote Desktop.
     - Package Visibility (<queries> in AndroidManifest.xml): Declares rdp and market schemes plus
       well-known RDP packages (Microsoft Remote Desktop com.microsoft.rdc.androidx/com.microsoft.rdc.android,
       and aRDP com.iiordanov.freeaRDP/com.iiordanov.aRDP) complying with Android 11+ package visibility rules.
-    - Ephemeral Clipboard Handoff: Copies decrypted session password to system clipboard with Android 13+
-      IS_SENSITIVE flag and schedules an automatic 30-second background self-destruct wipe, enforcing zero
-      lingering credentials in memory or clipboard caches.
     - Play Store Auto-Fallback: If no compatible RDP client is installed on the device, seamlessly redirects
       the user to Google Play Store to install Microsoft Remote Desktop.
     - Dynamic Host & DNS-Aware WOL: Resolves domain names and hostnames to IPv4 addresses and transmits
@@ -952,19 +954,21 @@ A parallel mobile software distribution branch sharing the identical cryptograph
       execution displaying real-time step notifications, countdown timer, visual progress bar, and user
       cancellation button, preventing user uncertainty during remote host boot.
     - Full Mobile Profile Editor & Settings: Embedded UserControl panels for adding/editing/deleting connections
-      (with custom RDP ports and Wake-on-LAN configuration) and managing hardware biometric seals.
+      (with custom RDP ports, Wake-on-LAN, and certificate warning suppression) and managing hardware biometric seals.
 
- 7. EGL RENDERING BACKEND & APP LIFECYCLE RESILIENCE:
-    - EGL / OpenGL ES Rendering Enforcement: Configured CustomizeAppBuilder with AndroidPlatformOptions
-      RenderingMode = [AndroidRenderingMode.Egl, AndroidRenderingMode.Software]. Avalonia defaults to Vulkan
-      on modern Android devices, which invalidates and fails to reconstruct its VkSurfaceKHR swapchain when
-      returning from the Home screen or Android Recents (App Switcher), causing a permanent blank white screen.
-      EGL natively handles Android surface recreation on onResume() without thread freezes.
+ 7. FAST APP-SWITCHING RESILIENCE & ZERO WHITE SCREEN:
+    - OnPause / OnResume Render Loop Lifecycle Synchronization: Overridden in MainActivity.cs via reflection
+      hooks into AvaloniaView.OnVisibilityChanged. OnPause invokes OnVisibilityChanged(false) ensuring
+      ChoreographerTimer and Skia render loop properly stop. OnResume invokes OnVisibilityChanged(true) which
+      cleanly restarts StartRendering() and resubscribes ChoreographerTimer, eliminating the permanent
+      freeze/deadlock when returning from the Home screen or Recents (square button).
+    - Window Background Override & Preview Disable: Set android:windowDisablePreview="true" and
+      android:windowBackground="#0E0E10" in styles.xml, plus explicit Window.SetBackgroundDrawable in OnResume,
+      preventing any flash of default Android white canvas.
+    - Activity Preservation on Back Navigation: Overridden OnBackPressed with MoveTaskToBack(true), keeping
+      the Activity alive in memory rather than destroying and triggering framework re-initialization faults.
     - SingleTask LaunchMode: MainActivity is configured with LaunchMode = LaunchMode.SingleTask to prevent
-      the Android OS task manager from creating duplicate or detached Activity instances when returning from
-      Recents.
-    - Theme Window Background: Added android:windowBackground and android:navigationBarColor (#0E0E10) in
-      Resources/values/styles.xml, matching the dark UI palette and eliminating any flash of white canvas.
+      the Android OS task manager from creating duplicate or detached Activity instances.
 
 --------------------------------------------------------------------------------
 END OF FILE — keep synchronized with the code.

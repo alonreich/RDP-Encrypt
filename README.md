@@ -60,7 +60,7 @@ RDP Vault provides an Android mobile APK companion sharing the exact same crypto
 
 - **Mobile TPM Equivalent**: Backed by Android Keystore and StrongBox Keymaster. Master keys are sealed in the device's hardware Secure Element / ARM TrustZone TEE, requiring Class 3 Strong Biometrics (fingerprint or 3D face unlock). Unexportable even under device root or memory dump compromise.
 - **Screen-Flip Continuity (Zero Mid-Session Re-Authentication)**: Active connections and memory-protected credentials are hosted inside an Android `ForegroundService` (`RdpSessionService`). Rotating the phone between portrait and landscape adapts the display viewport in-place without restarting the activity, dropping connections, or prompting for biometrics.
-- **Mobile RDP Client Intent Handoff & Credential Hygiene**: Connects directly via standard Android RDP Intent handoff (`rdp://`) into Microsoft Remote Desktop or compatible clients. Decrypted session passwords are automatically placed in the Android system clipboard with `IS_SENSITIVE` protection (Android 13+) and an automatic 30-second self-destruct background wipe. Automatically redirects to Google Play Store if no client is installed.
+- **Mobile RDP Client Intent Handoff & Strict Credential Isolation**: Connects directly via standard Android RDP Intent handoff (`rdp://`) into Microsoft Remote Desktop or compatible clients with automatic certificate warning suppression (`authentication level=i:0`). Decrypted passwords never touch the system clipboard or disk, strictly isolating credentials from cloud sync, keyboard prediction buffers, and third-party apps. Automatically redirects to Google Play Store if no client is installed.
 
 Build Android APK:
 ```

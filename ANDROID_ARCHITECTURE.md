@@ -23,11 +23,12 @@ RDP Vault Android is a parallel distribution branch providing zero-compromise en
   3. The activity acts solely as a viewport. When flipped from portrait to landscape, the viewport merely adjusts display dimensions while the underlying session remains uninterrupted.
   4. Auto-lock timers are suspended while a foreground session is active.
 
-### 2.3 Mobile RDP Client Intent Handoff & Credential Hygiene
+### 2.3 Mobile RDP Client Intent Handoff & Strict Credential Isolation
 - **Architecture**: `RdpLauncher` dispatches connections via standard Android RDP Intent handoff (`rdp://`).
 - **Target Clients**: Microsoft Remote Desktop / Windows App (`com.microsoft.rdc.androidx`, `com.microsoft.rdc.android`), Free aRDP (`com.iiordanov.freeaRDP`), and aRDP Pro (`com.iiordanov.aRDP`).
 - **Store Fallback**: Direct one-tap redirect to Google Play Store if no client is installed.
-- **Clipboard Self-Destruct**: Transmits password securely via Android system clipboard with `IS_SENSITIVE` extra flag (Android 13+) and schedules an automatic background self-destruct wipe after 30 seconds.
+- **Zero Clipboard Exposure**: Passwords NEVER touch the system clipboard, eliminating credential leakage to predictive keyboards, clipboard logging services, or cloud sync.
+- **Certificate Warning Suppression**: Automatically configures `authentication level=i:0` and `promptcredentialonce=i:1` to suppress untrusted certificate and server identity warnings.
 - **Network Resilience**: Dynamic DNS resolution and dual-endpoint WOL (broadcast + unicast across WOL port and custom RDP port).
 
 ### 2.4 Vault Interchangeability

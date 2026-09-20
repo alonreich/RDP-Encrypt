@@ -259,6 +259,14 @@
                         </StackPanel>
                     </Border>
 
+                    <!-- Security & Certificates Card -->
+                    <Border Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="SECURITY &amp; CERTIFICATES" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
+                            <CheckBox Name="ChkProfileSuppressCert" Content="Suppress certificate &amp; identity warnings" Foreground="#EDEDED" IsChecked="True"/>
+                        </StackPanel>
+                    </Border>
+
                     <Border Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16">
                         <StackPanel Spacing="6">
                             <TextBlock Text="NOTES" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
@@ -327,6 +335,14 @@
                             <ProgressBar IsIndeterminate="True" Height="4" Foreground="#005FB8" Background="#1C1C21"/>
                             <TextBlock Text="Re-encrypting vault with new Argon2id key..." FontSize="12" Foreground="#8A8A93" HorizontalAlignment="Center"/>
                         </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- General Connection & Security Defaults Card -->
+                <Border Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16">
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="CONNECTION &amp; SECURITY DEFAULTS" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
+                        <CheckBox Name="ChkSettingsSuppressCert" Content="Suppress certificate &amp; identity warnings (default: checked)" Foreground="#EDEDED" IsChecked="True"/>
                     </StackPanel>
                 </Border>
 

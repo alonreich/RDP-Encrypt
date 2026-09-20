@@ -9,6 +9,7 @@
     <item name="android:statusBarColor">#0E0E10</item>
     <item name="android:navigationBarColor">#0E0E10</item>
     <item name="android:windowBackground">#0E0E10</item>
+    <item name="android:windowDisablePreview">true</item>
     <item name="android:windowLightStatusBar">false</item>
   </style>
 </resources>

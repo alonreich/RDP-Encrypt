@@ -5,6 +5,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Avalonia;
@@ -18,6 +19,7 @@ using Button = Avalonia.Controls.Button;
 using CheckBox = Avalonia.Controls.CheckBox;
 using ProgressBar = Avalonia.Controls.ProgressBar;
 using TextBox = Avalonia.Controls.TextBox;
+using Avalonia.Platform.Storage;
 using RDPVault;
 using RDPVault.Android.Rdp;
 using RDPVault.Android.Security;
@@ -34,6 +36,8 @@ public partial class MainView : UserControl
     private IntPtr _activeRdpContext = IntPtr.Zero;
     private System.Threading.CancellationTokenSource? _connectCts;
     private bool _biometricPromptSuppressed;
+    private volatile bool _skipWolWait;
+    private bool _isFormattingRecovery;
 
     private static string ResolveVaultPath()
     {
@@ -101,6 +105,7 @@ public partial class MainView : UserControl
 
         // 3. First-Time Setup Wizard
         BtnFirstRunCreate.Click += async (_, _) => await CreateVaultFirstTimeAsync();
+        BtnFirstRunImportExisting.Click += async (_, _) => await ImportVaultFileAsync();
 
         // 4. Recovery Code Display
         BtnCopyRecoveryCode.Click += async (_, _) => await CopyRecoveryCodeToClipboardAsync();
@@ -128,6 +133,8 @@ public partial class MainView : UserControl
         BtnShowRecovery.Click += (_, _) => ShowRecoveryUnlock();
 
         // 6. Recovery Unlock
+        BtnPasteRecoveryCode.Click += async (_, _) => await PasteRecoveryCodeAsync();
+        TxtRecoveryInput.TextChanged += (_, _) => OnRecoveryInputChanged();
         BtnSubmitRecoveryUnlock.Click += async (_, _) => await SubmitRecoveryUnlockAsync();
         BtnCancelRecoveryUnlock.Click += (_, _) => ShowLockScreen();
 
@@ -141,6 +148,12 @@ public partial class MainView : UserControl
             TxtSearch.Text = "";
             RefreshProfilesList();
         };
+        BtnReturnToRdp.Click += (_, _) =>
+        {
+            var ctx = (global::Android.Content.Context?)MainActivity.Instance ?? global::Android.App.Application.Context;
+            RdpLauncher.ResumeRemoteDesktop(ctx);
+        };
+        BtnEndActiveSession.Click += (_, _) => EndActiveSession();
 
         // 8. Profile Editor (Sticky Top Header and Bottom Buttons)
         BtnSaveProfile.Click += (_, _) => SaveProfile();
@@ -197,7 +210,14 @@ public partial class MainView : UserControl
         };
 
         // 9. Settings
+        BtnTopCloseSettings.Click += (_, _) =>
+        {
+            PanelSettings.IsVisible = false;
+            PanelUnlocked.IsVisible = true;
+        };
         BtnToggleBiometrics.Click += async (_, _) => await ToggleBiometricsAsync();
+        BtnExportVault.Click += async (_, _) => await ExportVaultFileAsync();
+        BtnImportVault.Click += async (_, _) => await ImportVaultFromSettingsAsync();
         BtnRegenerateRecoveryCode.Click += (_, _) =>
         {
             TxtVerifyPassForRecovery.Text = "";
@@ -224,8 +244,9 @@ public partial class MainView : UserControl
             PanelUnlocked.IsVisible = true;
         };
 
-        // 10. RDP Session
+        // 10. RDP Session & WOL
         BtnDisconnectSession.Click += (_, _) => DisconnectSession();
+        BtnSkipWolWait.Click += (_, _) => SkipWolWait();
     }
 
     private void SetupPasswordToggle(TextBox tb, Button btn)
@@ -842,22 +863,25 @@ public partial class MainView : UserControl
             CornerRadius = new CornerRadius(8),
             BorderBrush = new SolidColorBrush(Color.Parse("#2E2E35")),
             BorderThickness = new Thickness(1),
-            Padding = new Thickness(14),
-            Cursor = new Cursor(StandardCursorType.Hand)
+            Padding = new Thickness(14, 12)
         };
 
-        // Tapping the card itself directly starts the connection
-        border.PointerPressed += async (_, _) => await StartSessionAsync(profile);
-
-        var grid = new Grid
+        var rootStack = new StackPanel
         {
-            ColumnDefinitions = new ColumnDefinitions("*,Auto,8,Auto,8,Auto")
+            Spacing = 10
+        };
+
+        // Row 1: Info (full-width) + Connect Button
+        var topGrid = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("*,Auto")
         };
 
         var info = new StackPanel
         {
-            Spacing = 4,
-            VerticalAlignment = VerticalAlignment.Center
+            Spacing = 3,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 10, 0)
         };
 
         info.Children.Add(new TextBlock
@@ -882,19 +906,50 @@ public partial class MainView : UserControl
             TextTrimming = TextTrimming.CharacterEllipsis
         });
 
-        // Copy Password Button (if password is saved)
-        Button? btnCopyPass = null;
+        var btnConnect = new Button
+        {
+            Content = "Connect",
+            Background = new SolidColorBrush(Color.Parse("#005FB8")),
+            Foreground = Brushes.White,
+            CornerRadius = new CornerRadius(6),
+            Height = 40,
+            Padding = new Thickness(18, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            FontWeight = FontWeight.SemiBold,
+            FontSize = 14
+        };
+        btnConnect.Click += async (_, e) =>
+        {
+            e.Handled = true;
+            await StartSessionAsync(profile);
+        };
+
+        Grid.SetColumn(info, 0);
+        Grid.SetColumn(btnConnect, 1);
+        topGrid.Children.Add(info);
+        topGrid.Children.Add(btnConnect);
+        rootStack.Children.Add(topGrid);
+
+        // Row 2: Actions Bar (Copy Password, Edit, Delete)
+        var actionsRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8
+        };
+
         if (profile.HasPassword)
         {
-            btnCopyPass = new Button
+            var btnCopyPass = new Button
             {
-                Content = "📋 Pass",
+                Content = "📋 Copy Password",
                 Background = new SolidColorBrush(Color.Parse("#1C1C21")),
                 Foreground = new SolidColorBrush(Color.Parse("#EDEDED")),
                 BorderBrush = new SolidColorBrush(Color.Parse("#2E2E35")),
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(4),
-                Height = 38,
+                Height = 34,
                 Padding = new Thickness(10, 0),
                 VerticalAlignment = VerticalAlignment.Center,
                 VerticalContentAlignment = VerticalAlignment.Center,
@@ -905,72 +960,68 @@ public partial class MainView : UserControl
             {
                 e.Handled = true;
                 await CopyPasswordToClipboardAsync(profile.Password, profile.Name);
-                btnCopyPass.Content = "✓ Copied";
+                btnCopyPass.Content = "✓ Password Copied";
                 btnCopyPass.Foreground = new SolidColorBrush(Color.Parse("#2FBF71"));
                 _ = Task.Delay(2000).ContinueWith(_ =>
                 {
                     Dispatcher.UIThread.Post(() =>
                     {
-                        btnCopyPass.Content = "📋 Pass";
+                        btnCopyPass.Content = "📋 Copy Password";
                         btnCopyPass.Foreground = new SolidColorBrush(Color.Parse("#EDEDED"));
                     });
                 });
             };
+            actionsRow.Children.Add(btnCopyPass);
         }
 
         var btnEdit = new Button
         {
-            Content = "Edit",
-            Background = new SolidColorBrush(Color.Parse("#2E2E35")),
+            Content = "✏ Edit",
+            Background = new SolidColorBrush(Color.Parse("#1C1C21")),
             Foreground = new SolidColorBrush(Color.Parse("#EDEDED")),
+            BorderBrush = new SolidColorBrush(Color.Parse("#2E2E35")),
+            BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(4),
-            Height = 38,
-            Padding = new Thickness(14, 0),
+            Height = 34,
+            Padding = new Thickness(12, 0),
             VerticalAlignment = VerticalAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center,
-            HorizontalContentAlignment = HorizontalAlignment.Center
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            FontSize = 12
         };
         btnEdit.Click += (_, e) =>
         {
             e.Handled = true;
             ShowProfileEditor(profile);
         };
+        actionsRow.Children.Add(btnEdit);
 
-        var btnConnect = new Button
+        var btnDelete = new Button
         {
-            Content = "Connect",
-            Background = new SolidColorBrush(Color.Parse("#005FB8")),
-            Foreground = Brushes.White,
+            Content = "🗑 Delete",
+            Background = new SolidColorBrush(Color.Parse("#1C1C21")),
+            Foreground = new SolidColorBrush(Color.Parse("#E85050")),
+            BorderBrush = new SolidColorBrush(Color.Parse("#3A2020")),
+            BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(4),
-            Height = 38,
-            Padding = new Thickness(16, 0),
+            Height = 34,
+            Padding = new Thickness(10, 0),
             VerticalAlignment = VerticalAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center,
             HorizontalContentAlignment = HorizontalAlignment.Center,
-            FontWeight = FontWeight.SemiBold
+            FontSize = 12
         };
-        btnConnect.Click += async (_, e) =>
+        btnDelete.Click += (_, e) =>
         {
             e.Handled = true;
-            await StartSessionAsync(profile);
+            _editingProfile = profile;
+            TxtConfirmDeleteMessage.Text = $"Are you sure you want to delete '{profile.Name}' ({profile.Host})? This action cannot be undone.";
+            OverlayConfirmDelete.IsVisible = true;
         };
+        actionsRow.Children.Add(btnDelete);
 
-        Grid.SetColumn(info, 0);
-        grid.Children.Add(info);
-
-        if (btnCopyPass != null)
-        {
-            Grid.SetColumn(btnCopyPass, 1);
-            grid.Children.Add(btnCopyPass);
-        }
-
-        Grid.SetColumn(btnEdit, 3);
-        grid.Children.Add(btnEdit);
-
-        Grid.SetColumn(btnConnect, 5);
-        grid.Children.Add(btnConnect);
-
-        border.Child = grid;
+        rootStack.Children.Add(actionsRow);
+        border.Child = rootStack;
         return border;
     }
 
@@ -1002,7 +1053,7 @@ public partial class MainView : UserControl
             ChkProfileEnableWol.IsChecked = false;
             TxtProfileWolMac.Text = "";
             TxtProfileWolPort.Text = "9";
-            TxtProfileWolWait.Text = "5";
+            TxtProfileWolWait.Text = "25";
             TxtProfileNotes.Text = "";
             ChkProfileSuppressCert.IsChecked = _payload?.Settings?.SuppressCertWarnings ?? true;
             BtnDeleteProfile.IsVisible = false;
@@ -1099,7 +1150,7 @@ public partial class MainView : UserControl
         int wolPort = 9;
         int.TryParse(TxtProfileWolPort.Text, out wolPort);
 
-        int wolWait = 5;
+        int wolWait = 25;
         int.TryParse(TxtProfileWolWait.Text, out wolWait);
 
         // Resolution preset resolution
@@ -1155,7 +1206,7 @@ public partial class MainView : UserControl
                 EnableWol = ChkProfileEnableWol.IsChecked == true,
                 WolMacAddress = TxtProfileWolMac.Text?.Trim() ?? "",
                 WolPort = wolPort > 0 ? wolPort : 9,
-                WolWaitSeconds = wolWait > 0 ? wolWait : 5,
+                WolWaitSeconds = wolWait > 0 ? wolWait : 25,
                 Notes = TxtProfileNotes.Text?.Trim() ?? "",
                 SuppressCertWarningsOverride = ChkProfileSuppressCert.IsChecked == true ? TriStateOverride.Enabled : TriStateOverride.Disabled
             };
@@ -1177,7 +1228,7 @@ public partial class MainView : UserControl
             _editingProfile.EnableWol = ChkProfileEnableWol.IsChecked == true;
             _editingProfile.WolMacAddress = TxtProfileWolMac.Text?.Trim() ?? "";
             _editingProfile.WolPort = wolPort > 0 ? wolPort : 9;
-            _editingProfile.WolWaitSeconds = wolWait > 0 ? wolWait : 5;
+            _editingProfile.WolWaitSeconds = wolWait > 0 ? wolWait : 25;
             _editingProfile.Notes = TxtProfileNotes.Text?.Trim() ?? "";
             _editingProfile.SuppressCertWarningsOverride = ChkProfileSuppressCert.IsChecked == true ? TriStateOverride.Enabled : TriStateOverride.Disabled;
         }
@@ -1441,10 +1492,10 @@ public partial class MainView : UserControl
         {
             await top.Clipboard.SetTextAsync(password);
 
-            // Auto-wipe password from clipboard after 30 seconds
+            // Auto-wipe password from clipboard after 60 seconds
             _ = Task.Run(async () =>
             {
-                await Task.Delay(30000);
+                await Task.Delay(60000);
                 await Dispatcher.UIThread.InvokeAsync(async () =>
                 {
                     try
@@ -1465,12 +1516,14 @@ public partial class MainView : UserControl
     {
         _connectCts = new System.Threading.CancellationTokenSource();
         var ct = _connectCts.Token;
+        _skipWolWait = false;
 
         TxtLaunchTitle.Text = profile.EnableWol ? "WAKING COMPUTER & CONNECTING" : "CONNECTING TO REMOTE COMPUTER";
         TxtLaunchTarget.Text = $"{profile.Name}  •  {profile.Host}:{profile.Port}";
         ProgLaunch.IsIndeterminate = true;
         ProgLaunch.Value = 0;
         TxtLaunchCountdown.IsVisible = false;
+        BtnSkipWolWait.IsVisible = false;
         TxtLaunchStep.Text = "Preparing connection...";
         TxtLaunchSubStatus.Text = "";
         BtnCancelLaunch.IsEnabled = true;
@@ -1478,13 +1531,13 @@ public partial class MainView : UserControl
 
         try
         {
-            // Auto-copy password to clipboard with 30s auto-wipe if saved
+            // Auto-copy password to clipboard with 60s auto-wipe if saved
             if (profile.HasPassword)
             {
                 await CopyPasswordToClipboardAsync(profile.Password, profile.Name);
                 TxtLaunchSubStatus.Text = "Password Ready";
-                TxtLaunchStep.Text = "Password copied to clipboard (clears in 30s). Paste when prompted by Remote Desktop!";
-                await Task.Delay(1000, ct);
+                TxtLaunchStep.Text = "Password copied to clipboard (clears in 60s). Paste when prompted by Remote Desktop!";
+                await Task.Delay(800, ct);
             }
 
             // 1. Wake-on-LAN dispatch if enabled
@@ -1496,10 +1549,11 @@ public partial class MainView : UserControl
 
                 if (profile.WolWaitSeconds > 0)
                 {
+                    BtnSkipWolWait.IsVisible = true;
                     int total = profile.WolWaitSeconds;
                     for (int s = total; s > 0; s--)
                     {
-                        if (ct.IsCancellationRequested) return;
+                        if (ct.IsCancellationRequested || _skipWolWait) break;
 
                         double percent = 100.0 * (total - s) / total;
                         ProgLaunch.IsIndeterminate = false;
@@ -1511,6 +1565,7 @@ public partial class MainView : UserControl
 
                         await Task.Delay(1000, ct);
                     }
+                    BtnSkipWolWait.IsVisible = false;
                 }
             }
 
@@ -1533,15 +1588,18 @@ public partial class MainView : UserControl
             if (result == RdpLaunchStatus.Success)
             {
                 MainActivity.Instance?.StartForegroundSession(profile);
-                await Task.Delay(2000, ct);
+                BannerActiveSession.IsVisible = true;
+                TxtActiveSessionDetails.Text = $"{profile.Name}  •  {profile.Host}:{profile.Port}";
+                // Immediately dismiss launch overlay so return from remote desktop is seamless and never shows a black screen
+                OverlayLaunch.IsVisible = false;
             }
             else if (result == RdpLaunchStatus.RedirectedToStore)
             {
-                await Task.Delay(3000, ct);
+                await Task.Delay(2500, ct);
             }
             else
             {
-                await Task.Delay(4000, ct);
+                await Task.Delay(3500, ct);
             }
         }
         catch (OperationCanceledException)
@@ -1557,6 +1615,7 @@ public partial class MainView : UserControl
         finally
         {
             OverlayLaunch.IsVisible = false;
+            BtnSkipWolWait.IsVisible = false;
             _connectCts?.Dispose();
             _connectCts = null;
         }
@@ -1639,6 +1698,7 @@ public partial class MainView : UserControl
             _activeRdpContext = IntPtr.Zero;
         }
 
+        EndActiveSession();
         PanelSession.IsVisible = false;
         if (_payload != null)
         {
@@ -1647,6 +1707,244 @@ public partial class MainView : UserControl
         else
         {
             PanelLocked.IsVisible = true;
+        }
+    }
+
+    private void SkipWolWait()
+    {
+        _skipWolWait = true;
+        BtnSkipWolWait.IsVisible = false;
+        TxtLaunchStep.Text = "Skipping countdown, connecting now...";
+    }
+
+    private void EndActiveSession()
+    {
+        MainActivity.Instance?.StopForegroundSession();
+        BannerActiveSession.IsVisible = false;
+        TxtActiveSessionDetails.Text = "";
+    }
+
+    public void OnSessionEnded()
+    {
+        BannerActiveSession.IsVisible = false;
+        TxtActiveSessionDetails.Text = "";
+    }
+
+    public void OnAppResumed()
+    {
+        if (OverlayLaunch.IsVisible && _connectCts == null)
+        {
+            OverlayLaunch.IsVisible = false;
+        }
+
+        // Update active session banner state
+        if (MainActivity.Instance != null && MainActivity.Instance.IsSessionActive)
+        {
+            var p = MainActivity.Instance.ActiveSessionProfile;
+            if (p != null)
+            {
+                BannerActiveSession.IsVisible = true;
+                TxtActiveSessionDetails.Text = $"{p.Name}  •  {p.Host}:{p.Port}";
+            }
+        }
+        else
+        {
+            BannerActiveSession.IsVisible = false;
+        }
+    }
+
+    private async Task PasteRecoveryCodeAsync()
+    {
+        try
+        {
+            var top = TopLevel.GetTopLevel(this);
+            if (top?.Clipboard != null)
+            {
+                string? text = await top.Clipboard.GetTextAsync();
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    TxtRecoveryInput.Text = text.Trim();
+                }
+            }
+        }
+        catch { }
+    }
+
+    private void OnRecoveryInputChanged()
+    {
+        if (_isFormattingRecovery) return;
+
+        string raw = (TxtRecoveryInput.Text ?? "").ToUpperInvariant();
+        var sb = new StringBuilder();
+        foreach (char c in raw)
+        {
+            if (char.IsLetterOrDigit(c)) sb.Append(c);
+            if (sb.Length == 24) break;
+        }
+
+        string clean = sb.ToString();
+        TxtRecoveryCharCount.Text = $"{clean.Length} / 24 characters";
+        TxtRecoveryCharCount.Foreground = clean.Length == 24
+            ? new SolidColorBrush(Color.Parse("#10B981"))
+            : new SolidColorBrush(Color.Parse("#94A3B8"));
+
+        var formatted = new StringBuilder();
+        for (int i = 0; i < clean.Length; i++)
+        {
+            if (i > 0 && i % 4 == 0) formatted.Append('-');
+            formatted.Append(clean[i]);
+        }
+
+        string formattedStr = formatted.ToString();
+        if (formattedStr != TxtRecoveryInput.Text)
+        {
+            _isFormattingRecovery = true;
+            try
+            {
+                TxtRecoveryInput.Text = formattedStr;
+                TxtRecoveryInput.CaretIndex = formattedStr.Length;
+            }
+            finally
+            {
+                _isFormattingRecovery = false;
+            }
+        }
+    }
+
+    private async Task ImportVaultFileAsync()
+    {
+        try
+        {
+            var top = TopLevel.GetTopLevel(this);
+            if (top == null) return;
+
+            var files = await top.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = "Select Vault File (*.rdpvault, *.enc, *.dat)",
+                AllowMultiple = false
+            });
+
+            if (files.Count > 0)
+            {
+                var file = files[0];
+                await using var stream = await file.OpenReadAsync();
+                using var ms = new MemoryStream();
+                await stream.CopyToAsync(ms);
+                byte[] importedData = ms.ToArray();
+
+                if (importedData.Length < 16)
+                {
+                    TxtFirstRunError.Text = "Selected file is too small or invalid.";
+                    TxtFirstRunError.IsVisible = true;
+                    return;
+                }
+
+                Directory.CreateDirectory(Path.GetDirectoryName(VaultPath)!);
+                await File.WriteAllBytesAsync(VaultPath, importedData);
+
+                ShowLockScreen();
+                TxtLockError.Text = "Vault file imported successfully! Enter master password to unlock.";
+                TxtLockError.Foreground = new SolidColorBrush(Color.Parse("#10B981"));
+                TxtLockError.IsVisible = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            TxtFirstRunError.Text = $"Import failed: {ex.Message}";
+            TxtFirstRunError.IsVisible = true;
+        }
+    }
+
+    private async Task ExportVaultFileAsync()
+    {
+        try
+        {
+            if (!File.Exists(VaultPath))
+            {
+                TxtVaultBackupStatus.Text = "No vault file exists to export.";
+                TxtVaultBackupStatus.Foreground = new SolidColorBrush(Color.Parse("#EF4444"));
+                TxtVaultBackupStatus.IsVisible = true;
+                return;
+            }
+
+            var top = TopLevel.GetTopLevel(this);
+            if (top == null) return;
+
+            string defaultName = $"rdp_vault_backup_{DateTime.Now:yyyyMMdd_HHmm}.rdpvault";
+            var file = await top.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = "Export Encrypted Vault Backup",
+                DefaultExtension = "rdpvault",
+                SuggestedFileName = defaultName
+            });
+
+            if (file != null)
+            {
+                byte[] vaultBytes = await File.ReadAllBytesAsync(VaultPath);
+                await using var stream = await file.OpenWriteAsync();
+                await stream.WriteAsync(vaultBytes);
+
+                TxtVaultBackupStatus.Text = $"Exported successfully ({vaultBytes.Length:N0} bytes).";
+                TxtVaultBackupStatus.Foreground = new SolidColorBrush(Color.Parse("#10B981"));
+                TxtVaultBackupStatus.IsVisible = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            TxtVaultBackupStatus.Text = $"Export error: {ex.Message}";
+            TxtVaultBackupStatus.Foreground = new SolidColorBrush(Color.Parse("#EF4444"));
+            TxtVaultBackupStatus.IsVisible = true;
+        }
+    }
+
+    private async Task ImportVaultFromSettingsAsync()
+    {
+        try
+        {
+            var top = TopLevel.GetTopLevel(this);
+            if (top == null) return;
+
+            var files = await top.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = "Select Vault Backup to Restore (*.rdpvault, *.enc, *.dat)",
+                AllowMultiple = false
+            });
+
+            if (files.Count > 0)
+            {
+                var file = files[0];
+                await using var stream = await file.OpenReadAsync();
+                using var ms = new MemoryStream();
+                await stream.CopyToAsync(ms);
+                byte[] importedData = ms.ToArray();
+
+                if (importedData.Length < 16)
+                {
+                    TxtVaultBackupStatus.Text = "Selected file is invalid or corrupted.";
+                    TxtVaultBackupStatus.Foreground = new SolidColorBrush(Color.Parse("#EF4444"));
+                    TxtVaultBackupStatus.IsVisible = true;
+                    return;
+                }
+
+                if (File.Exists(VaultPath))
+                {
+                    string backupPath = VaultPath + ".bak";
+                    File.Copy(VaultPath, backupPath, overwrite: true);
+                }
+
+                await File.WriteAllBytesAsync(VaultPath, importedData);
+
+                LockVault();
+                TxtLockError.Text = "Vault restored! Enter password to unlock.";
+                TxtLockError.Foreground = new SolidColorBrush(Color.Parse("#10B981"));
+                TxtLockError.IsVisible = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            TxtVaultBackupStatus.Text = $"Restore error: {ex.Message}";
+            TxtVaultBackupStatus.Foreground = new SolidColorBrush(Color.Parse("#EF4444"));
+            TxtVaultBackupStatus.IsVisible = true;
         }
     }
 }

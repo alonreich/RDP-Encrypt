@@ -1017,41 +1017,62 @@ A parallel mobile software distribution branch sharing the identical cryptograph
     - Full Mobile Profile Editor & Settings: Embedded UserControl panels for adding/editing/deleting connections
       (with custom RDP ports, Wake-on-LAN, and certificate warning suppression) and managing hardware biometric seals.
 
- 7. FAST APP-SWITCHING RESILIENCE & ZERO WHITE SCREEN:
-    - OnPause / OnResume Render Loop Lifecycle Synchronization: Overridden in MainActivity.cs via reflection
-      hooks into AvaloniaView.OnVisibilityChanged. OnPause invokes OnVisibilityChanged(false) ensuring
-      ChoreographerTimer and Skia render loop properly stop. OnResume invokes OnVisibilityChanged(true) which
-      cleanly restarts StartRendering() and resubscribes ChoreographerTimer, eliminating the permanent
-      freeze/deadlock when returning from the Home screen or Recents (square button).
-    - Window Background Override & Preview Disable: Set android:windowDisablePreview="true" and
-      android:windowBackground="#0E0E10" in styles.xml, plus explicit Window.SetBackgroundDrawable in OnResume,
+ 7. FAST APP-SWITCHING RESILIENCE & ZERO BLANK / BLACK SCREEN:
+    - Root Cause Analysis: Previous fast-switching blank screens stemmed from two issues:
+      (1) An opaque launch overlay (`OverlayLaunch`, background `#E00A0A0C`) remained stuck covering the
+          entire visual tree if a user fast-switched back while Microsoft Remote Desktop was opening, and
+      (2) Avalonia's EGL Android surface re-attaches asynchronously on resume; an earlier broken reflection
+          call to non-existent `AvaloniaView.OnVisibilityChanged` failed silently and left Skia's render pass deadlocked.
+    - Lifecycle Synchronization & Surface Re-Attachment (MainActivity.cs):
+      * In `OnResume()`, `mainView.OnAppResumed()` is dispatched immediately to dismiss any lingering launch overlays
+        and update the active session banner state.
+      * A 60ms deferred `InvalidateVisual()` dispatch (`PostDelayed`) guarantees that Skia executes a fresh render
+        pass immediately after the Android WindowManager binds the new hardware surface.
+    - Window Background Override & Preview Disable: Set `android:windowDisablePreview="true"` and
+      `android:windowBackground="#0E0E10"` in styles.xml, plus explicit `Window.SetBackgroundDrawable` in `OnResume`,
       preventing any flash of default Android white canvas.
-    - Activity Preservation on Back Navigation: Overridden OnBackPressed with MoveTaskToBack(true), keeping
+    - Activity Preservation on Back Navigation: Overridden `OnBackPressed` with `MoveTaskToBack(true)`, keeping
       the Activity alive in memory rather than destroying and triggering framework re-initialization faults.
- 8. ANDROID UI/UX COMPREHENSIVE REFINEMENT & RESOLUTION PROTECTION (SEPTEMBER 2026):
-    - Physical Android Back Navigation: Implemented HandleBackPressed in MainView and integrated with
-      MainActivity.OnBackPressed, closing modals/sub-screens gracefully instead of minimizing the app.
-    - Zero-Distortion Resolution & Multi-Monitor Protection:
-      * Global Settings: DefaultResolution selector ("1920x1080", "1280x720", "1600x900", "1366x768",
-        "2560x1440", "3840x2160", "Device"), multi-monitor safety mode (single monitor lock to primary display),
-        and Smart Sizing default (desktopscale=100, smart sizing=1).
-      * Profile Editor Override: Full per-card resolution override (inherit, fixed presets, match device, or custom
-        width/height) with multi-monitor override. Locking to 1920x1080 standard 16:9 prevents remote Windows hosts
-        from scrambling desktop icons and displacing application windows across secondary displays upon Android connection.
-      * RdpLauncher Query Parameters: Appends desktopwidth, desktopheight, screen mode id=2, smart sizing=1,
-        use multimon=0/1, span monitors=0/1, desktopscale=100, and redirectclipboard into the rdp:// intent.
-    - Auto-Lock on Background / Inactivity: MainActivity.OnPause records timestamp; OnResume verifies if
-      backgrounded > 30s without an active ForegroundService session and locks vault automatically.
-    - Automatic Biometrics Trigger: Detects hardware biometric seals and auto-invokes BiometricPrompt on lock screen.
-    - Show/Hide Password Eye Toggles: Integrated eye visibility buttons across all 8 password fields.
-    - Password Handoff & Auto-Wipe Clipboard: Connection cards include dedicated 'Pass' copy buttons; launching
-      connections auto-copies saved passwords with a 30-second cryptographic clipboard wipe timer.
-    - Touch Targets & Card Click: Entire connection card is clickable to connect; buttons expanded to 38-44dp.
-    - Explicit Delete Confirmation Modal: Replaced immediate deletion with OverlayConfirmDelete modal.
-    - Emergency Recovery Code Regeneration: Clean password verification modal in Settings for fresh code display.
-    - Human-Friendly Terminology: Replaced low-level cryptographic jargon with plain English UI phrasing.
+
+ 8. BIDIRECTIONAL RDP HANDOFF & SESSION LIFECYCLE (NEVER GET TRAPPED):
+    - Smooth Handoff & Auto-Wipe: Tapping 'Connect' immediately prepares credentials, dispatches DNS-aware WOL,
+      copies the password to the Android system clipboard with a 60-second secure auto-wipe timer, launches
+      the Microsoft Remote Desktop intent, and immediately clears the dark launch overlay.
+    - Ongoing Notification Controls: `RdpSessionService` creates a persistent foreground notification with two
+      interactive Action Buttons directly in Android's notification pull-down drawer:
+      * `[Open RDP]` (`ActionResumeRemoteDesktop`): Re-focuses Microsoft Remote Desktop without re-launching or resetting.
+      * `[End Session]` (`ActionEndSession`): Dispatches directly to `MainActivity.OnNewIntent`, gracefully
+        terminating the session, clearing credentials, and bringing RDP Vault back into focus.
+    - In-App Active Session Banner (`BannerActiveSession`):
+      When returning to RDP Vault while an RDP connection is ongoing, a prominent emerald banner appears at the top
+      of the screen displaying the connected computer name/host with two one-touch controls:
+      * `Return to Remote Desktop` (`RdpLauncher.ResumeRemoteDesktop`): Instant jump back to the full-screen remote desktop.
+      * `End Session`: Stops the background service, dismisses the notification, and resets the session banner.
+
+ 9. RESOLUTION OF 10 CRITICAL ANDROID UI/UX ISSUES (SEPTEMBER 2026):
+    1. Import Existing Vault on First Run: Added secondary "Restore Existing Vault Backup" button on first-run setup,
+       allowing users to open .rdpvault files from cloud storage or local downloads without having to create an empty vault.
+    2. Vault Backup & Restore in Settings: Added dedicated "Vault Backup & File Transfer" section in Settings with
+       "Export Encrypted Vault Backup" and "Import / Restore Vault Backup" using Android's system file picker (`IStorageProvider`).
+    3. Accidental Connection Launch Prevention: Removed whole-card tap-to-connect triggers that caused accidental
+       connections while scrolling through lists. Replaced with dedicated 40px 'Connect' action buttons on the right.
+    4. Profile Card Action Ergonomics: Redesigned connection cards with a spacious horizontal top row (computer name,
+       host:port, badges, Connect button) and a clean secondary bottom action bar (`📋 Copy Password`, `✏ Edit`, `🗑 Delete`).
+    5. Skip Wake-on-LAN Wait Countdown: Added a "Skip Countdown & Connect Now" button inside the launch overlay, letting
+       users immediately connect if their computer wakes up faster than the configured timeout.
+    6. Extended Clipboard Password Auto-Wipe: Increased clipboard clearing timer from 30s to 60s, giving users ample time
+       to navigate the Microsoft Remote Desktop connection prompt without losing their copied password.
+    7. One-Tap Recovery Code Paste & Live Formatting: Added a "Paste Code from Clipboard" button on the recovery unlock
+       screen along with real-time character counter (`24 / 24`) and automatic hyphenation (`XXXX-XXXX-XXXX-XXXX-XXXX-XXXX`).
+    8. Sticky Settings Close Header: Added a sticky top navigation header in Settings (`Settings`, `← Back to Connections`),
+       preventing users on small phones or large font sizes from being stranded at the bottom of long settings forms.
+    9. Unsquashed Profile Editor Bottom Controls: Replaced cramped 3-column button rows with a full-width emerald
+       "Save Changes" button and a separate dark red "Delete Connection" button with safe spacing.
+    10. Smooth Bidirectional Remote Desktop Navigation: Added interactive notification action buttons and the in-app
+        emerald session banner, eliminating the trap where users lost track of their connection or vault state.
 
 --------------------------------------------------------------------------------
 END OF FILE — keep synchronized with the code.
 ================================================================================
+
 

@@ -17,6 +17,9 @@ namespace RDPVault.Android.Services;
 [Service(Name = "com.rdpvault.app.services.RdpSessionService", Enabled = true, Exported = false, ForegroundServiceType = global::Android.Content.PM.ForegroundService.TypeRemoteMessaging)]
 public class RdpSessionService : Service
 {
+    public const string ActionEndSession = "com.rdpvault.action.END_SESSION";
+    public const string ActionResumeRemoteDesktop = "com.rdpvault.action.RESUME_RDP";
+
     public const string ChannelId = "rdpvault_active_session";
     public const int NotificationId = 1001;
 
@@ -46,6 +49,17 @@ public class RdpSessionService : Service
 
     public override StartCommandResult OnStartCommand(Intent? intent, StartCommandFlags flags, int startId)
     {
+        if (intent?.Action == ActionEndSession)
+        {
+            EndSession();
+            MainActivity.Instance?.OnSessionEndedFromNotification();
+            return StartCommandResult.NotSticky;
+        }
+        else if (intent?.Action == ActionResumeRemoteDesktop)
+        {
+            Rdp.RdpLauncher.ResumeRemoteDesktop(this);
+            return StartCommandResult.Sticky;
+        }
         return StartCommandResult.Sticky;
     }
 
@@ -83,10 +97,27 @@ public class RdpSessionService : Service
     private Notification BuildNotification(string statusText)
     {
         var launchIntent = PackageManager?.GetLaunchIntentForPackage(PackageName ?? "") ?? new Intent(this, typeof(MainActivity));
+        launchIntent.AddFlags(ActivityFlags.ClearTop | ActivityFlags.SingleTop);
         var pendingIntent = PendingIntent.GetActivity(
             this,
             0,
             launchIntent,
+            PendingIntentFlags.UpdateCurrent | PendingIntentFlags.Immutable);
+
+        var resumeIntent = new Intent(this, typeof(RdpSessionService));
+        resumeIntent.SetAction(ActionResumeRemoteDesktop);
+        var resumePendingIntent = PendingIntent.GetService(
+            this,
+            1,
+            resumeIntent,
+            PendingIntentFlags.UpdateCurrent | PendingIntentFlags.Immutable);
+
+        var endIntent = new Intent(this, typeof(RdpSessionService));
+        endIntent.SetAction(ActionEndSession);
+        var endPendingIntent = PendingIntent.GetService(
+            this,
+            2,
+            endIntent,
             PendingIntentFlags.UpdateCurrent | PendingIntentFlags.Immutable);
 
         var builder = new NotificationCompat.Builder(this, ChannelId);
@@ -100,6 +131,9 @@ public class RdpSessionService : Service
         {
             builder.SetContentIntent(pendingIntent);
         }
+
+        builder.AddAction(global::Android.Resource.Drawable.IcMediaPlay, "Open RDP", resumePendingIntent);
+        builder.AddAction(global::Android.Resource.Drawable.IcMenuCloseClearCancel, "End Session", endPendingIntent);
 
         var notification = builder.Build();
         return notification ?? new Notification();

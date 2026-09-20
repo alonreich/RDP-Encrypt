@@ -79,31 +79,12 @@ public class MainActivity : AvaloniaMainActivity<App>
         }
     }
 
-    private static readonly System.Reflection.FieldInfo? ViewField =
-        typeof(AvaloniaActivity).GetField("_view", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
-
-    private static readonly System.Reflection.MethodInfo? OnVisibilityChangedMethod =
-        ViewField?.FieldType.GetMethod("OnVisibilityChanged", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public, null, new[] { typeof(bool) }, null);
-
     private DateTime _lastBackgroundedUtc = DateTime.MinValue;
 
     protected override void OnPause()
     {
         base.OnPause();
         _lastBackgroundedUtc = DateTime.UtcNow;
-        try
-        {
-            // Explicitly notify Avalonia view that it is no longer visible so the render timer unsubscribes cleanly
-            var view = ViewField?.GetValue(this);
-            if (view != null && OnVisibilityChangedMethod != null)
-            {
-                OnVisibilityChangedMethod.Invoke(view, new object[] { false });
-            }
-        }
-        catch (Exception ex)
-        {
-            global::Android.Util.Log.Warn("RDPVault", "OnPause visibility notify skipped: " + ex.Message);
-        }
     }
 
     protected override void OnResume()
@@ -114,19 +95,36 @@ public class MainActivity : AvaloniaMainActivity<App>
             // 1. Force the native window background to dark theme color to prevent any white canvas exposure
             Window?.SetBackgroundDrawable(new global::Android.Graphics.Drawables.ColorDrawable(global::Android.Graphics.Color.ParseColor("#0E0E10")));
 
-            // 2. Explicitly notify Avalonia view of visibility so render timer cleanly resubscribes and StartRendering() is triggered
-            var view = ViewField?.GetValue(this);
-            if (view != null && OnVisibilityChangedMethod != null)
+            // 2. Notify MainView that the app resumed from background (dismisses stale overlays, syncs active session)
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
             {
-                OnVisibilityChangedMethod.Invoke(view, new object[] { true });
-            }
+                try
+                {
+                    if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.ISingleViewApplicationLifetime singleView
+                        && singleView.MainView is Views.MainView mainView)
+                    {
+                        mainView.OnAppResumed();
+                        mainView.InvalidateVisual();
+                    }
+                }
+                catch { }
+            });
 
-            // 3. Request immediate layout pass and invalidate hardware surface
-            if (view is global::Android.Views.View androidView)
+            // 3. Deferred invalidation pass (60ms) to ensure Skia renders after Android completes asynchronous surface rebind
+            Task.Delay(60).ContinueWith(_ =>
             {
-                androidView.RequestLayout();
-                androidView.Invalidate();
-            }
+                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    try
+                    {
+                        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.ISingleViewApplicationLifetime singleView)
+                        {
+                            singleView.MainView?.InvalidateVisual();
+                        }
+                    }
+                    catch { }
+                });
+            });
 
             // 4. Auto-lock verification: if backgrounded for more than 30 seconds and not running an active session
             if (_lastBackgroundedUtc != DateTime.MinValue && (_sessionService == null || !_sessionService.IsConnected))
@@ -149,24 +147,38 @@ public class MainActivity : AvaloniaMainActivity<App>
                 }
             }
             _lastBackgroundedUtc = DateTime.MinValue;
-
-            // 5. Force visual tree invalidation on Avalonia dispatcher
-            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-            {
-                try
-                {
-                    if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.ISingleViewApplicationLifetime singleView)
-                    {
-                        singleView.MainView?.InvalidateVisual();
-                    }
-                }
-                catch { }
-            });
         }
         catch (Exception ex)
         {
-            global::Android.Util.Log.Warn("RDPVault", "OnResume visibility restore skipped: " + ex.Message);
+            global::Android.Util.Log.Warn("RDPVault", "OnResume lifecycle restore: " + ex.Message);
         }
+    }
+
+    protected override void OnNewIntent(Intent? intent)
+    {
+        base.OnNewIntent(intent);
+        Intent = intent;
+        if (intent?.Action == RdpSessionService.ActionEndSession)
+        {
+            EndForegroundSession();
+            OnSessionEndedFromNotification();
+        }
+    }
+
+    public void OnSessionEndedFromNotification()
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            try
+            {
+                if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.ISingleViewApplicationLifetime singleView
+                    && singleView.MainView is Views.MainView mainView)
+                {
+                    mainView.OnSessionEnded();
+                }
+            }
+            catch { }
+        });
     }
 
     public override void OnBackPressed()
@@ -203,6 +215,9 @@ public class MainActivity : AvaloniaMainActivity<App>
             // Active session maintained seamlessly without credential re-prompt
         }
     }
+
+    public bool IsSessionActive => _sessionService?.IsConnected == true;
+    public RdpProfile? ActiveSessionProfile => _sessionService?.ActiveProfile;
 
     public void StartForegroundSession(RdpProfile profile)
     {

@@ -49,6 +49,9 @@
                 <Button Name="BtnFirstRunCreate" Content="Create Encrypted Vault" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                         Background="#005FB8" Foreground="White" Height="48" CornerRadius="6" FontSize="15" FontWeight="SemiBold"/>
 
+                <Button Name="BtnFirstRunImportExisting" Content="📂 Open / Import Existing Vault File" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                        Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" BorderThickness="1" Height="44" CornerRadius="6" FontSize="14"/>
+
                 <StackPanel Name="PnlFirstRunProgress" Spacing="6" Margin="0,4,0,0" IsVisible="False">
                     <ProgressBar IsIndeterminate="True" Height="4" Foreground="#005FB8" Background="#1C1C21"/>
                     <TextBlock Text="Creating and securing your vault..." FontSize="12" Foreground="#8A8A93" HorizontalAlignment="Center"/>
@@ -153,10 +156,17 @@
                 <Border Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16">
                     <StackPanel Spacing="12">
                         <TextBlock Text="RECOVERY CODE" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
-                        <TextBox Name="TxtRecoveryInput" Watermark="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"
-                                 Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="44" FontSize="14"/>
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBox Grid.Column="0" Name="TxtRecoveryInput" Watermark="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"
+                                     Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="44" FontSize="14"
+                                     FontFamily="Consolas, Courier New, monospace"/>
+                            <Button Grid.Column="1" Name="BtnPasteRecoveryCode" Content="📋 Paste" Background="#1C1C21" Foreground="#EDEDED"
+                                    BorderBrush="#2E2E35" BorderThickness="1" Height="44" Padding="12,0" Margin="4,0,0,0"
+                                    VerticalContentAlignment="Center" HorizontalContentAlignment="Center"/>
+                        </Grid>
+                        <TextBlock Name="TxtRecoveryCharCount" Text="0 / 24 characters" FontSize="11" Foreground="#8A8A93" Margin="2,-4,0,0"/>
 
-                        <TextBlock Text="NEW MASTER PASSWORD" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1" Margin="0,6,0,0"/>
+                        <TextBlock Text="NEW MASTER PASSWORD" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1" Margin="0,4,0,0"/>
                         <Grid ColumnDefinitions="*,Auto">
                             <TextBox Grid.Column="0" Name="TxtRecoveryNewPass" PasswordChar="●" Watermark="New master password (min 8 chars)..."
                                      Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="44" FontSize="14"/>
@@ -189,9 +199,9 @@
         </ScrollViewer>
 
         <!-- ==================== 5. UNLOCKED PANEL ==================== -->
-        <Grid Name="PanelUnlocked" RowDefinitions="Auto,Auto,*,Auto" Margin="16,48,16,16" IsVisible="False">
+        <Grid Name="PanelUnlocked" RowDefinitions="Auto,Auto,Auto,*,Auto" Margin="16,36,16,16" IsVisible="False">
             <!-- Header Bar with safe margin below status bar and separate subtitle row -->
-            <Grid Grid.Row="0" RowDefinitions="Auto,Auto" Margin="0,0,0,14">
+            <Grid Grid.Row="0" RowDefinitions="Auto,Auto" Margin="0,0,0,12">
                 <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto,Auto">
                     <TextBlock Grid.Column="0" Text="RDP VAULT" FontSize="20" FontWeight="Bold" Foreground="#FFFFFF" VerticalAlignment="Center"/>
                     <Button Grid.Column="1" Name="BtnAddProfile" Content="+ Add" Background="#005FB8" Foreground="White"
@@ -208,8 +218,25 @@
                            FontSize="11" Foreground="#2FBF71" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/>
             </Grid>
 
+            <!-- Active Remote Session Status & Fast Return Banner -->
+            <Border Grid.Row="1" Name="BannerActiveSession" Background="#162719" BorderBrush="#2FBF71" BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,0,0,12" IsVisible="False">
+                <Grid ColumnDefinitions="*,Auto,8,Auto">
+                    <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Text="●" FontSize="11" Foreground="#2FBF71" VerticalAlignment="Center"/>
+                            <TextBlock Text="ACTIVE REMOTE SESSION" FontSize="11" FontWeight="Bold" Foreground="#2FBF71" LetterSpacing="1"/>
+                        </StackPanel>
+                        <TextBlock Name="TxtActiveSessionDetails" Text="Connected to Remote PC" FontSize="13" Foreground="#FFFFFF" TextTrimming="CharacterEllipsis"/>
+                    </StackPanel>
+                    <Button Grid.Column="1" Name="BtnReturnToRdp" Content="Resume RDP" Background="#005FB8" Foreground="White" Height="36" Padding="12,0" CornerRadius="4"
+                            VerticalContentAlignment="Center" HorizontalContentAlignment="Center"/>
+                    <Button Grid.Column="3" Name="BtnEndActiveSession" Content="End Session" Background="#B80000" Foreground="White" Height="36" Padding="12,0" CornerRadius="4"
+                            VerticalContentAlignment="Center" HorizontalContentAlignment="Center"/>
+                </Grid>
+            </Border>
+
             <!-- Search / Filter Bar -->
-            <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Margin="0,0,0,12">
+            <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,0,0,12">
                 <TextBox Grid.Column="0" Name="TxtSearch" Watermark="Search connections (name, host, user, notes)..."
                          Background="#141417" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="42" FontSize="14"/>
                 <Button Grid.Column="1" Name="BtnClearSearch" Content="✕" Background="#141417" Foreground="#8A8A93"
@@ -218,7 +245,7 @@
             </Grid>
 
             <!-- Profiles List -->
-            <ScrollViewer Grid.Row="2">
+            <ScrollViewer Grid.Row="3">
                 <StackPanel Spacing="10">
                     <TextBlock Name="TxtEmptyProfiles" Text="No connections yet. Tap '+ Add' above to configure your first computer."
                                Foreground="#8A8A93" FontSize="13" HorizontalAlignment="Center" Margin="0,32,0,0" IsVisible="False"/>
@@ -351,118 +378,142 @@
                     <TextBlock Name="TxtProfileError" Foreground="#E83030" FontSize="13" HorizontalAlignment="Center" IsVisible="False" TextWrapping="Wrap"/>
 
                     <!-- Bottom Action Buttons -->
-                    <Grid ColumnDefinitions="*,10,*,10,Auto">
-                        <Button Grid.Column="0" Name="BtnSaveProfile" Content="Save" Background="#005FB8" Foreground="White"
-                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Height="44" CornerRadius="6" FontWeight="SemiBold"/>
-                        <Button Grid.Column="2" Name="BtnCancelProfile" Content="Cancel" Background="#2E2E35" Foreground="#EDEDED"
-                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Height="44" CornerRadius="6"/>
-                        <Button Grid.Column="4" Name="BtnDeleteProfile" Content="Delete Connection" Background="#B80000" Foreground="White"
-                                Height="44" Padding="14,0" CornerRadius="6" IsVisible="False" VerticalContentAlignment="Center" HorizontalContentAlignment="Center"/>
-                    </Grid>
+                    <StackPanel Spacing="10">
+                        <Button Name="BtnSaveProfile" Content="Save Connection" Background="#005FB8" Foreground="White"
+                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                Height="46" CornerRadius="6" FontWeight="SemiBold" FontSize="15"/>
+                        <Button Name="BtnDeleteProfile" Content="Delete Connection" Background="#B80000" Foreground="White"
+                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                Height="44" CornerRadius="6" IsVisible="False"/>
+                    </StackPanel>
                 </StackPanel>
             </ScrollViewer>
         </Grid>
 
         <!-- ==================== 7. SETTINGS PANEL ==================== -->
-        <ScrollViewer Name="PanelSettings" IsVisible="False" HorizontalScrollBarVisibility="Disabled">
-            <StackPanel Margin="20,48,20,180" Spacing="16">
-                <TextBlock Text="VAULT SETTINGS" FontSize="20" FontWeight="Bold" Foreground="#FFFFFF"/>
+        <Grid Name="PanelSettings" RowDefinitions="Auto,*" Margin="16,36,16,16" IsVisible="False">
+            <!-- Sticky Top Header Bar: Back / Title -->
+            <Grid Grid.Row="0" ColumnDefinitions="Auto,*" Margin="0,0,0,12">
+                <Button Grid.Column="0" Name="BtnTopCloseSettings" Content="← Back" Background="#2E2E35" Foreground="#EDEDED"
+                        Height="38" Padding="14,0" CornerRadius="4" VerticalContentAlignment="Center" HorizontalContentAlignment="Center"/>
+                <TextBlock Grid.Column="1" Text="Vault Settings" FontSize="18" FontWeight="Bold" Foreground="#FFFFFF"
+                           VerticalAlignment="Center" Margin="12,0,0,0"/>
+            </Grid>
 
-                <!-- Biometric Hardware Card -->
-                <Border Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16">
-                    <StackPanel Spacing="10">
-                        <TextBlock Text="DEVICE BIOMETRICS (FINGERPRINT / FACE UNLOCK)" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
-                        <TextBlock Name="TxtBiometricStatus" Text="Biometrics: Not enrolled" FontSize="13" Foreground="#EDEDED"/>
-                        <Button Name="BtnToggleBiometrics" Content="Enroll Biometrics" Background="#005FB8" Foreground="White"
-                                Height="42" CornerRadius="6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
-                    </StackPanel>
-                </Border>
-
-                <!-- Remote Display & Resolution Defaults (Monitor Protection) -->
-                <Border Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16">
-                    <StackPanel Spacing="10">
-                        <TextBlock Text="REMOTE DISPLAY &amp; RESOLUTION DEFAULTS" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
-                        <TextBlock Text="Default Display Resolution" FontSize="12" Foreground="#8A8A93"/>
-                        <ComboBox Name="CmbSettingsResolution" HorizontalAlignment="Stretch" Background="#1C1C21" BorderBrush="#2E2E35" Foreground="#EDEDED">
-                            <ComboBoxItem Content="1920 x 1080 (1080p Full HD - Safe for Desktop Monitors)"/>
-                            <ComboBoxItem Content="1280 x 720 (720p HD - Bandwidth Saver)"/>
-                            <ComboBoxItem Content="1600 x 900 (900p HD+)"/>
-                            <ComboBoxItem Content="1366 x 768 (Standard Laptop)"/>
-                            <ComboBoxItem Content="2560 x 1440 (1440p 2K QHD)"/>
-                            <ComboBoxItem Content="3840 x 2160 (4K Ultra HD)"/>
-                            <ComboBoxItem Content="Match Mobile Device Screen"/>
-                        </ComboBox>
-
-                        <TextBlock Text="Remote Multi-Monitor Safety Mode" FontSize="12" Foreground="#8A8A93" Margin="0,4,0,0"/>
-                        <ComboBox Name="CmbSettingsMultiMon" HorizontalAlignment="Stretch" Background="#1C1C21" BorderBrush="#2E2E35" Foreground="#EDEDED">
-                            <ComboBoxItem Content="Single Monitor Only (Recommended: prevents scrambling remote dual/multi-monitors)"/>
-                            <ComboBoxItem Content="Use All Remote Displays (Span all monitors)"/>
-                        </ComboBox>
-
-                        <CheckBox Name="ChkSettingsSmartSizing" Content="Scale desktop to fit mobile screen without distortion (Smart Sizing)" Foreground="#EDEDED" IsChecked="True"/>
-                        <TextBlock Text="💡 Standard desktop monitors run at 1920x1080. Locking default resolution to 1080p with Smart Sizing ensures remote icons and open windows stay neatly positioned across dual or multi-monitor setups."
-                                   FontSize="11" Foreground="#8A8A93" TextWrapping="Wrap"/>
-                    </StackPanel>
-                </Border>
-
-                <!-- Recovery Code Card -->
-                <Border Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16">
-                    <StackPanel Spacing="10">
-                        <TextBlock Text="EMERGENCY RECOVERY CODE" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
-                        <TextBlock Text="Your emergency recovery code is sealed inside your vault. For security, it cannot be read in plain text. You can generate a fresh recovery code anytime."
-                                   FontSize="12" Foreground="#8A8A93" TextWrapping="Wrap"/>
-                        <Button Name="BtnRegenerateRecoveryCode" Content="Generate Fresh Recovery Code" Background="#2E2E35" Foreground="#EDEDED"
-                                Height="42" CornerRadius="6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
-                    </StackPanel>
-                </Border>
-
-                <!-- Change Master Password Card -->
-                <Border Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16">
-                    <StackPanel Spacing="10">
-                        <TextBlock Text="CHANGE MASTER PASSWORD" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
-                        <Grid ColumnDefinitions="*,Auto">
-                            <TextBox Grid.Column="0" Name="TxtSettingsCurrentPass" PasswordChar="●" Watermark="Current master password..."
-                                     Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="40"/>
-                            <Button Grid.Column="1" Name="BtnToggleSettingsCurrentPass" Content="👁" Background="#1C1C21" Foreground="#8A8A93"
-                                    BorderBrush="#2E2E35" Height="40" Width="40" Margin="4,0,0,0" VerticalContentAlignment="Center" HorizontalContentAlignment="Center"/>
-                        </Grid>
-                        <Grid ColumnDefinitions="*,Auto">
-                            <TextBox Grid.Column="0" Name="TxtSettingsNewPass" PasswordChar="●" Watermark="New master password (min 8 chars)..."
-                                     Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="40"/>
-                            <Button Grid.Column="1" Name="BtnToggleSettingsNewPass" Content="👁" Background="#1C1C21" Foreground="#8A8A93"
-                                    BorderBrush="#2E2E35" Height="40" Width="40" Margin="4,0,0,0" VerticalContentAlignment="Center" HorizontalContentAlignment="Center"/>
-                        </Grid>
-                        <Grid ColumnDefinitions="*,Auto">
-                            <TextBox Grid.Column="0" Name="TxtSettingsConfirmPass" PasswordChar="●" Watermark="Confirm new master password..."
-                                     Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="40"/>
-                            <Button Grid.Column="1" Name="BtnToggleSettingsConfirmPass" Content="👁" Background="#1C1C21" Foreground="#8A8A93"
-                                    BorderBrush="#2E2E35" Height="40" Width="40" Margin="4,0,0,0" VerticalContentAlignment="Center" HorizontalContentAlignment="Center"/>
-                        </Grid>
-
-                        <TextBlock Name="TxtChangePasswordError" Foreground="#E83030" FontSize="13" HorizontalAlignment="Center" IsVisible="False" TextWrapping="Wrap"/>
-
-                        <Button Name="BtnChangeMasterPassword" Content="Update Master Password" Background="#2E2E35" Foreground="#EDEDED"
-                                Height="42" CornerRadius="6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
-
-                        <StackPanel Name="PnlChangePassProgress" Spacing="6" Margin="0,4,0,0" IsVisible="False">
-                            <ProgressBar IsIndeterminate="True" Height="4" Foreground="#005FB8" Background="#1C1C21"/>
-                            <TextBlock Text="Updating master password..." FontSize="12" Foreground="#8A8A93" HorizontalAlignment="Center"/>
+            <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Margin="0,0,0,180" Spacing="16">
+                    <!-- Biometric Hardware Card -->
+                    <Border Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16">
+                        <StackPanel Spacing="10">
+                            <TextBlock Text="DEVICE BIOMETRICS (FINGERPRINT / FACE UNLOCK)" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
+                            <TextBlock Name="TxtBiometricStatus" Text="Biometrics: Not enrolled" FontSize="13" Foreground="#EDEDED"/>
+                            <Button Name="BtnToggleBiometrics" Content="Enroll Biometrics" Background="#005FB8" Foreground="White"
+                                    Height="42" CornerRadius="6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
                         </StackPanel>
-                    </StackPanel>
-                </Border>
+                    </Border>
 
-                <!-- General Connection & Security Defaults Card -->
-                <Border Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16">
-                    <StackPanel Spacing="10">
-                        <TextBlock Text="CONNECTION &amp; SECURITY DEFAULTS" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
-                        <CheckBox Name="ChkSettingsSuppressCert" Content="Ignore certificate warnings by default (Recommended for private/home networks)" Foreground="#EDEDED" IsChecked="True"/>
-                    </StackPanel>
-                </Border>
+                    <!-- Remote Display & Resolution Defaults (Monitor Protection) -->
+                    <Border Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16">
+                        <StackPanel Spacing="10">
+                            <TextBlock Text="REMOTE DISPLAY &amp; RESOLUTION DEFAULTS" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
+                            <TextBlock Text="Default Display Resolution" FontSize="12" Foreground="#8A8A93"/>
+                            <ComboBox Name="CmbSettingsResolution" HorizontalAlignment="Stretch" Background="#1C1C21" BorderBrush="#2E2E35" Foreground="#EDEDED">
+                                <ComboBoxItem Content="1920 x 1080 (1080p Full HD - Safe for Desktop Monitors)"/>
+                                <ComboBoxItem Content="1280 x 720 (720p HD - Bandwidth Saver)"/>
+                                <ComboBoxItem Content="1600 x 900 (900p HD+)"/>
+                                <ComboBoxItem Content="1366 x 768 (Standard Laptop)"/>
+                                <ComboBoxItem Content="2560 x 1440 (1440p 2K QHD)"/>
+                                <ComboBoxItem Content="3840 x 2160 (4K Ultra HD)"/>
+                                <ComboBoxItem Content="Match Mobile Device Screen"/>
+                            </ComboBox>
 
-                <Button Name="BtnCloseSettings" Content="Back to Connections" Background="#2E2E35" Foreground="#EDEDED"
-                        Height="44" CornerRadius="6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
-            </StackPanel>
-        </ScrollViewer>
+                            <TextBlock Text="Remote Multi-Monitor Safety Mode" FontSize="12" Foreground="#8A8A93" Margin="0,4,0,0"/>
+                            <ComboBox Name="CmbSettingsMultiMon" HorizontalAlignment="Stretch" Background="#1C1C21" BorderBrush="#2E2E35" Foreground="#EDEDED">
+                                <ComboBoxItem Content="Single Monitor Only (Recommended: prevents scrambling remote dual/multi-monitors)"/>
+                                <ComboBoxItem Content="Use All Remote Displays (Span all monitors)"/>
+                            </ComboBox>
+
+                            <CheckBox Name="ChkSettingsSmartSizing" Content="Scale desktop to fit mobile screen without distortion (Smart Sizing)" Foreground="#EDEDED" IsChecked="True"/>
+                            <TextBlock Text="💡 Standard desktop monitors run at 1920x1080. Locking default resolution to 1080p with Smart Sizing ensures remote icons and open windows stay neatly positioned across dual or multi-monitor setups."
+                                       FontSize="11" Foreground="#8A8A93" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Vault Backup & File Transfer Card -->
+                    <Border Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16">
+                        <StackPanel Spacing="10">
+                            <TextBlock Text="VAULT BACKUP &amp; FILE TRANSFER" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
+                            <TextBlock Text="Export your encrypted vault file (vault.rdpv) to transfer to your PC or another phone, or restore from a backup."
+                                       FontSize="12" Foreground="#8A8A93" TextWrapping="Wrap"/>
+                            <Grid ColumnDefinitions="*,10,*">
+                                <Button Grid.Column="0" Name="BtnExportVault" Content="📤 Export Vault" Background="#2E2E35" Foreground="#EDEDED"
+                                        Height="42" CornerRadius="6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
+                                <Button Grid.Column="2" Name="BtnImportVault" Content="📥 Import Vault" Background="#2E2E35" Foreground="#EDEDED"
+                                        Height="42" CornerRadius="6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
+                            </Grid>
+                            <TextBlock Name="TxtVaultBackupStatus" Text="" FontSize="12" Foreground="#2FBF71" HorizontalAlignment="Center" IsVisible="False" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Recovery Code Card -->
+                    <Border Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16">
+                        <StackPanel Spacing="10">
+                            <TextBlock Text="EMERGENCY RECOVERY CODE" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
+                            <TextBlock Text="Your emergency recovery code is sealed inside your vault. For security, it cannot be read in plain text. You can generate a fresh recovery code anytime."
+                                       FontSize="12" Foreground="#8A8A93" TextWrapping="Wrap"/>
+                            <Button Name="BtnRegenerateRecoveryCode" Content="Generate Fresh Recovery Code" Background="#2E2E35" Foreground="#EDEDED"
+                                    Height="42" CornerRadius="6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Change Master Password Card -->
+                    <Border Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16">
+                        <StackPanel Spacing="10">
+                            <TextBlock Text="CHANGE MASTER PASSWORD" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
+                            <Grid ColumnDefinitions="*,Auto">
+                                <TextBox Grid.Column="0" Name="TxtSettingsCurrentPass" PasswordChar="●" Watermark="Current master password..."
+                                         Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="40"/>
+                                <Button Grid.Column="1" Name="BtnToggleSettingsCurrentPass" Content="👁" Background="#1C1C21" Foreground="#8A8A93"
+                                         BorderBrush="#2E2E35" Height="40" Width="40" Margin="4,0,0,0" VerticalContentAlignment="Center" HorizontalContentAlignment="Center"/>
+                            </Grid>
+                            <Grid ColumnDefinitions="*,Auto">
+                                <TextBox Grid.Column="0" Name="TxtSettingsNewPass" PasswordChar="●" Watermark="New master password (min 8 chars)..."
+                                         Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="40"/>
+                                <Button Grid.Column="1" Name="BtnToggleSettingsNewPass" Content="👁" Background="#1C1C21" Foreground="#8A8A93"
+                                         BorderBrush="#2E2E35" Height="40" Width="40" Margin="4,0,0,0" VerticalContentAlignment="Center" HorizontalContentAlignment="Center"/>
+                            </Grid>
+                            <Grid ColumnDefinitions="*,Auto">
+                                <TextBox Grid.Column="0" Name="TxtSettingsConfirmPass" PasswordChar="●" Watermark="Confirm new master password..."
+                                         Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="40"/>
+                                <Button Grid.Column="1" Name="BtnToggleSettingsConfirmPass" Content="👁" Background="#1C1C21" Foreground="#8A8A93"
+                                         BorderBrush="#2E2E35" Height="40" Width="40" Margin="4,0,0,0" VerticalContentAlignment="Center" HorizontalContentAlignment="Center"/>
+                            </Grid>
+
+                            <TextBlock Name="TxtChangePasswordError" Foreground="#E83030" FontSize="13" HorizontalAlignment="Center" IsVisible="False" TextWrapping="Wrap"/>
+
+                            <Button Name="BtnChangeMasterPassword" Content="Update Master Password" Background="#2E2E35" Foreground="#EDEDED"
+                                    Height="42" CornerRadius="6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
+
+                            <StackPanel Name="PnlChangePassProgress" Spacing="6" Margin="0,4,0,0" IsVisible="False">
+                                <ProgressBar IsIndeterminate="True" Height="4" Foreground="#005FB8" Background="#1C1C21"/>
+                                <TextBlock Text="Updating master password..." FontSize="12" Foreground="#8A8A93" HorizontalAlignment="Center"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- General Connection & Security Defaults Card -->
+                    <Border Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16">
+                        <StackPanel Spacing="10">
+                            <TextBlock Text="CONNECTION &amp; SECURITY DEFAULTS" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
+                            <CheckBox Name="ChkSettingsSuppressCert" Content="Ignore certificate warnings by default (Recommended for private/home networks)" Foreground="#EDEDED" IsChecked="True"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Button Name="BtnCloseSettings" Content="Back to Connections" Background="#2E2E35" Foreground="#EDEDED"
+                            Height="44" CornerRadius="6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
 
         <!-- ==================== 8. ACTIVE RDP SESSION VIEWPORT ==================== -->
         <Grid Name="PanelSession" IsVisible="False" Background="#000000">
@@ -506,10 +557,12 @@
                     </Border>
 
                     <!-- Action buttons -->
-                    <Grid ColumnDefinitions="*,Auto">
+                    <Grid ColumnDefinitions="*,Auto,8,Auto">
                         <TextBlock Name="TxtLaunchSubStatus" Grid.Column="0" Text="" FontSize="11" Foreground="#2FBF71"
                                    VerticalAlignment="Center" TextWrapping="Wrap"/>
-                        <Button Grid.Column="1" Name="BtnCancelLaunch" Content="Cancel" Height="36" Padding="14,0" CornerRadius="4" Click="BtnCancelLaunch_Click"/>
+                        <Button Grid.Column="1" Name="BtnSkipWolWait" Content="Connect Now" Background="#005FB8" Foreground="White"
+                                Height="36" Padding="12,0" CornerRadius="4" IsVisible="False"/>
+                        <Button Grid.Column="3" Name="BtnCancelLaunch" Content="Cancel" Height="36" Padding="14,0" CornerRadius="4" Click="BtnCancelLaunch_Click"/>
                     </Grid>
                 </StackPanel>
             </Border>

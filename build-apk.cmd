@@ -95,4 +95,34 @@ if "!DO_PUBLISH!"=="0" (
   exit /b 0
 )
 
+echo.
+echo ###########################################################
+echo PUBLISHING ANDROID RELEASE TO GITHUB...
+echo ###########################################################
+where gh >nul 2>&1
+if errorlevel 1 (
+  echo [PUBLISH] STOPPED: GitHub CLI ^(gh^) is not installed.
+  exit /b 1
+)
+gh auth status >nul 2>&1
+if errorlevel 1 (
+  echo [PUBLISH] STOPPED: gh is not signed in.
+  exit /b 1
+)
+
+set "REPO=alonreich/RDP-Encrypt"
+for /f "usebackq delims=" %%D in (`powershell -NoProfile -Command "Get-Date -Format yyyy.MM.dd"`) do set "TAG=v%%D"
+
+echo [PUBLISH] Uploading %OUTPUT_DIR%\%OUTPUT_APK% to GitHub release !TAG!...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%developer_tools\UploadAsset.ps1" -Repo "!REPO!" -Tag "!TAG!" -FilePath "%OUTPUT_DIR%\%OUTPUT_APK%"
+if errorlevel 1 (
+  echo [PUBLISH] STOPPED: uploading release asset failed.
+  exit /b 1
+)
+
+echo.
+echo ###########################################################
+echo SUCCESS: Android APK !TAG! is published to GitHub.
+echo Download: https://github.com/!REPO!/releases/latest/download/%OUTPUT_APK%
+echo ###########################################################
 exit /b 0

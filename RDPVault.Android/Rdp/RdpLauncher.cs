@@ -189,4 +189,35 @@ public static class RdpLauncher
             return RdpLaunchStatus.Failed;
         }
     }
+
+    /// <summary>
+    /// Resumes or brings the external RDP application to the foreground.
+    /// </summary>
+    public static bool ResumeRemoteDesktop(Context context)
+    {
+        var pm = context.PackageManager;
+        string[] knownPackages = new[]
+        {
+            "com.microsoft.rdc.androidx",
+            "com.microsoft.rdc.android",
+            "com.iiordanov.freeaRDP",
+            "com.iiordanov.aRDP"
+        };
+
+        foreach (var pkg in knownPackages)
+        {
+            try
+            {
+                var launchIntent = pm?.GetLaunchIntentForPackage(pkg);
+                if (launchIntent != null)
+                {
+                    launchIntent.AddFlags(ActivityFlags.NewTask | ActivityFlags.ReorderToFront);
+                    context.StartActivity(launchIntent);
+                    return true;
+                }
+            }
+            catch { }
+        }
+        return false;
+    }
 }

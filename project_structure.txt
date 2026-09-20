@@ -1138,7 +1138,8 @@ A parallel mobile software distribution branch sharing the identical cryptograph
          engine to squish and distort a 1920x1080 desktop canvas into a narrow mobile portrait aspect ratio.
        - Architectural Fix (RdpLauncher.cs): When preserving native resolution (default), passes `screen mode id=1`
          (Windowed / Fixed Canvas), `dynamic resolution=0`, and `smart sizing=0`. Protects Windows physical monitors from
-         receiving display resize PDUs (MS-RDPEDISP) that reconfigure host monitors to 1080x1920.
+         receiving display resize PDUs (MS-RDPEDISP) that reconfigure host monitors to 1080x1920. Passes
+         `prompt for credentials on client=i:0` to suppress credential prompt dialogs when matching user accounts are stored in the client.
        - Oversimplified UI Redesign: Replaced confusing technical jargon ("Allow client scaling") with straightforward,
          human-understandable control:
            "Keep Native 1920x1080 (Never squash or distort — scroll to view)" (Checked by default).

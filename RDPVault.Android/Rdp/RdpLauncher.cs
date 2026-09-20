@@ -100,6 +100,7 @@ public static class RdpLauncher
             $"full%20address=s:{encodedAddress}",
             $"authentication%20level=i:{authLevel}",
             "promptcredentialonce=i:1",
+            "prompt%20for%20credentials%20on%20client=i:0",
             $"screen%20mode%20id=i:{screenModeId}",
             $"use%20multimon=i:{(useMultiMon ? 1 : 0)}",
             $"span%20monitors=i:{(useMultiMon ? 1 : 0)}",

@@ -1746,7 +1746,7 @@ public partial class MainView : UserControl
             if (clipboardManager != null)
             {
                 var clip = global::Android.Content.ClipData.NewPlainText(label, text);
-                if (OperatingSystem.IsAndroidVersionAtLeast(33) && clip.Description != null)
+                if (clip != null && OperatingSystem.IsAndroidVersionAtLeast(33) && clip.Description != null)
                 {
                     try
                     {

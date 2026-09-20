@@ -168,7 +168,7 @@ public class RdpAutoTypeService : AccessibilityService
 
             foreach (var node in editTexts)
             {
-                if (node.IsPassword || IsPasswordField(node))
+                if (node.Password || IsPasswordField(node))
                 {
                     passwordField = node;
                 }
@@ -208,14 +208,14 @@ public class RdpAutoTypeService : AccessibilityService
                     if (string.IsNullOrWhiteSpace(currentText))
                     {
                         var userBundle = new Bundle();
-                        userBundle.PutCharSequence(AccessibilityNodeInfo.ActionArgumentSetTextCharSequence, targetUser);
+                        userBundle.PutCharSequence(AccessibilityNodeInfo.ActionArgumentSetTextCharsequence, targetUser);
                         usernameField.PerformAction(global::Android.Views.Accessibility.Action.SetText, userBundle);
                     }
                 }
 
                 // 2. Inject password into password field
                 var passBundle = new Bundle();
-                passBundle.PutCharSequence(AccessibilityNodeInfo.ActionArgumentSetTextCharSequence, targetPass);
+                passBundle.PutCharSequence(AccessibilityNodeInfo.ActionArgumentSetTextCharsequence, targetPass);
                 bool setPassSuccess = passwordField.PerformAction(global::Android.Views.Accessibility.Action.SetText, passBundle);
 
                 // 3. Immediately wipe password from memory
@@ -268,7 +268,7 @@ public class RdpAutoTypeService : AccessibilityService
 
     private static bool IsPasswordField(AccessibilityNodeInfo node)
     {
-        if (node.IsPassword) return true;
+        if (node.Password) return true;
 
         var inputType = (InputTypes)node.InputType;
         if ((inputType & InputTypes.TextVariationPassword) != 0 ||
@@ -289,7 +289,7 @@ public class RdpAutoTypeService : AccessibilityService
 
     private static AccessibilityNodeInfo? FindConnectButton(AccessibilityNodeInfo node)
     {
-        if (node.IsClickable)
+        if (node.Clickable)
         {
             string text = (node.Text?.ToString() ?? node.ContentDescription?.ToString() ?? "").Trim().ToLowerInvariant();
             if (text == "connect" || text == "ok" || text == "sign in" || text == "continue" || text == "log in")

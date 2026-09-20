@@ -63,6 +63,36 @@ RDP Vault provides an Android mobile APK companion sharing the exact same crypto
 - **Mobile RDP Client Intent Handoff & Strict Credential Isolation**: Connects directly via standard Android RDP Intent handoff (`rdp://`) into Microsoft Remote Desktop or compatible clients with automatic certificate warning suppression (`authentication level=i:0`). Decrypted passwords never linger in cleartext and connection launches support a 30-second auto-clearing clipboard buffer for seamless sign-in. Automatically redirects to Google Play Store if no client is installed.
 - **Resolution & Multi-Monitor Protection**: Global and per-connection display resolution presets (1080p, 720p, 900p, 1440p, 4K, device native, or custom) paired with Smart Sizing and single-monitor primary locks. Standard 1920x1080 locks prevent the remote Windows host from scrambling desktop icons and displacing application windows across secondary displays upon Android connection.
 
+## Android Installation & Zero-Clipboard Setup Guide
+
+### Method A: Fast 1-Click Install via ADB (Recommended — Zero Restrictions)
+If your phone is connected to your PC with USB debugging enabled, this method installs the app and activates Auto-Type without any grayed-out menus or permission hurdles:
+
+```powershell
+# 1. Install the APK
+adb install -r compiled\RDPVault.apk
+
+# 2. Grant Auto-Type accessibility permission directly
+adb shell settings put secure enabled_accessibility_services com.rdpvault.app/com.rdpvault.app.services.RdpAutoTypeService
+adb shell settings put secure accessibility_enabled 1
+```
+
+---
+
+### Method B: Manual Sideload via Phone
+
+1. **If Samsung blocks installation ("App blocked to protect your device")**:
+   - Go to **Settings → Security and privacy → Auto Blocker** and toggle it **OFF**.
+   - If Google Play Protect warns during install, tap **More details → Install anyway**.
+
+2. **Un-grey the Auto-Type switch (Android 13+ "Restricted Settings" bypass)**:
+   - In RDP Vault, tap **Settings → Configure** (or tap **Connect** on any profile).
+   - In Accessibility, tap **RDP Vault Auto-Type**. When the *"Restricted setting"* pop-up appears, tap **OK**.
+   - Return to RDP Vault and tap **Unlock App Info** (or go to phone **Settings → Apps → RDP Vault**).
+   - Tap **Force Stop**, then tap the **3 dots (`⋮`)** in the top-right corner.
+   - Tap **Allow restricted settings** and confirm with your PIN/fingerprint.
+   - Return to **Accessibility → RDP Vault Auto-Type** and toggle the switch **ON**.
+
 Build Android APK:
 ```
 dotnet workload install android

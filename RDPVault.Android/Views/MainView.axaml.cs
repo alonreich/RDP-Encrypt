@@ -345,11 +345,21 @@ public partial class MainView : UserControl
             var ctx = (global::Android.Content.Context?)MainActivity.Instance ?? global::Android.App.Application.Context;
             RdpAutoTypeService.OpenAccessibilitySettings(ctx);
         };
+        BtnSettingsAppInfo.Click += (_, _) =>
+        {
+            var ctx = (global::Android.Content.Context?)MainActivity.Instance ?? global::Android.App.Application.Context;
+            RdpAutoTypeService.OpenAppInfo(ctx);
+        };
         BtnOpenAccessibilitySettings.Click += (_, _) =>
         {
             OverlayEnableAccessibility.IsVisible = false;
             var ctx = (global::Android.Content.Context?)MainActivity.Instance ?? global::Android.App.Application.Context;
             RdpAutoTypeService.OpenAccessibilitySettings(ctx);
+        };
+        BtnOpenAppInfo.Click += (_, _) =>
+        {
+            var ctx = (global::Android.Content.Context?)MainActivity.Instance ?? global::Android.App.Application.Context;
+            RdpAutoTypeService.OpenAppInfo(ctx);
         };
         BtnContinueWithoutAccessibility.Click += async (_, _) =>
         {

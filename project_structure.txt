@@ -1196,11 +1196,13 @@ A parallel mobile software distribution branch sharing the identical cryptograph
          delay, delivering a completely automated zero-touch login experience.
      - User Consent & First-Time Activation Flow:
        * `OverlayEnableAccessibility`: Displays a clear, non-intrusive onboarding dialog upon session launch if the user has
-         a saved password and the accessibility service is disabled. Explains the security benefits and provides a 1-tap shortcut
-         directly to Android Accessibility Settings (`Settings.ActionAccessibilitySettings`).
+         a saved password and the accessibility service is disabled. Explains the security benefits and provides 1-tap shortcuts
+         directly to Android Accessibility Settings (`Settings.ActionAccessibilitySettings`) and App Info (`OpenAppInfo`).
        * PanelSettings Indicator: Added dedicated "AUTO-TYPE PASSWORD INJECTION" card in settings displaying real-time service
-         status (Active / Disabled) with a direct configuration button.
-       * Graceful Fallback: If the user prefers not to grant accessibility permissions, "Connect Anyway (Manual Entry)" proceeds
+         status (Active / Disabled) with direct "Configure" and "Unlock App Info" action buttons, plus in-app guidance.
+       * 1-Click ADB Setup: Documented `adb install -r` and `adb shell settings put secure enabled_accessibility_services`
+         providing instantaneous zero-friction installation without Android 13+ Restricted Settings UI graying.
+       * Graceful Fallback: If the user prefers not to grant accessibility permissions, "Connect Anyway (Manual Password)" proceeds
          with standard launch without blocking the connection.
 
 --------------------------------------------------------------------------------

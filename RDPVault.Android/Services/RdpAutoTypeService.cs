@@ -362,4 +362,22 @@ public class RdpAutoTypeService : AccessibilityService
             global::Android.Util.Log.Warn("RDPVault", $"Failed to open accessibility settings: {ex.Message}");
         }
     }
+
+    /// <summary>
+    /// Opens the Android System App Info settings screen for RDP Vault to allow restricted settings.
+    /// </summary>
+    public static void OpenAppInfo(Context context)
+    {
+        try
+        {
+            var intent = new Intent(Settings.ActionApplicationDetailsSettings);
+            intent.SetData(global::Android.Net.Uri.Parse("package:" + context.PackageName));
+            intent.AddFlags(ActivityFlags.NewTask);
+            context.StartActivity(intent);
+        }
+        catch (Exception ex)
+        {
+            global::Android.Util.Log.Warn("RDPVault", $"Failed to open app info: {ex.Message}");
+        }
+    }
 }

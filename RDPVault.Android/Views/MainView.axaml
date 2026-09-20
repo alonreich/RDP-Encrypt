@@ -340,8 +340,8 @@
                                 <ComboBoxItem Content="Span All Remote Monitors (Multi-monitor)"/>
                             </ComboBox>
 
-                            <CheckBox Name="ChkProfileSmartSizing" Content="Scale desktop to fit mobile screen without distortion (Smart Sizing)" Foreground="#EDEDED" IsChecked="True"/>
-                            <TextBlock Text="💡 1920x1080 locks the desktop to standard 16:9, preventing Windows from scrambling your icons and displacing secondary monitor windows."
+                            <CheckBox Name="ChkProfileSmartSizing" Content="Allow client scaling (Uncheck for true 1:1 unscaled desktop)" Foreground="#EDEDED" IsChecked="False"/>
+                            <TextBlock Text="💡 Unchecked (Recommended): Locks remote desktop to true native 1920x1080 with 0% scaling or distortion. Dynamic resolution updates are disabled to protect your Windows desktop monitor layout."
                                        FontSize="11" Foreground="#8A8A93" TextWrapping="Wrap"/>
                         </StackPanel>
                     </Border>
@@ -464,8 +464,8 @@
                                 <ComboBoxItem Content="Use All Remote Displays (Span all monitors)"/>
                             </ComboBox>
 
-                            <CheckBox Name="ChkSettingsSmartSizing" Content="Scale desktop to fit mobile screen without distortion (Smart Sizing)" Foreground="#EDEDED" IsChecked="True"/>
-                            <TextBlock Text="💡 Standard desktop monitors run at 1920x1080. Locking default resolution to 1080p with Smart Sizing ensures remote icons and open windows stay neatly positioned across dual or multi-monitor setups."
+                            <CheckBox Name="ChkSettingsSmartSizing" Content="Allow client scaling by default (Uncheck for true 1:1 unscaled desktop)" Foreground="#EDEDED" IsChecked="False"/>
+                            <TextBlock Text="💡 Unchecked (Recommended): Locks remote sessions to true native 1920x1080 with 0% scaling or distortion. Disables dynamic resolution updates to preserve Windows desktop monitors."
                                        FontSize="11" Foreground="#8A8A93" TextWrapping="Wrap"/>
                         </StackPanel>
                     </Border>
@@ -576,6 +576,18 @@
                         </Grid>
                     </Border>
 
+                    <!-- First-time credential tip with zero-clipboard password reveal -->
+                    <Border Name="CardLaunchPasswordTip" Background="#18181D" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="4" Padding="10,8" IsVisible="False">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel Grid.Column="0" Spacing="2">
+                                <TextBlock Text="AUTHENTICATION NOTICE" FontSize="10" FontWeight="Bold" Foreground="#8AB4F8"/>
+                                <TextBlock Text="Enter password once in Remote Desktop &amp; check 'Store user account' for auto-logins." FontSize="10" Foreground="#8A8A93" TextWrapping="Wrap"/>
+                            </StackPanel>
+                            <Button Grid.Column="1" Name="BtnLaunchViewPassword" Content="👁 Password" Background="#1C1C21" Foreground="#EDEDED"
+                                    BorderBrush="#2E2E35" Height="30" FontSize="11" Padding="8,0" Margin="8,0,0,0"/>
+                        </Grid>
+                    </Border>
+
                     <!-- Action buttons -->
                     <Grid ColumnDefinitions="*,Auto,8,Auto">
                         <TextBlock Name="TxtLaunchSubStatus" Grid.Column="0" Text="" FontSize="11" Foreground="#2FBF71"
@@ -663,6 +675,38 @@
                         <Button Grid.Column="2" Name="BtnSubmitVerifyPassForRecovery" Content="Generate Code" Background="#005FB8" Foreground="White"
                                 Height="42" CornerRadius="6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" FontWeight="SemiBold"/>
                     </Grid>
+                </StackPanel>
+            </Border>
+        </Border>
+
+        <!-- Ephemeral Password Reveal Modal Overlay (Zero-Clipboard Security) -->
+        <Border Name="OverlayShowPassword" Background="#E00A0A0C" IsVisible="False" ZIndex="250">
+            <Border Background="#141417" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="8"
+                    Margin="24" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="440" Padding="20">
+                <StackPanel Spacing="14">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="CREDENTIAL DETAILS" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
+                        <TextBlock Name="TxtShowPassProfileTitle" Text="Connection Name" FontSize="16" FontWeight="SemiBold" Foreground="#EDEDED"/>
+                    </StackPanel>
+
+                    <TextBlock Text="Password" FontSize="12" Foreground="#8A8A93"/>
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBox Grid.Column="0" Name="TxtRevealedPassword" PasswordChar="●" IsReadOnly="True"
+                                 Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="42" FontSize="15" FontFamily="Monospace"/>
+                        <Button Grid.Column="1" Name="BtnToggleRevealedPassword" Content="👁" Background="#1C1C21" Foreground="#8A8A93"
+                                BorderBrush="#2E2E35" Height="42" Width="42" Margin="4,0,0,0" VerticalContentAlignment="Center" HorizontalContentAlignment="Center"/>
+                    </Grid>
+
+                    <Border Background="#1A1813" BorderBrush="#664D03" BorderThickness="1" CornerRadius="6" Padding="12">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="🔒 ZERO-CLIPBOARD SECURITY MANDATE" FontSize="11" FontWeight="Bold" Foreground="#FFC107"/>
+                            <TextBlock Text="For your security, credentials are NEVER placed onto the system clipboard. Enter this password once in Microsoft Remote Desktop and check 'Store user account' for permanent automatic zero-click logins."
+                                       FontSize="11" Foreground="#EDEDED" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Button Name="BtnDismissShowPassword" Content="Close" Background="#005FB8" Foreground="White"
+                            Height="42" CornerRadius="6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" FontWeight="SemiBold"/>
                 </StackPanel>
             </Border>
         </Border>

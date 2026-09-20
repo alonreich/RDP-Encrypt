@@ -33,6 +33,7 @@ public partial class MainView : UserControl
     private VaultPayload? _payload;
     private byte[]? _masterKey;
     private RdpProfile? _editingProfile;
+    private RdpProfile? _activeLaunchProfile;
     private string _activeRecoveryCode = "";
     private System.Threading.CancellationTokenSource? _connectCts;
     private System.Threading.CancellationTokenSource? _searchCts;
@@ -121,6 +122,15 @@ public partial class MainView : UserControl
         SetupPasswordToggle(TxtSettingsNewPass, BtnToggleSettingsNewPass);
         SetupPasswordToggle(TxtSettingsConfirmPass, BtnToggleSettingsConfirmPass);
         SetupPasswordToggle(TxtVerifyPassForRecovery, BtnToggleVerifyRecoveryPass);
+        SetupPasswordToggle(TxtRevealedPassword, BtnToggleRevealedPassword);
+        BtnDismissShowPassword.Click += (_, _) =>
+        {
+            OverlayShowPassword.IsVisible = false;
+            TxtRevealedPassword.Text = "";
+            TxtRevealedPassword.PasswordChar = '●';
+            BtnToggleRevealedPassword.Content = "👁";
+        };
+        BtnLaunchViewPassword.Click += (_, _) => ShowPasswordRevealModal(_activeLaunchProfile);
 
         // 2. Numeric input filtering
         RestrictToDigits(TxtProfilePort);
@@ -244,10 +254,19 @@ public partial class MainView : UserControl
             ConfirmDeleteProfile();
         };
 
-        // Custom resolution field toggle in editor
+        // Custom resolution field toggle and SmartSizing auto-default in editor
         CmbProfileResolution.SelectionChanged += (_, _) =>
         {
-            PnlProfileCustomRes.IsVisible = CmbProfileResolution.SelectedIndex == 8;
+            int idx = CmbProfileResolution.SelectedIndex;
+            PnlProfileCustomRes.IsVisible = idx == 8;
+            if (idx == 7) // Match Mobile Device Screen
+            {
+                ChkProfileSmartSizing.IsChecked = true;
+            }
+            else if (idx >= 0 && idx <= 6) // Desktop presets including 1920x1080
+            {
+                ChkProfileSmartSizing.IsChecked = false;
+            }
         };
 
         void ScrollToWol()
@@ -349,6 +368,16 @@ public partial class MainView : UserControl
     /// </summary>
     public bool HandleBackPressed()
     {
+        // 0. Revealed password overlay
+        if (OverlayShowPassword.IsVisible)
+        {
+            OverlayShowPassword.IsVisible = false;
+            TxtRevealedPassword.Text = "";
+            TxtRevealedPassword.PasswordChar = '●';
+            BtnToggleRevealedPassword.Content = "👁";
+            return true;
+        }
+
         // 1. Password verification for recovery overlay
         if (OverlayPromptPasswordForRecovery.IsVisible)
         {
@@ -516,7 +545,7 @@ public partial class MainView : UserControl
         payload.Settings.DefaultResolution = "1920x1080";
         payload.Settings.DefaultWidth = 1920;
         payload.Settings.DefaultHeight = 1080;
-        payload.Settings.DefaultSmartSizing = true;
+        payload.Settings.DefaultSmartSizing = false;
         payload.Settings.DefaultUseMultiMon = false; // Safe single-monitor default for mobile
 
         try
@@ -1010,9 +1039,9 @@ public partial class MainView : UserControl
 
         if (profile.HasPassword)
         {
-            var btnCopyPass = new Button
+            var btnShowPass = new Button
             {
-                Content = "📋 Copy Password",
+                Content = "👁 View Password",
                 Background = new SolidColorBrush(Color.Parse("#1C1C21")),
                 Foreground = new SolidColorBrush(Color.Parse("#EDEDED")),
                 BorderBrush = new SolidColorBrush(Color.Parse("#2E2E35")),
@@ -1025,22 +1054,12 @@ public partial class MainView : UserControl
                 HorizontalContentAlignment = HorizontalAlignment.Center,
                 FontSize = 12
             };
-            btnCopyPass.Click += async (_, e) =>
+            btnShowPass.Click += (_, e) =>
             {
                 e.Handled = true;
-                await CopyPasswordToClipboardAsync(profile.Password, profile.Name);
-                btnCopyPass.Content = "✓ Password Copied";
-                btnCopyPass.Foreground = new SolidColorBrush(Color.Parse("#2FBF71"));
-                _ = Task.Delay(2000).ContinueWith(_ =>
-                {
-                    Dispatcher.UIThread.Post(() =>
-                    {
-                        btnCopyPass.Content = "📋 Copy Password";
-                        btnCopyPass.Foreground = new SolidColorBrush(Color.Parse("#EDEDED"));
-                    });
-                });
+                ShowPasswordRevealModal(profile);
             };
-            actionsRow.Children.Add(btnCopyPass);
+            actionsRow.Children.Add(btnShowPass);
         }
 
         var btnEdit = new Button
@@ -1176,7 +1195,7 @@ public partial class MainView : UserControl
             TxtProfileCustomWidth.Text = "1920";
             TxtProfileCustomHeight.Text = "1080";
             CmbProfileMultiMon.SelectedIndex = 0;
-            ChkProfileSmartSizing.IsChecked = true;
+            ChkProfileSmartSizing.IsChecked = false;
 
             ChkProfileEnableWol.IsChecked = false;
             PnlWolDetails.IsVisible = false;
@@ -1228,8 +1247,8 @@ public partial class MainView : UserControl
             // Smart Sizing override
             ChkProfileSmartSizing.IsChecked = profile.SmartSizingOverride switch
             {
-                TriStateOverride.Disabled => false,
-                _ => true
+                TriStateOverride.Enabled => true,
+                _ => false
             };
 
             ChkProfileEnableWol.IsChecked = profile.EnableWol;
@@ -1454,7 +1473,7 @@ public partial class MainView : UserControl
         };
 
         CmbSettingsMultiMon.SelectedIndex = (_payload?.Settings?.DefaultUseMultiMon == true) ? 1 : 0;
-        ChkSettingsSmartSizing.IsChecked = _payload?.Settings?.DefaultSmartSizing ?? true;
+        ChkSettingsSmartSizing.IsChecked = _payload?.Settings?.DefaultSmartSizing ?? false;
 
         string machineId = VaultCrypto.CurrentMachineId();
         bool enrolled = _vaultFile?.Seals?.Any(s => s.MachineId == machineId && !string.IsNullOrEmpty(s.KeyId) && !string.IsNullOrEmpty(s.TpmBlob)) == true;
@@ -1764,17 +1783,19 @@ public partial class MainView : UserControl
         _lastSensitiveCopiedText = null;
     }
 
-    private Task CopyPasswordToClipboardAsync(string password, string profileName)
+    private void ShowPasswordRevealModal(RdpProfile? profile)
     {
-        if (!string.IsNullOrEmpty(password))
-        {
-            CopySensitiveTextToClipboard(password, $"Password for {profileName}");
-        }
-        return Task.CompletedTask;
+        if (profile == null) return;
+        TxtShowPassProfileTitle.Text = $"{profile.Name}  •  {profile.Host}:{profile.Port}";
+        TxtRevealedPassword.Text = profile.Password;
+        TxtRevealedPassword.PasswordChar = '●';
+        BtnToggleRevealedPassword.Content = "👁";
+        OverlayShowPassword.IsVisible = true;
     }
 
     private async Task StartSessionAsync(RdpProfile profile)
     {
+        _activeLaunchProfile = profile;
         _connectCts = new System.Threading.CancellationTokenSource();
         var ct = _connectCts.Token;
         _skipWolWait = false;
@@ -1785,21 +1806,18 @@ public partial class MainView : UserControl
         ProgLaunch.Value = 0;
         TxtLaunchCountdown.IsVisible = false;
         BtnSkipWolWait.IsVisible = false;
-        TxtLaunchStep.Text = "Preparing connection...";
-        TxtLaunchSubStatus.Text = "";
+        CardLaunchPasswordTip.IsVisible = profile.HasPassword;
+        TxtLaunchSubStatus.Text = "Display & Security";
+        var (w, h, isDevice) = profile.ResolveResolution(_payload?.Settings);
+        TxtLaunchStep.Text = isDevice
+            ? "Configuring mobile screen resolution..."
+            : $"Enforcing native {w}x{h} unscaled desktop (monitor protection active)...";
         BtnCancelLaunch.IsEnabled = true;
         OverlayLaunch.IsVisible = true;
 
         try
         {
-            // Auto-copy password to clipboard with 60s auto-wipe if saved
-            if (profile.HasPassword)
-            {
-                await CopyPasswordToClipboardAsync(profile.Password, profile.Name);
-                TxtLaunchSubStatus.Text = "Password Ready";
-                TxtLaunchStep.Text = "Password copied to clipboard (clears in 60s). Paste when prompted by Remote Desktop!";
-                await Task.Delay(800, ct);
-            }
+            await Task.Delay(200, ct);
 
             // 1. Wake-on-LAN dispatch if enabled
             if (profile.EnableWol && !string.IsNullOrWhiteSpace(profile.WolMacAddress))
@@ -1877,6 +1895,7 @@ public partial class MainView : UserControl
         {
             OverlayLaunch.IsVisible = false;
             BtnSkipWolWait.IsVisible = false;
+            CardLaunchPasswordTip.IsVisible = false;
             _connectCts?.Dispose();
             _connectCts = null;
         }

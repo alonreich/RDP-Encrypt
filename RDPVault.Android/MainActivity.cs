@@ -114,6 +114,9 @@ public class MainActivity : AvaloniaMainActivity<App>
         base.OnResume();
         try
         {
+            // 0. Reset orientation preference back to user / sensor control upon returning to RDP Vault
+            RequestedOrientation = ScreenOrientation.Unspecified;
+
             // 1. Force the native window background to dark theme color to prevent any white canvas exposure
             Window?.SetBackgroundDrawable(new global::Android.Graphics.Drawables.ColorDrawable(global::Android.Graphics.Color.ParseColor("#0E0E10")));
 

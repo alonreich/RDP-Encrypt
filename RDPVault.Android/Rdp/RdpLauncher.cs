@@ -65,8 +65,21 @@ public static class RdpLauncher
         bool useMultiMon = profile.ResolveUseMultiMon(settings);
         bool allowClipboard = profile.ResolveAllowClipboard(settings);
 
+        // If launching a desktop widescreen resolution (e.g. 1920x1080), request sensor landscape orientation
+        // so that the incoming Remote Desktop client immediately opens in native 16:9 widescreen, preventing
+        // the remote desktop from squashing/smooshing into portrait (1080x1920).
+        var activity = (context as Activity) ?? MainActivity.Instance;
+        if (!isDeviceNative && width > height && activity != null)
+        {
+            try
+            {
+                activity.RequestedOrientation = ScreenOrientation.SensorLandscape;
+            }
+            catch { }
+        }
+
         // 4. Construct standard Microsoft Remote Desktop URI with display & monitor protection
-        // Format: rdp://full%20address=s:{host}:{port}&desktopwidth=i:{w}&desktopheight=i:{h}&screen%20mode%20id=i:2&smart%20sizing=i:1&use%20multimon=i:0&span%20monitors=i:0&authentication%20level=i:{authLevel}&promptcredentialonce=i:1
+        // Format: rdp://full%20address=s:{host}:{port}&desktopwidth=i:{w}&desktopheight=i:{h}&screen%20mode%20id=i:2&smart%20sizing=i:0&dynamic%20resolution=i:0&use%20multimon=i:0&span%20monitors=i:0&authentication%20level=i:{authLevel}&promptcredentialonce=i:1
         string encodedAddress = global::Android.Net.Uri.Encode(fullAddress) ?? fullAddress;
         string encodedUser = string.IsNullOrWhiteSpace(profile.Username) ? "" : (global::Android.Net.Uri.Encode(profile.Username) ?? profile.Username);
 
@@ -76,10 +89,12 @@ public static class RdpLauncher
             $"authentication%20level=i:{authLevel}",
             "promptcredentialonce=i:1",
             "screen%20mode%20id=i:2",
-            $"smart%20sizing=i:{(smartSizing ? 1 : 0)}",
             $"use%20multimon=i:{(useMultiMon ? 1 : 0)}",
             $"span%20monitors=i:{(useMultiMon ? 1 : 0)}",
             "desktopscale=i:100",
+            "desktopscalefactor=i:100",
+            "session%20bpp=i:32",
+            "autoreconnection%20enabled=i:1",
             $"redirectclipboard=i:{(allowClipboard ? 1 : 0)}"
         };
 
@@ -87,6 +102,18 @@ public static class RdpLauncher
         {
             queryList.Add($"desktopwidth=i:{width}");
             queryList.Add($"desktopheight=i:{height}");
+            // CRITICAL: Disable dynamic resolution updates to prevent Microsoft Remote Desktop from sending
+            // a display resize PDU (MS-RDPEDISP) that alters the Windows OS physical monitor resolution to 1080x1920!
+            queryList.Add("dynamic%20resolution=i:0");
+            // CRITICAL: For fixed desktop resolutions (like 1920x1080), smart sizing is disabled by default
+            // to ensure true 1:1 pixel fidelity with zero scaling or aspect ratio distortion.
+            bool effectiveSmartSizing = profile.SmartSizingOverride == TriStateOverride.Enabled;
+            queryList.Add($"smart%20sizing=i:{(effectiveSmartSizing ? 1 : 0)}");
+        }
+        else
+        {
+            queryList.Add($"smart%20sizing=i:{(smartSizing ? 1 : 0)}");
+            queryList.Add("dynamic%20resolution=i:1");
         }
 
         if (!string.IsNullOrEmpty(encodedUser))

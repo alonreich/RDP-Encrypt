@@ -23,15 +23,12 @@ RDP Vault Android is a parallel distribution branch providing zero-compromise en
   3. The activity acts solely as a viewport. When flipped from portrait to landscape, the viewport merely adjusts display dimensions while the underlying session remains uninterrupted.
   4. Auto-lock timers are suspended while a foreground session is active.
 
-### 2.3 Embedded FreeRDP Engine
-- **Engine**: Bundles `libfreerdp.so` and `libwinpr.so` natively.
-- **Benefits**: No dependency on third-party remote desktop applications; enables direct in-memory credential injection, session zeroing via `VaultMemoryGuard`, and scoped trace erasure.
-- **Input Engine**: Touch gesture translation:
-  - Single tap = Left click
-  - Two-finger tap = Right click
-  - Drag = Mouse pointer move
-  - Pinch-to-zoom / Pan = Framebuffer scaling
-  - Virtual overlay keyboard with Windows shortcuts (Ctrl+Alt+Del, Win, Esc, Tab).
+### 2.3 Mobile RDP Client Intent Handoff & Credential Hygiene
+- **Architecture**: `RdpLauncher` dispatches connections via standard Android RDP Intent handoff (`rdp://`).
+- **Target Clients**: Microsoft Remote Desktop / Windows App (`com.microsoft.rdc.androidx`, `com.microsoft.rdc.android`), Free aRDP (`com.iiordanov.freeaRDP`), and aRDP Pro (`com.iiordanov.aRDP`).
+- **Store Fallback**: Direct one-tap redirect to Google Play Store if no client is installed.
+- **Clipboard Self-Destruct**: Transmits password securely via Android system clipboard with `IS_SENSITIVE` extra flag (Android 13+) and schedules an automatic background self-destruct wipe after 30 seconds.
+- **Network Resilience**: Dynamic DNS resolution and dual-endpoint WOL (broadcast + unicast across WOL port and custom RDP port).
 
 ### 2.4 Vault Interchangeability
 - The Android app directly opens, imports, and updates the exact same `vault.rdpv` file used on Windows.
@@ -54,7 +51,8 @@ C:\Full_Control\RDP_Encrypt\
 │   ├── MainActivity.cs
 │   ├── Services\RdpSessionService.cs
 │   ├── Security\AndroidHardwareKeyStore.cs
-│   └── Rdp\FreeRdpClient.cs
+│   ├── Rdp\FreeRdpClient.cs
+│   └── Rdp\RdpLauncher.cs
 ├── build.cmd                     (Builds & publishes Windows RDPVault.exe)
 └── build-apk.cmd                 (Builds & publishes Android RDPVault.apk)
 ```

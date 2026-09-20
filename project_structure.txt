@@ -898,9 +898,19 @@ A parallel mobile software distribution branch sharing the identical cryptograph
       credentials. Screen flips simply adapt the viewport without session drops or auth prompts.
     - Auto-lock timer is suspended while a foreground session is active.
 
- 4. EMBEDDED FREERDP CLIENT:
-    Embedded native client (libfreerdp.so, libwinpr.so) with touch-to-mouse translation,
-    pinch-to-zoom framebuffer scaling, and instant credential memory wiping.
+ 4. MOBILE RDP CLIENT INTENT HANDOFF & CREDENTIAL HYGIENE:
+    - RdpLauncher (RDPVault.Android.Rdp): Handles RDP connections via standard Android Intent handoff
+      (rdp://full%20address=s:{host}:{port}&username=s:{user}).
+    - Package Visibility (<queries> in AndroidManifest.xml): Declares rdp and market schemes plus
+      well-known RDP packages (Microsoft Remote Desktop com.microsoft.rdc.androidx/com.microsoft.rdc.android,
+      and aRDP com.iiordanov.freeaRDP/com.iiordanov.aRDP) complying with Android 11+ package visibility rules.
+    - Ephemeral Clipboard Handoff: Copies decrypted session password to system clipboard with Android 13+
+      IS_SENSITIVE flag and schedules an automatic 30-second background self-destruct wipe, enforcing zero
+      lingering credentials in memory or clipboard caches.
+    - Play Store Auto-Fallback: If no compatible RDP client is installed on the device, seamlessly redirects
+      the user to Google Play Store to install Microsoft Remote Desktop.
+    - Dynamic Host & DNS-Aware WOL: Resolves domain names and hostnames to IPv4 addresses and transmits
+      Wake-on-LAN magic packets across broadcast and unicast endpoints (both WOL port and custom RDP port).
 
  5. PARALLEL BUILD PIPELINE, RELEASE SIGNING & APP DRAWER / RUNTIME FIXES:
     - build-apk.cmd mirrors build.cmd, validating the .NET Android workload, building RDPVault.Android,
@@ -943,6 +953,18 @@ A parallel mobile software distribution branch sharing the identical cryptograph
       cancellation button, preventing user uncertainty during remote host boot.
     - Full Mobile Profile Editor & Settings: Embedded UserControl panels for adding/editing/deleting connections
       (with custom RDP ports and Wake-on-LAN configuration) and managing hardware biometric seals.
+
+ 7. EGL RENDERING BACKEND & APP LIFECYCLE RESILIENCE:
+    - EGL / OpenGL ES Rendering Enforcement: Configured CustomizeAppBuilder with AndroidPlatformOptions
+      RenderingMode = [AndroidRenderingMode.Egl, AndroidRenderingMode.Software]. Avalonia defaults to Vulkan
+      on modern Android devices, which invalidates and fails to reconstruct its VkSurfaceKHR swapchain when
+      returning from the Home screen or Android Recents (App Switcher), causing a permanent blank white screen.
+      EGL natively handles Android surface recreation on onResume() without thread freezes.
+    - SingleTask LaunchMode: MainActivity is configured with LaunchMode = LaunchMode.SingleTask to prevent
+      the Android OS task manager from creating duplicate or detached Activity instances when returning from
+      Recents.
+    - Theme Window Background: Added android:windowBackground and android:navigationBarColor (#0E0E10) in
+      Resources/values/styles.xml, matching the dark UI palette and eliminating any flash of white canvas.
 
 --------------------------------------------------------------------------------
 END OF FILE — keep synchronized with the code.

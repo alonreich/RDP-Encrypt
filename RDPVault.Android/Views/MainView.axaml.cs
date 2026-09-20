@@ -1021,25 +1021,41 @@ public partial class MainView : UserControl
 
             ProgLaunch.IsIndeterminate = true;
             TxtLaunchCountdown.IsVisible = false;
-            TxtLaunchSubStatus.Text = "Establishing session";
-            TxtLaunchStep.Text = $"Connecting to {profile.Host}:{profile.Port}...";
+            TxtLaunchSubStatus.Text = "Handoff to Remote Desktop";
+            TxtLaunchStep.Text = $"Opening Remote Desktop client for {profile.Host}:{profile.Port}...";
 
-            // 2. Launch RDP Session
-            PanelUnlocked.IsVisible = false;
-            PanelSession.IsVisible = true;
+            // 2. Launch RDP via Mobile Intent handoff
+            var context = (global::Android.Content.Context?)MainActivity.Instance ?? global::Android.App.Application.Context;
+            var result = RdpLauncher.LaunchRdp(context, profile, out string message);
 
-            int width = (int)Math.Max(800, Bounds.Width);
-            int height = (int)Math.Max(600, Bounds.Height);
+            ProgLaunch.IsIndeterminate = false;
+            ProgLaunch.Value = 100;
+            TxtLaunchSubStatus.Text = result == RdpLaunchStatus.Failed ? "Handoff Failed" : "Handoff Active";
+            TxtLaunchStep.Text = message;
 
-            _activeRdpContext = FreeRdpClient.Connect(profile, _payload?.Settings, width, height);
+            if (result == RdpLaunchStatus.Success)
+            {
+                MainActivity.Instance?.StartForegroundSession(profile);
+                await Task.Delay(2500, ct);
+            }
+            else if (result == RdpLaunchStatus.RedirectedToStore)
+            {
+                await Task.Delay(3000, ct);
+            }
+            else
+            {
+                await Task.Delay(4000, ct);
+            }
         }
         catch (OperationCanceledException)
         {
             // Aborted by user
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            DisconnectSession();
+            TxtLaunchSubStatus.Text = "Error";
+            TxtLaunchStep.Text = $"Connection failed: {ex.Message}";
+            await Task.Delay(3000);
         }
         finally
         {
@@ -1067,17 +1083,39 @@ public partial class MainView : UserControl
             using var client = new UdpClient();
             client.EnableBroadcast = true;
 
-            // Transmit to broadcast and host unicast across WOL port & custom RDP port
+            int wolPort = profile.WolPort > 0 ? profile.WolPort : 9;
+            int rdpPort = profile.Port > 0 ? profile.Port : 3389;
+
             var endpoints = new List<IPEndPoint>
             {
-                new IPEndPoint(IPAddress.Broadcast, profile.WolPort > 0 ? profile.WolPort : 9),
-                new IPEndPoint(IPAddress.Broadcast, profile.Port)
+                new IPEndPoint(IPAddress.Broadcast, wolPort),
+                new IPEndPoint(IPAddress.Broadcast, rdpPort)
             };
 
-            if (IPAddress.TryParse(profile.Host, out var hostIp))
+            string host = profile.Host.Trim();
+            if (host.Contains(':') && !host.Contains('['))
             {
-                endpoints.Add(new IPEndPoint(hostIp, profile.WolPort > 0 ? profile.WolPort : 9));
-                endpoints.Add(new IPEndPoint(hostIp, profile.Port));
+                var parts = host.Split(':');
+                host = parts[0];
+            }
+
+            if (IPAddress.TryParse(host, out var hostIp))
+            {
+                endpoints.Add(new IPEndPoint(hostIp, wolPort));
+                endpoints.Add(new IPEndPoint(hostIp, rdpPort));
+            }
+            else if (!string.IsNullOrWhiteSpace(host))
+            {
+                try
+                {
+                    var addresses = await Dns.GetHostAddressesAsync(host);
+                    foreach (var addr in addresses.Where(a => a.AddressFamily == AddressFamily.InterNetwork))
+                    {
+                        endpoints.Add(new IPEndPoint(addr, wolPort));
+                        endpoints.Add(new IPEndPoint(addr, rdpPort));
+                    }
+                }
+                catch { }
             }
 
             foreach (var ep in endpoints)

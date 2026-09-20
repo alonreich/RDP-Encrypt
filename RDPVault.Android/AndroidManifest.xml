@@ -20,6 +20,22 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!-- Intent and package visibility for external RDP client handoff and Play Store fallback -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="rdp" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="market" />
+        </intent>
+        <package android:name="com.microsoft.rdc.androidx" />
+        <package android:name="com.microsoft.rdc.android" />
+        <package android:name="com.iiordanov.freeaRDP" />
+        <package android:name="com.iiordanov.aRDP" />
+    </queries>
+
     <application
         android:label="RDP Vault"
         android:icon="@mipmap/icon"

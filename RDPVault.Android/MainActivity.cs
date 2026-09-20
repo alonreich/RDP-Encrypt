@@ -20,6 +20,7 @@ namespace RDPVault.Android;
     RoundIcon = "@mipmap/icon",
     MainLauncher = true,
     Exported = true,
+    LaunchMode = LaunchMode.SingleTask,
     WindowSoftInputMode = global::Android.Views.SoftInput.AdjustResize,
     ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize | ConfigChanges.UiMode | ConfigChanges.SmallestScreenSize | ConfigChanges.ScreenLayout | ConfigChanges.Density)]
 public class MainActivity : AvaloniaMainActivity<App>
@@ -27,7 +28,11 @@ public class MainActivity : AvaloniaMainActivity<App>
     protected override AppBuilder CustomizeAppBuilder(AppBuilder builder)
     {
         return base.CustomizeAppBuilder(builder)
-            .WithInterFont();
+            .WithInterFont()
+            .With(new AndroidPlatformOptions
+            {
+                RenderingMode = new[] { AndroidRenderingMode.Egl, AndroidRenderingMode.Software }
+            });
     }
     private RdpSessionService? _sessionService;
     private bool _serviceBound;
@@ -88,6 +93,30 @@ public class MainActivity : AvaloniaMainActivity<App>
         if (_sessionService != null && _sessionService.IsConnected)
         {
             // Active session maintained seamlessly without credential re-prompt
+        }
+    }
+
+    public void StartForegroundSession(RdpProfile profile)
+    {
+        try
+        {
+            _sessionService?.StartSession(profile);
+        }
+        catch (Exception ex)
+        {
+            global::Android.Util.Log.Warn("RDPVault", "Failed to start foreground session: " + ex.Message);
+        }
+    }
+
+    public void EndForegroundSession()
+    {
+        try
+        {
+            _sessionService?.EndSession();
+        }
+        catch (Exception ex)
+        {
+            global::Android.Util.Log.Warn("RDPVault", "Failed to end foreground session: " + ex.Message);
         }
     }
 

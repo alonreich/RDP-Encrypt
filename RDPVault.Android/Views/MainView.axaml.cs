@@ -19,6 +19,7 @@ using Button = Avalonia.Controls.Button;
 using CheckBox = Avalonia.Controls.CheckBox;
 using ProgressBar = Avalonia.Controls.ProgressBar;
 using TextBox = Avalonia.Controls.TextBox;
+using Orientation = Avalonia.Layout.Orientation;
 using Avalonia.Platform.Storage;
 using RDPVault;
 using RDPVault.Android.Rdp;
@@ -158,11 +159,6 @@ public partial class MainView : UserControl
         // 8. Profile Editor (Sticky Top Header and Bottom Buttons)
         BtnSaveProfile.Click += (_, _) => SaveProfile();
         BtnTopSaveProfile.Click += (_, _) => SaveProfile();
-        BtnCancelProfile.Click += (_, _) =>
-        {
-            PanelProfileEditor.IsVisible = false;
-            PanelUnlocked.IsVisible = true;
-        };
         BtnTopCancelProfile.Click += (_, _) =>
         {
             PanelProfileEditor.IsVisible = false;
@@ -935,7 +931,7 @@ public partial class MainView : UserControl
         // Row 2: Actions Bar (Copy Password, Edit, Delete)
         var actionsRow = new StackPanel
         {
-            Orientation = Orientation.Horizontal,
+            Orientation = Avalonia.Layout.Orientation.Horizontal,
             Spacing = 8
         };
 

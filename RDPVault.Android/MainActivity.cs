@@ -243,6 +243,8 @@ public class MainActivity : AvaloniaMainActivity<App>
         }
     }
 
+    public void StopForegroundSession() => EndForegroundSession();
+
     protected override void OnDestroy()
     {
         if (Instance == this) Instance = null;

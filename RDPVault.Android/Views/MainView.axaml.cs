@@ -34,11 +34,36 @@ public partial class MainView : UserControl
     private byte[]? _masterKey;
     private RdpProfile? _editingProfile;
     private string _activeRecoveryCode = "";
-    private IntPtr _activeRdpContext = IntPtr.Zero;
     private System.Threading.CancellationTokenSource? _connectCts;
+    private System.Threading.CancellationTokenSource? _searchCts;
     private bool _biometricPromptSuppressed;
     private volatile bool _skipWolWait;
     private bool _isFormattingRecovery;
+    private byte[]? _stagedRestoreBytes;
+    private DateTime _lastSensitiveCopyUtc = DateTime.MinValue;
+    private string? _lastSensitiveCopiedText;
+
+    private struct ProfileEditorState
+    {
+        public string Name;
+        public string Host;
+        public string Port;
+        public string User;
+        public string Pass;
+        public string Gateway;
+        public int ResIndex;
+        public string CustomWidth;
+        public string CustomHeight;
+        public int MultiMonIndex;
+        public bool SmartSizing;
+        public bool EnableWol;
+        public string WolMac;
+        public string WolPort;
+        public string WolWait;
+        public bool SuppressCert;
+        public string Notes;
+    }
+    private ProfileEditorState _editorInitialState;
 
     private static string ResolveVaultPath()
     {
@@ -109,7 +134,7 @@ public partial class MainView : UserControl
         BtnFirstRunImportExisting.Click += async (_, _) => await ImportVaultFileAsync();
 
         // 4. Recovery Code Display
-        BtnCopyRecoveryCode.Click += async (_, _) => await CopyRecoveryCodeToClipboardAsync();
+        BtnCopyRecoveryCode.Click += (_, _) => CopyRecoveryCodeToClipboardAsync();
         ChkConfirmRecoverySaved.IsCheckedChanged += (_, _) =>
         {
             BtnFinishSetupAndEnter.IsEnabled = ChkConfirmRecoverySaved.IsChecked == true;
@@ -143,12 +168,33 @@ public partial class MainView : UserControl
         BtnAddProfile.Click += (_, _) => ShowProfileEditor(null);
         BtnSettings.Click += (_, _) => ShowSettings();
         BtnLock.Click += (_, _) => LockVault();
-        TxtSearch.TextChanged += (_, _) => RefreshProfilesList();
+
+        // Search with 150ms debounce to prevent mobile jank during typing
+        TxtSearch.TextChanged += (_, _) =>
+        {
+            _searchCts?.Cancel();
+            var cts = new System.Threading.CancellationTokenSource();
+            _searchCts = cts;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(150, cts.Token);
+                    if (!cts.Token.IsCancellationRequested)
+                    {
+                        await Dispatcher.UIThread.InvokeAsync(RefreshProfilesList);
+                    }
+                }
+                catch (TaskCanceledException) { }
+            });
+        };
         BtnClearSearch.Click += (_, _) =>
         {
+            _searchCts?.Cancel();
             TxtSearch.Text = "";
             RefreshProfilesList();
         };
+        BtnDismissActiveBanner.Click += (_, _) => BannerActiveSession.IsVisible = false;
         BtnReturnToRdp.Click += (_, _) =>
         {
             var ctx = (global::Android.Content.Context?)MainActivity.Instance ?? global::Android.App.Application.Context;
@@ -159,10 +205,27 @@ public partial class MainView : UserControl
         // 8. Profile Editor (Sticky Top Header and Bottom Buttons)
         BtnSaveProfile.Click += (_, _) => SaveProfile();
         BtnTopSaveProfile.Click += (_, _) => SaveProfile();
-        BtnTopCancelProfile.Click += (_, _) =>
+        BtnTopCancelProfile.Click += (_, _) => OnCancelProfileEditor();
+        BtnBottomCancelProfile.Click += (_, _) => OnCancelProfileEditor();
+        BtnKeepEditingProfile.Click += (_, _) => OverlayConfirmDiscardProfile.IsVisible = false;
+        BtnConfirmDiscardProfile.Click += (_, _) =>
         {
+            OverlayConfirmDiscardProfile.IsVisible = false;
             PanelProfileEditor.IsVisible = false;
             PanelUnlocked.IsVisible = true;
+        };
+
+        // Wake-on-LAN collapsible toggle
+        ChkProfileEnableWol.IsCheckedChanged += (_, _) =>
+        {
+            PnlWolDetails.IsVisible = ChkProfileEnableWol.IsChecked == true;
+        };
+        TxtProfileWolMac.LostFocus += (_, _) =>
+        {
+            if (MacAddressHelper.TryNormalizeMac(TxtProfileWolMac.Text, out string formatted, out _))
+            {
+                TxtProfileWolMac.Text = formatted;
+            }
         };
 
         // Delete with explicit confirmation
@@ -214,6 +277,12 @@ public partial class MainView : UserControl
         BtnToggleBiometrics.Click += async (_, _) => await ToggleBiometricsAsync();
         BtnExportVault.Click += async (_, _) => await ExportVaultFileAsync();
         BtnImportVault.Click += async (_, _) => await ImportVaultFromSettingsAsync();
+        BtnCancelRestoreVault.Click += (_, _) =>
+        {
+            _stagedRestoreBytes = null;
+            OverlayConfirmRestoreVault.IsVisible = false;
+        };
+        BtnConfirmRestoreVault.Click += async (_, _) => await ExecuteVaultRestoreAsync();
         BtnRegenerateRecoveryCode.Click += (_, _) =>
         {
             TxtVerifyPassForRecovery.Text = "";
@@ -228,7 +297,8 @@ public partial class MainView : UserControl
 
         BtnChangeMasterPassword.Click += async (_, _) => await ChangeMasterPasswordAsync();
 
-        // Resolution & Security Defaults in Settings
+        // Resolution, Auto-Lock & Security Defaults in Settings
+        CmbSettingsAutoLock.SelectionChanged += (_, _) => SaveSettingsDefaults();
         CmbSettingsResolution.SelectionChanged += (_, _) => SaveSettingsDefaults();
         CmbSettingsMultiMon.SelectionChanged += (_, _) => SaveSettingsDefaults();
         ChkSettingsSmartSizing.IsCheckedChanged += (_, _) => SaveSettingsDefaults();
@@ -240,8 +310,7 @@ public partial class MainView : UserControl
             PanelUnlocked.IsVisible = true;
         };
 
-        // 10. RDP Session & WOL
-        BtnDisconnectSession.Click += (_, _) => DisconnectSession();
+        // 10. WOL Skip Wait
         BtnSkipWolWait.Click += (_, _) => SkipWolWait();
     }
 
@@ -287,14 +356,29 @@ public partial class MainView : UserControl
             return true;
         }
 
-        // 2. Delete confirmation modal
+        // 2. Discard profile confirmation modal
+        if (OverlayConfirmDiscardProfile.IsVisible)
+        {
+            OverlayConfirmDiscardProfile.IsVisible = false;
+            return true;
+        }
+
+        // 3. Restore vault confirmation modal
+        if (OverlayConfirmRestoreVault.IsVisible)
+        {
+            OverlayConfirmRestoreVault.IsVisible = false;
+            _stagedRestoreBytes = null;
+            return true;
+        }
+
+        // 4. Delete confirmation modal
         if (OverlayConfirmDelete.IsVisible)
         {
             OverlayConfirmDelete.IsVisible = false;
             return true;
         }
 
-        // 3. Launch overlay cancel
+        // 5. Launch overlay cancel
         if (OverlayLaunch.IsVisible)
         {
             _connectCts?.Cancel();
@@ -302,15 +386,14 @@ public partial class MainView : UserControl
             return true;
         }
 
-        // 4. Profile editor -> return to connections list
+        // 6. Profile editor -> check unsaved changes before returning to connections list
         if (PanelProfileEditor.IsVisible)
         {
-            PanelProfileEditor.IsVisible = false;
-            PanelUnlocked.IsVisible = true;
+            OnCancelProfileEditor();
             return true;
         }
 
-        // 5. Settings -> return to connections list
+        // 7. Settings -> return to connections list
         if (PanelSettings.IsVisible)
         {
             PanelSettings.IsVisible = false;
@@ -318,21 +401,14 @@ public partial class MainView : UserControl
             return true;
         }
 
-        // 6. Recovery unlock -> return to lock screen
+        // 8. Recovery unlock -> return to lock screen
         if (PanelRecoveryUnlock.IsVisible)
         {
             ShowLockScreen();
             return true;
         }
 
-        // 7. Active session -> disconnect
-        if (PanelSession.IsVisible)
-        {
-            DisconnectSession();
-            return true;
-        }
-
-        // 8. Recovery display -> enter vault if already initialized
+        // 9. Recovery display -> enter vault if already initialized
         if (PanelRecoveryDisplay.IsVisible && _payload != null)
         {
             PanelRecoveryDisplay.IsVisible = false;
@@ -340,15 +416,16 @@ public partial class MainView : UserControl
             return true;
         }
 
-        // 9. Active search query -> clear search filter
+        // 10. Active search query -> clear search filter
         if (PanelUnlocked.IsVisible && !string.IsNullOrEmpty(TxtSearch.Text))
         {
+            _searchCts?.Cancel();
             TxtSearch.Text = "";
             RefreshProfilesList();
             return true;
         }
 
-        // 10. Root level (Unlocked list, Lock screen, or Setup wizard)
+        // 11. Root level (Unlocked list, Lock screen, or Setup wizard)
         return false;
     }
 
@@ -372,7 +449,6 @@ public partial class MainView : UserControl
         PanelUnlocked.IsVisible = panel == PanelUnlocked;
         PanelProfileEditor.IsVisible = panel == PanelProfileEditor;
         PanelSettings.IsVisible = panel == PanelSettings;
-        PanelSession.IsVisible = panel == PanelSession;
     }
 
     // ==================== STATE MANAGEMENT ====================
@@ -511,38 +587,15 @@ public partial class MainView : UserControl
     private static string FormatRecoveryCode(string raw)
     {
         if (string.IsNullOrWhiteSpace(raw)) return "";
-        string clean = raw.Replace("-", "").Trim();
-        if (clean.Length < 24) return raw;
-        return $"{clean[..4]}-{clean[4..8]}-{clean[8..12]}-{clean[12..16]}-{clean[16..20]}-{clean[20..24]}";
+        string clean = RecoveryCode.Normalize(raw);
+        return RecoveryCode.Format(clean);
     }
 
-    private async Task CopyRecoveryCodeToClipboardAsync()
+    private void CopyRecoveryCodeToClipboardAsync()
     {
-        var top = TopLevel.GetTopLevel(this);
-        if (top?.Clipboard != null && !string.IsNullOrEmpty(_activeRecoveryCode))
-        {
-            await top.Clipboard.SetTextAsync(_activeRecoveryCode);
-            TxtCopyNotice.IsVisible = true;
-
-            // Auto-wipe recovery code from clipboard after 60 seconds
-            string codeToWipe = _activeRecoveryCode;
-            _ = Task.Run(async () =>
-            {
-                await Task.Delay(60000);
-                await Dispatcher.UIThread.InvokeAsync(async () =>
-                {
-                    try
-                    {
-                        string? current = await top.Clipboard.GetTextAsync();
-                        if (current == codeToWipe)
-                        {
-                            await top.Clipboard.ClearAsync();
-                        }
-                    }
-                    catch { }
-                });
-            });
-        }
+        if (string.IsNullOrEmpty(_activeRecoveryCode)) return;
+        CopySensitiveTextToClipboard(_activeRecoveryCode, "RDP Vault Recovery Code");
+        TxtCopyNotice.IsVisible = true;
     }
 
     // ==================== LOCK SCREEN & UNLOCK ====================
@@ -553,6 +606,7 @@ public partial class MainView : UserControl
         TxtPassword.Text = "";
         TxtPassword.PasswordChar = '●';
         BtnToggleUnlockPass.Content = "👁";
+        TxtLockNotice.IsVisible = false;
         TxtLockError.IsVisible = false;
         PnlUnlockProgress.IsVisible = false;
         BtnUnlock.IsEnabled = true;
@@ -587,6 +641,7 @@ public partial class MainView : UserControl
     private async Task UnlockWithBiometricsAsync()
     {
         if (MainActivity.Instance == null || _vaultFile == null) return;
+        TxtLockNotice.IsVisible = false;
 
         string machineId = VaultCrypto.CurrentMachineId();
         var seal = _vaultFile.Seals.FirstOrDefault(s => s.MachineId == machineId && !string.IsNullOrEmpty(s.KeyId) && !string.IsNullOrEmpty(s.TpmBlob));
@@ -647,6 +702,7 @@ public partial class MainView : UserControl
 
         PnlUnlockProgress.IsVisible = true;
         BtnUnlock.IsEnabled = false;
+        TxtLockNotice.IsVisible = false;
         TxtLockError.IsVisible = false;
 
         try
@@ -723,13 +779,14 @@ public partial class MainView : UserControl
 
     private async Task SubmitRecoveryUnlockAsync()
     {
-        string code = TxtRecoveryInput.Text ?? "";
+        string rawCode = TxtRecoveryInput.Text ?? "";
+        string code = RecoveryCode.Normalize(rawCode);
         string newPass = TxtRecoveryNewPass.Text ?? "";
         string confirmPass = TxtRecoveryConfirmPass.Text ?? "";
 
-        if (string.IsNullOrWhiteSpace(code))
+        if (code.Length != 52)
         {
-            TxtRecoveryUnlockError.Text = "Please enter your 24-character recovery code.";
+            TxtRecoveryUnlockError.Text = $"Emergency recovery code must be exactly 52 characters (entered {code.Length}/52).";
             TxtRecoveryUnlockError.IsVisible = true;
             return;
         }
@@ -795,6 +852,11 @@ public partial class MainView : UserControl
     {
         ShowPanel(PanelUnlocked);
 
+        if (MainActivity.Instance != null && _payload?.Settings != null)
+        {
+            MainActivity.Instance.ConfiguredLockMinutes = _payload.Settings.LockMinutes;
+        }
+
         string machineId = VaultCrypto.CurrentMachineId();
         bool hasBio = _vaultFile?.Seals?.Any(s => s.MachineId == machineId && !string.IsNullOrEmpty(s.KeyId) && !string.IsNullOrEmpty(s.TpmBlob)) == true;
         TxtUnlockedStatus.Text = hasBio
@@ -806,7 +868,7 @@ public partial class MainView : UserControl
 
     private void LockVault()
     {
-        DisconnectSession();
+        EndActiveSession();
         _payload = null;
         if (_masterKey != null)
         {
@@ -817,6 +879,8 @@ public partial class MainView : UserControl
         _biometricPromptSuppressed = false;
 
         ShowLockScreen();
+        TxtLockNotice.Text = "Vault locked";
+        TxtLockNotice.IsVisible = true;
     }
 
     // ==================== PROFILES MANAGEMENT ====================
@@ -824,8 +888,9 @@ public partial class MainView : UserControl
     private void RefreshProfilesList()
     {
         PnlProfilesList.Children.Clear();
-        if (_payload?.Profiles == null)
+        if (_payload?.Profiles == null || _payload.Profiles.Count == 0)
         {
+            TxtEmptyProfiles.Text = "No connections yet. Tap '+ Add' above to configure your first computer.";
             TxtEmptyProfiles.IsVisible = true;
             return;
         }
@@ -839,15 +904,23 @@ public partial class MainView : UserControl
                 p.Name.Contains(query, StringComparison.OrdinalIgnoreCase) ||
                 p.Host.Contains(query, StringComparison.OrdinalIgnoreCase) ||
                 p.Username.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                p.GatewayHost.Contains(query, StringComparison.OrdinalIgnoreCase) ||
                 p.Notes.Contains(query, StringComparison.OrdinalIgnoreCase));
         }
 
         var list = profiles.ToList();
-        TxtEmptyProfiles.IsVisible = list.Count == 0;
-
-        foreach (var profile in list)
+        if (list.Count == 0)
         {
-            PnlProfilesList.Children.Add(CreateProfileCard(profile));
+            TxtEmptyProfiles.Text = $"No connections found matching '{query}'.";
+            TxtEmptyProfiles.IsVisible = true;
+        }
+        else
+        {
+            TxtEmptyProfiles.IsVisible = false;
+            foreach (var profile in list)
+            {
+                PnlProfilesList.Children.Add(CreateProfileCard(profile));
+            }
         }
     }
 
@@ -1021,6 +1094,65 @@ public partial class MainView : UserControl
         return border;
     }
 
+    private void CaptureProfileEditorInitialState()
+    {
+        _editorInitialState = new ProfileEditorState
+        {
+            Name = TxtProfileName.Text ?? "",
+            Host = TxtProfileHost.Text ?? "",
+            Port = TxtProfilePort.Text ?? "3389",
+            User = TxtProfileUser.Text ?? "",
+            Pass = TxtProfilePass.Text ?? "",
+            Gateway = TxtProfileGateway.Text ?? "",
+            ResIndex = CmbProfileResolution.SelectedIndex,
+            CustomWidth = TxtProfileCustomWidth.Text ?? "1920",
+            CustomHeight = TxtProfileCustomHeight.Text ?? "1080",
+            MultiMonIndex = CmbProfileMultiMon.SelectedIndex,
+            SmartSizing = ChkProfileSmartSizing.IsChecked == true,
+            EnableWol = ChkProfileEnableWol.IsChecked == true,
+            WolMac = TxtProfileWolMac.Text ?? "",
+            WolPort = TxtProfileWolPort.Text ?? "9",
+            WolWait = TxtProfileWolWait.Text ?? "25",
+            SuppressCert = ChkProfileSuppressCert.IsChecked == true,
+            Notes = TxtProfileNotes.Text ?? ""
+        };
+    }
+
+    private bool HasUnsavedProfileEdits()
+    {
+        if (!PanelProfileEditor.IsVisible) return false;
+        return (TxtProfileName.Text ?? "") != _editorInitialState.Name
+            || (TxtProfileHost.Text ?? "") != _editorInitialState.Host
+            || (TxtProfilePort.Text ?? "") != _editorInitialState.Port
+            || (TxtProfileUser.Text ?? "") != _editorInitialState.User
+            || (TxtProfilePass.Text ?? "") != _editorInitialState.Pass
+            || (TxtProfileGateway.Text ?? "") != _editorInitialState.Gateway
+            || CmbProfileResolution.SelectedIndex != _editorInitialState.ResIndex
+            || (TxtProfileCustomWidth.Text ?? "") != _editorInitialState.CustomWidth
+            || (TxtProfileCustomHeight.Text ?? "") != _editorInitialState.CustomHeight
+            || CmbProfileMultiMon.SelectedIndex != _editorInitialState.MultiMonIndex
+            || (ChkProfileSmartSizing.IsChecked == true) != _editorInitialState.SmartSizing
+            || (ChkProfileEnableWol.IsChecked == true) != _editorInitialState.EnableWol
+            || (TxtProfileWolMac.Text ?? "") != _editorInitialState.WolMac
+            || (TxtProfileWolPort.Text ?? "") != _editorInitialState.WolPort
+            || (TxtProfileWolWait.Text ?? "") != _editorInitialState.WolWait
+            || (ChkProfileSuppressCert.IsChecked == true) != _editorInitialState.SuppressCert
+            || (TxtProfileNotes.Text ?? "") != _editorInitialState.Notes;
+    }
+
+    private void OnCancelProfileEditor()
+    {
+        if (HasUnsavedProfileEdits())
+        {
+            OverlayConfirmDiscardProfile.IsVisible = true;
+        }
+        else
+        {
+            PanelProfileEditor.IsVisible = false;
+            PanelUnlocked.IsVisible = true;
+        }
+    }
+
     private void ShowProfileEditor(RdpProfile? profile)
     {
         _editingProfile = profile;
@@ -1036,7 +1168,7 @@ public partial class MainView : UserControl
             TxtProfilePass.Text = "";
             TxtProfilePass.PasswordChar = '●';
             BtnToggleProfilePass.Content = "👁";
-            TxtProfileDomain.Text = "";
+            TxtProfileGateway.Text = "";
 
             // Resolution defaults
             CmbProfileResolution.SelectedIndex = 0;
@@ -1047,6 +1179,7 @@ public partial class MainView : UserControl
             ChkProfileSmartSizing.IsChecked = true;
 
             ChkProfileEnableWol.IsChecked = false;
+            PnlWolDetails.IsVisible = false;
             TxtProfileWolMac.Text = "";
             TxtProfileWolPort.Text = "9";
             TxtProfileWolWait.Text = "25";
@@ -1064,7 +1197,7 @@ public partial class MainView : UserControl
             TxtProfilePass.Text = profile.Password;
             TxtProfilePass.PasswordChar = '●';
             BtnToggleProfilePass.Content = "👁";
-            TxtProfileDomain.Text = profile.GatewayHost;
+            TxtProfileGateway.Text = profile.GatewayHost;
 
             // Map resolution preset
             string preset = profile.ResolutionPreset ?? "InheritGlobal";
@@ -1100,6 +1233,7 @@ public partial class MainView : UserControl
             };
 
             ChkProfileEnableWol.IsChecked = profile.EnableWol;
+            PnlWolDetails.IsVisible = profile.EnableWol;
             TxtProfileWolMac.Text = profile.WolMacAddress;
             TxtProfileWolPort.Text = profile.WolPort.ToString();
             TxtProfileWolWait.Text = profile.WolWaitSeconds.ToString();
@@ -1113,6 +1247,7 @@ public partial class MainView : UserControl
             BtnDeleteProfile.IsVisible = true;
         }
 
+        CaptureProfileEditorInitialState();
         ScrollProfileEditor.Offset = new Vector(0, 0);
         ShowPanel(PanelProfileEditor);
     }
@@ -1144,10 +1279,33 @@ public partial class MainView : UserControl
         }
 
         int wolPort = 9;
-        int.TryParse(TxtProfileWolPort.Text, out wolPort);
-
         int wolWait = 25;
-        int.TryParse(TxtProfileWolWait.Text, out wolWait);
+        string wolMac = (TxtProfileWolMac.Text ?? "").Trim();
+        if (ChkProfileEnableWol.IsChecked == true)
+        {
+            if (!MacAddressHelper.TryNormalizeMac(wolMac, out string formattedMac, out string macError))
+            {
+                TxtProfileError.Text = macError;
+                TxtProfileError.IsVisible = true;
+                return;
+            }
+            wolMac = formattedMac;
+            TxtProfileWolMac.Text = formattedMac;
+
+            if (!int.TryParse(TxtProfileWolPort.Text, out wolPort) || wolPort < 1 || wolPort > 65535)
+            {
+                TxtProfileError.Text = "WOL Port must be between 1 and 65535 (standard is 9).";
+                TxtProfileError.IsVisible = true;
+                return;
+            }
+
+            if (!int.TryParse(TxtProfileWolWait.Text, out wolWait) || wolWait < 0 || wolWait > 300)
+            {
+                TxtProfileError.Text = "WOL Wait seconds must be between 0 and 300.";
+                TxtProfileError.IsVisible = true;
+                return;
+            }
+        }
 
         // Resolution preset resolution
         string resPreset = CmbProfileResolution.SelectedIndex switch
@@ -1184,6 +1342,8 @@ public partial class MainView : UserControl
 
         if (_payload == null || _vaultFile == null || _masterKey == null) return;
 
+        string gateway = TxtProfileGateway.Text?.Trim() ?? "";
+
         if (_editingProfile == null)
         {
             var p = new RdpProfile
@@ -1193,16 +1353,16 @@ public partial class MainView : UserControl
                 Port = port,
                 Username = TxtProfileUser.Text?.Trim() ?? "",
                 Password = TxtProfilePass.Text ?? "",
-                GatewayHost = TxtProfileDomain.Text?.Trim() ?? "",
+                GatewayHost = gateway,
                 ResolutionPreset = resPreset,
                 Width = customWidth,
                 Height = customHeight,
                 MultiMonOverride = multiMonOverride,
                 SmartSizingOverride = smartSizingOverride,
                 EnableWol = ChkProfileEnableWol.IsChecked == true,
-                WolMacAddress = TxtProfileWolMac.Text?.Trim() ?? "",
+                WolMacAddress = wolMac,
                 WolPort = wolPort > 0 ? wolPort : 9,
-                WolWaitSeconds = wolWait > 0 ? wolWait : 25,
+                WolWaitSeconds = wolWait >= 0 ? wolWait : 25,
                 Notes = TxtProfileNotes.Text?.Trim() ?? "",
                 SuppressCertWarningsOverride = ChkProfileSuppressCert.IsChecked == true ? TriStateOverride.Enabled : TriStateOverride.Disabled
             };
@@ -1215,16 +1375,16 @@ public partial class MainView : UserControl
             _editingProfile.Port = port;
             _editingProfile.Username = TxtProfileUser.Text?.Trim() ?? "";
             _editingProfile.Password = TxtProfilePass.Text ?? "";
-            _editingProfile.GatewayHost = TxtProfileDomain.Text?.Trim() ?? "";
+            _editingProfile.GatewayHost = gateway;
             _editingProfile.ResolutionPreset = resPreset;
             _editingProfile.Width = customWidth;
             _editingProfile.Height = customHeight;
             _editingProfile.MultiMonOverride = multiMonOverride;
             _editingProfile.SmartSizingOverride = smartSizingOverride;
             _editingProfile.EnableWol = ChkProfileEnableWol.IsChecked == true;
-            _editingProfile.WolMacAddress = TxtProfileWolMac.Text?.Trim() ?? "";
+            _editingProfile.WolMacAddress = wolMac;
             _editingProfile.WolPort = wolPort > 0 ? wolPort : 9;
-            _editingProfile.WolWaitSeconds = wolWait > 0 ? wolWait : 25;
+            _editingProfile.WolWaitSeconds = wolWait >= 0 ? wolWait : 25;
             _editingProfile.Notes = TxtProfileNotes.Text?.Trim() ?? "";
             _editingProfile.SuppressCertWarningsOverride = ChkProfileSuppressCert.IsChecked == true ? TriStateOverride.Enabled : TriStateOverride.Disabled;
         }
@@ -1267,6 +1427,19 @@ public partial class MainView : UserControl
         PnlChangePassProgress.IsVisible = false;
         ChkSettingsSuppressCert.IsChecked = _payload?.Settings?.SuppressCertWarnings ?? true;
 
+        // Auto-lock setting
+        int lockMinutes = _payload?.Settings?.LockMinutes ?? 60;
+        CmbSettingsAutoLock.SelectedIndex = lockMinutes switch
+        {
+            1 => 0,
+            5 => 1,
+            15 => 2,
+            30 => 3,
+            60 => 4,
+            <= 0 => 5,
+            _ => 4
+        };
+
         // Resolution preset in settings
         string defRes = _payload?.Settings?.DefaultResolution ?? "1920x1080";
         CmbSettingsResolution.SelectedIndex = defRes.ToLowerInvariant() switch
@@ -1297,6 +1470,22 @@ public partial class MainView : UserControl
     {
         if (_payload?.Settings != null && _vaultFile != null && _masterKey != null)
         {
+            int lockMins = CmbSettingsAutoLock.SelectedIndex switch
+            {
+                0 => 1,
+                1 => 5,
+                2 => 15,
+                3 => 30,
+                4 => 60,
+                5 => 0,
+                _ => 60
+            };
+            _payload.Settings.LockMinutes = lockMins;
+            if (MainActivity.Instance != null)
+            {
+                MainActivity.Instance.ConfiguredLockMinutes = lockMins;
+            }
+
             _payload.Settings.DefaultResolution = CmbSettingsResolution.SelectedIndex switch
             {
                 1 => "1280x720",
@@ -1480,32 +1669,108 @@ public partial class MainView : UserControl
         OverlayLaunch.IsVisible = false;
     }
 
-    private async Task CopyPasswordToClipboardAsync(string password, string profileName)
+    private void CopySensitiveTextToClipboard(string text, string label)
     {
-        if (string.IsNullOrEmpty(password)) return;
-        var top = TopLevel.GetTopLevel(this);
-        if (top?.Clipboard != null)
-        {
-            await top.Clipboard.SetTextAsync(password);
+        if (string.IsNullOrEmpty(text)) return;
+        _lastSensitiveCopyUtc = DateTime.UtcNow;
+        _lastSensitiveCopiedText = text;
 
-            // Auto-wipe password from clipboard after 60 seconds
-            _ = Task.Run(async () =>
+        try
+        {
+            var context = (global::Android.Content.Context?)MainActivity.Instance ?? global::Android.App.Application.Context;
+            var clipboardManager = (global::Android.Content.ClipboardManager?)context.GetSystemService(global::Android.Content.Context.ClipboardService);
+            if (clipboardManager != null)
             {
-                await Task.Delay(60000);
-                await Dispatcher.UIThread.InvokeAsync(async () =>
+                var clip = global::Android.Content.ClipData.NewPlainText(label, text);
+                if (OperatingSystem.IsAndroidVersionAtLeast(33) && clip.Description != null)
                 {
                     try
                     {
-                        string? current = await top.Clipboard.GetTextAsync();
-                        if (current == password)
-                        {
-                            await top.Clipboard.ClearAsync();
-                        }
+                        var extras = new global::Android.OS.PersistableBundle();
+                        extras.PutBoolean("android.content.extra.IS_SENSITIVE", true);
+                        clip.Description.Extras = extras;
                     }
                     catch { }
-                });
-            });
+                }
+                clipboardManager.PrimaryClip = clip;
+            }
         }
+        catch (Exception ex)
+        {
+            global::Android.Util.Log.Warn("RDPVault", "Sensitive clip error: " + ex.Message);
+        }
+
+        try
+        {
+            var top = TopLevel.GetTopLevel(this);
+            top?.Clipboard?.SetTextAsync(text);
+        }
+        catch { }
+
+        // Auto-wipe clipboard after 60 seconds
+        string textToWipe = text;
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(60000);
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (_lastSensitiveCopiedText == textToWipe)
+                {
+                    ClearSensitiveClipboard();
+                }
+            });
+        });
+    }
+
+    public void CheckAndWipeExpiredClipboard()
+    {
+        if (_lastSensitiveCopiedText == null) return;
+        if ((DateTime.UtcNow - _lastSensitiveCopyUtc).TotalSeconds >= 60)
+        {
+            ClearSensitiveClipboard();
+        }
+    }
+
+    private void ClearSensitiveClipboard()
+    {
+        try
+        {
+            var context = (global::Android.Content.Context?)MainActivity.Instance ?? global::Android.App.Application.Context;
+            var clipboardManager = (global::Android.Content.ClipboardManager?)context.GetSystemService(global::Android.Content.Context.ClipboardService);
+            if (clipboardManager != null)
+            {
+                if (OperatingSystem.IsAndroidVersionAtLeast(28))
+                {
+                    clipboardManager.ClearPrimaryClip();
+                }
+                else
+                {
+                    clipboardManager.PrimaryClip = global::Android.Content.ClipData.NewPlainText("", "");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            global::Android.Util.Log.Warn("RDPVault", "Clear clipboard error: " + ex.Message);
+        }
+
+        try
+        {
+            var top = TopLevel.GetTopLevel(this);
+            top?.Clipboard?.ClearAsync();
+        }
+        catch { }
+
+        _lastSensitiveCopiedText = null;
+    }
+
+    private Task CopyPasswordToClipboardAsync(string password, string profileName)
+    {
+        if (!string.IsNullOrEmpty(password))
+        {
+            CopySensitiveTextToClipboard(password, $"Password for {profileName}");
+        }
+        return Task.CompletedTask;
     }
 
     private async Task StartSessionAsync(RdpProfile profile)
@@ -1681,31 +1946,6 @@ public partial class MainView : UserControl
         }
     }
 
-    private void DisconnectSession()
-    {
-        if (_activeRdpContext != IntPtr.Zero)
-        {
-            try
-            {
-                FreeRdpClient.freerdp_client_stop(_activeRdpContext);
-                FreeRdpClient.freerdp_client_context_free(_activeRdpContext);
-            }
-            catch { }
-            _activeRdpContext = IntPtr.Zero;
-        }
-
-        EndActiveSession();
-        PanelSession.IsVisible = false;
-        if (_payload != null)
-        {
-            PanelUnlocked.IsVisible = true;
-        }
-        else
-        {
-            PanelLocked.IsVisible = true;
-        }
-    }
-
     private void SkipWolWait()
     {
         _skipWolWait = true;
@@ -1770,28 +2010,16 @@ public partial class MainView : UserControl
     {
         if (_isFormattingRecovery) return;
 
-        string raw = (TxtRecoveryInput.Text ?? "").ToUpperInvariant();
-        var sb = new StringBuilder();
-        foreach (char c in raw)
-        {
-            if (char.IsLetterOrDigit(c)) sb.Append(c);
-            if (sb.Length == 24) break;
-        }
+        string raw = TxtRecoveryInput.Text ?? "";
+        string clean = RecoveryCode.Normalize(raw);
+        if (clean.Length > 52) clean = clean[..52];
 
-        string clean = sb.ToString();
-        TxtRecoveryCharCount.Text = $"{clean.Length} / 24 characters";
-        TxtRecoveryCharCount.Foreground = clean.Length == 24
-            ? new SolidColorBrush(Color.Parse("#10B981"))
-            : new SolidColorBrush(Color.Parse("#94A3B8"));
+        TxtRecoveryCharCount.Text = $"{clean.Length} / 52 characters";
+        TxtRecoveryCharCount.Foreground = clean.Length == 52
+            ? new SolidColorBrush(Color.Parse("#2FBF71"))
+            : new SolidColorBrush(Color.Parse("#8A8A93"));
 
-        var formatted = new StringBuilder();
-        for (int i = 0; i < clean.Length; i++)
-        {
-            if (i > 0 && i % 4 == 0) formatted.Append('-');
-            formatted.Append(clean[i]);
-        }
-
-        string formattedStr = formatted.ToString();
+        string formattedStr = RecoveryCode.Format(clean);
         if (formattedStr != TxtRecoveryInput.Text)
         {
             _isFormattingRecovery = true;
@@ -1816,7 +2044,7 @@ public partial class MainView : UserControl
 
             var files = await top.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
             {
-                Title = "Select Vault File (*.rdpvault, *.enc, *.dat)",
+                Title = "Select Vault File (*.rdpv, *.rdpvault, *.enc, *.dat)",
                 AllowMultiple = false
             });
 
@@ -1839,9 +2067,9 @@ public partial class MainView : UserControl
                 await File.WriteAllBytesAsync(VaultPath, importedData);
 
                 ShowLockScreen();
-                TxtLockError.Text = "Vault file imported successfully! Enter master password to unlock.";
-                TxtLockError.Foreground = new SolidColorBrush(Color.Parse("#10B981"));
-                TxtLockError.IsVisible = true;
+                TxtLockNotice.Text = "Vault file imported successfully! Enter master password to unlock.";
+                TxtLockNotice.IsVisible = true;
+                TxtLockError.IsVisible = false;
             }
         }
         catch (Exception ex)
@@ -1866,11 +2094,11 @@ public partial class MainView : UserControl
             var top = TopLevel.GetTopLevel(this);
             if (top == null) return;
 
-            string defaultName = $"rdp_vault_backup_{DateTime.Now:yyyyMMdd_HHmm}.rdpvault";
+            string defaultName = $"rdp_vault_backup_{DateTime.Now:yyyyMMdd_HHmm}.rdpv";
             var file = await top.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
             {
                 Title = "Export Encrypted Vault Backup",
-                DefaultExtension = "rdpvault",
+                DefaultExtension = "rdpv",
                 SuggestedFileName = defaultName
             });
 
@@ -1881,7 +2109,7 @@ public partial class MainView : UserControl
                 await stream.WriteAsync(vaultBytes);
 
                 TxtVaultBackupStatus.Text = $"Exported successfully ({vaultBytes.Length:N0} bytes).";
-                TxtVaultBackupStatus.Foreground = new SolidColorBrush(Color.Parse("#10B981"));
+                TxtVaultBackupStatus.Foreground = new SolidColorBrush(Color.Parse("#2FBF71"));
                 TxtVaultBackupStatus.IsVisible = true;
             }
         }
@@ -1902,7 +2130,7 @@ public partial class MainView : UserControl
 
             var files = await top.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
             {
-                Title = "Select Vault Backup to Restore (*.rdpvault, *.enc, *.dat)",
+                Title = "Select Vault Backup to Restore (*.rdpv, *.rdpvault, *.enc, *.dat)",
                 AllowMultiple = false
             });
 
@@ -1922,19 +2150,38 @@ public partial class MainView : UserControl
                     return;
                 }
 
-                if (File.Exists(VaultPath))
-                {
-                    string backupPath = VaultPath + ".bak";
-                    File.Copy(VaultPath, backupPath, overwrite: true);
-                }
-
-                await File.WriteAllBytesAsync(VaultPath, importedData);
-
-                LockVault();
-                TxtLockError.Text = "Vault restored! Enter password to unlock.";
-                TxtLockError.Foreground = new SolidColorBrush(Color.Parse("#10B981"));
-                TxtLockError.IsVisible = true;
+                _stagedRestoreBytes = importedData;
+                OverlayConfirmRestoreVault.IsVisible = true;
             }
+        }
+        catch (Exception ex)
+        {
+            TxtVaultBackupStatus.Text = $"Restore error: {ex.Message}";
+            TxtVaultBackupStatus.Foreground = new SolidColorBrush(Color.Parse("#EF4444"));
+            TxtVaultBackupStatus.IsVisible = true;
+        }
+    }
+
+    private async Task ExecuteVaultRestoreAsync()
+    {
+        OverlayConfirmRestoreVault.IsVisible = false;
+        if (_stagedRestoreBytes == null) return;
+
+        try
+        {
+            if (File.Exists(VaultPath))
+            {
+                string backupPath = VaultPath + AppPaths.BackupSuffix;
+                File.Copy(VaultPath, backupPath, overwrite: true);
+            }
+
+            await File.WriteAllBytesAsync(VaultPath, _stagedRestoreBytes);
+            _stagedRestoreBytes = null;
+
+            LockVault();
+            TxtLockNotice.Text = "Vault restored from backup successfully! Enter master password to unlock.";
+            TxtLockNotice.IsVisible = true;
+            TxtLockError.IsVisible = false;
         }
         catch (Exception ex)
         {

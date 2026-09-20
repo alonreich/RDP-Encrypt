@@ -1071,8 +1071,65 @@ A parallel mobile software distribution branch sharing the identical cryptograph
     10. Smooth Bidirectional Remote Desktop Navigation: Added interactive notification action buttons and the in-app
         emerald session banner, eliminating the trap where users lost track of their connection or vault state.
 
+ 10. COMPREHENSIVE RESOLUTION OF 10 UI/UX IMPROVEMENTS & 5 ARCHITECTURAL FINDINGS (SEPTEMBER 2026):
+     Issue 1 - Full 52-Character Crockford-Base32 Recovery Code:
+       - Root Cause: Recovery display and recovery unlock inputs previously truncated Crockford-Base32 codes to 24 characters,
+         guaranteeing 100% failure during VaultCrypto.OpenWithRecoveryCode (which requires the full 256-bit entropy / 52 chars).
+       - Fix: Implemented full 52-character Crockford-Base32 handling using RecoveryCode.Normalize and RecoveryCode.Format
+         across UI and logic. Updated character count label to "0 / 52 characters", formatted 13 groups of 4 with hyphens,
+         and enforced 52-character validation prior to running Argon2id derivation.
+     Issue 2 - Unsaved Changes Discard Confirmation in Profile Editor:
+       - Root Cause: Pressing the Android physical back button or Cancel button silently wiped all entered profile fields.
+       - Fix: Added HasUnsavedProfileEdits() state tracking against snapshot captured on editor open. Added
+         OverlayConfirmDiscardProfile modal overlay ("Discard Unsaved Changes?") intercepting both Cancel buttons and
+         HandleBackPressed() physical back events.
+     Issue 3 - RD Gateway Server Configuration & Parameter Handoff:
+       - Root Cause: TxtProfileGateway was labeled "DOMAIN" and was passed as domain rather than RD Gateway, and launch URIs
+         did not include gateway parameters.
+       - Fix: Renamed to TxtProfileGateway with explicit label "RD GATEWAY SERVER (OPTIONAL)" and watermark "e.g. gateway.company.com (RD Gateway)".
+         Updated RdpLauncher.cs to append gatewayhostname, gatewayusagemethod=1, and gatewayprofileusagemethod=1 when configured.
+     Issue 4 - Dedicated Lock Screen Success/Status Notice:
+       - Root Cause: TxtLockError was being overloaded for both red error messages and green success/status notices.
+       - Fix: Added dedicated TxtLockNotice (#2FBF71 emerald) alongside TxtLockError (#E83030 red). State transitions and
+         notifications cleanly separate errors from positive statuses (e.g. vault locked, imported, restored).
+     Issue 5 - Primary Accent CTA Styling on Unlock Button:
+       - Root Cause: BtnUnlock used dark secondary input styling identical to text boxes, blending into the background.
+       - Fix: Restyled BtnUnlock with #005FB8 primary accent background and bold white typography.
+     Issue 6 - Safe Area Clearance for Camera Cutouts & Notches:
+       - Root Cause: Top headers sat flush at the top edge, occluded by camera notches, punch holes, and status bars.
+       - Fix: Applied 52-56px top margins across all panels (PanelFirstRun, PanelRecoveryDisplay, PanelLocked,
+         PanelRecoveryUnlock, PanelUnlocked, PanelProfileEditor, PanelSettings) ensuring safe clearance across all mobile form factors.
+     Issue 7 - Active Remote Session Banner Redesign:
+       - Root Cause: Horizontal 3-column layout squashed action buttons into unreadable boxes on narrow mobile screens.
+       - Fix: Redesigned BannerActiveSession with vertical card stacking (green status indicator row, connected host details,
+         and two equal-width action buttons: Resume RDP and End Session) plus a dedicated "✕ Dismiss" control.
+     Issue 8 - In-Place Vault Restore Confirmation & .rdpv Standard:
+       - Root Cause: Importing a backup from settings immediately overwrote active vault without confirmation.
+       - Fix: Staged imported data in memory and displayed OverlayConfirmRestoreVault modal ("Restore Vault Backup?").
+         Upon confirmation, creates a .bak backup and restores vault. Standardized file extensions and dialog titles to .rdpv.
+     Issue 9 - Collapsible Wake-on-LAN Settings & MAC Normalization:
+       - Root Cause: Wake-on-LAN fields occupied massive vertical space even when WOL was disabled, and lacked MAC validation.
+       - Fix: Added collapsible PnlWolDetails that expands only when ChkProfileEnableWol is checked. Added bottom Cancel/Save
+         action grid and integrated MacAddressHelper.TryNormalizeMac validation with error reporting.
+     Issue 10 - Configurable Auto-Lock Inactivity Timeout:
+       - Root Cause: Auto-lock was hardcoded to 30 seconds of backgrounding with no UI configuration.
+       - Fix: Added CmbSettingsAutoLock dropdown in PanelSettings (1 min, 5 min, 15 min, 30 min, 60 min, Never), bound to
+         _payload.Settings.LockMinutes and synchronized with MainActivity.Instance.ConfiguredLockMinutes.
+     Finding A - Native FreeRDP Cleanup:
+       - Stubbed out and deprecated unused P/Invoke bindings in FreeRdpClient.cs targeting non-existent native libraries.
+         Removed dead PanelSession grid and obsolete context references.
+     Finding B - Sensitive Clipboard Protection & Expired Wipe on Resume:
+       - Attached android.content.extra.IS_SENSITIVE PersistableBundle on Android 13+ (API 33+) to prevent visual clipboard
+         overlay leakage. Implemented CheckAndWipeExpiredClipboard() on MainActivity.OnResume() using ClipboardManager.ClearPrimaryClip() (API 28+).
+     Finding C - Android 14+ Foreground Service Compliance:
+       - Updated AndroidManifest.xml and RdpSessionService.cs ForegroundServiceType to connectedDevice.
+       - Added RequestNotificationPermissionIfNeeded() requesting POST_NOTIFICATIONS runtime permission on Android 13+ (API 33).
+     Finding D - Mobile RDP Intent Handoff Integrity:
+       - Confirmed robust query parameterization in RdpLauncher.cs, supporting RD Gateway, resolution presets, and client fallbacks.
+     Finding E - Debounced Search & Clear Feedback:
+       - Added 150ms debounce delay to TxtSearch.TextChanged to eliminate UI frame drops during typing.
+       - Differentiated empty vault ("No connections yet...") from zero-match search results ("No connections found matching '{query}'.").
+
 --------------------------------------------------------------------------------
 END OF FILE — keep synchronized with the code.
 ================================================================================
-
-

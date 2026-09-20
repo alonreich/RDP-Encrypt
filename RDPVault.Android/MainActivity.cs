@@ -61,10 +61,32 @@ public class MainActivity : AvaloniaMainActivity<App>
 
     public static MainActivity? Instance { get; private set; }
 
+    public int ConfiguredLockMinutes { get; set; } = 60;
+
+    public void RequestNotificationPermissionIfNeeded()
+    {
+        try
+        {
+            if (OperatingSystem.IsAndroidVersionAtLeast(33))
+            {
+                if (CheckSelfPermission(global::Android.Manifest.Permission.PostNotifications) != Permission.Granted)
+                {
+                    RequestPermissions(new[] { global::Android.Manifest.Permission.PostNotifications }, 1002);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            global::Android.Util.Log.Warn("RDPVault", "Notification permission request: " + ex.Message);
+        }
+    }
+
     protected override void OnCreate(Bundle? savedInstanceState)
     {
         Instance = this;
         base.OnCreate(savedInstanceState);
+
+        RequestNotificationPermissionIfNeeded();
 
         try
         {
@@ -95,7 +117,7 @@ public class MainActivity : AvaloniaMainActivity<App>
             // 1. Force the native window background to dark theme color to prevent any white canvas exposure
             Window?.SetBackgroundDrawable(new global::Android.Graphics.Drawables.ColorDrawable(global::Android.Graphics.Color.ParseColor("#0E0E10")));
 
-            // 2. Notify MainView that the app resumed from background (dismisses stale overlays, syncs active session)
+            // 2. Notify MainView that the app resumed from background (dismisses stale overlays, syncs active session, wipes expired clipboard)
             Avalonia.Threading.Dispatcher.UIThread.Post(() =>
             {
                 try
@@ -104,6 +126,7 @@ public class MainActivity : AvaloniaMainActivity<App>
                         && singleView.MainView is Views.MainView mainView)
                     {
                         mainView.OnAppResumed();
+                        mainView.CheckAndWipeExpiredClipboard();
                         mainView.InvalidateVisual();
                     }
                 }
@@ -126,11 +149,12 @@ public class MainActivity : AvaloniaMainActivity<App>
                 });
             });
 
-            // 4. Auto-lock verification: if backgrounded for more than 30 seconds and not running an active session
+            // 4. Configurable auto-lock verification: if backgrounded longer than configured LockMinutes and not running an active session
             if (_lastBackgroundedUtc != DateTime.MinValue && (_sessionService == null || !_sessionService.IsConnected))
             {
                 TimeSpan elapsed = DateTime.UtcNow - _lastBackgroundedUtc;
-                if (elapsed.TotalSeconds >= 30)
+                int lockMinutes = ConfiguredLockMinutes > 0 ? ConfiguredLockMinutes : 60;
+                if (ConfiguredLockMinutes > 0 && elapsed.TotalMinutes >= lockMinutes)
                 {
                     Avalonia.Threading.Dispatcher.UIThread.Post(() =>
                     {
@@ -223,6 +247,7 @@ public class MainActivity : AvaloniaMainActivity<App>
     {
         try
         {
+            RequestNotificationPermissionIfNeeded();
             _sessionService?.StartSession(profile);
         }
         catch (Exception ex)

@@ -62,3 +62,27 @@ C:\Full_Control\RDP_Encrypt\
 To compile the APK locally:
 1. Run `dotnet workload install android`
 2. Run `.\build-apk.cmd`
+
+---
+
+## 4. UI/UX & Technical Hardening (September 2026 Release)
+
+### 4.1 UI/UX Critical Improvements
+1. **52-Character Crockford-Base32 Recovery Code**: Emergency recovery displays and unlock inputs use the full 52-character Crockford-Base32 format (`RecoveryCode.Normalize` / `RecoveryCode.Format`), resolving earlier 24-character truncation failures.
+2. **Unsaved Profile Discard Protection**: Back button and Cancel triggers prompt `OverlayConfirmDiscardProfile` whenever unsaved edits exist in the connection editor.
+3. **RD Gateway Configuration & Handoff**: `TxtProfileGateway` is labeled "RD GATEWAY SERVER (OPTIONAL)" and passes `gatewayhostname`, `gatewayusagemethod=1`, and `gatewayprofileusagemethod=1` in the launch intent.
+4. **Dedicated Status/Notice Feedback**: Emerald `TxtLockNotice` (`#2FBF71`) is separated from red `TxtLockError` (`#E83030`) on the lock screen.
+5. **Primary Accent Unlock CTA**: Prominent `#005FB8` styling on `BtnUnlock`.
+6. **Safe-Area Notch / Status Bar Margins**: 52-56px top padding across all views guarantees zero camera punch-hole occlusion.
+7. **Active Remote Session Banner Redesign**: Vertical card layout with equal-width Resume/End action buttons and a dedicated "✕ Dismiss" control.
+8. **In-Place Vault Restore Confirmation**: `OverlayConfirmRestoreVault` safeguards against accidental vault overwrites during backup imports, and files standardize on `.rdpv`.
+9. **Collapsible Wake-on-LAN**: `PnlWolDetails` expands only when WOL is enabled, and enforces MAC address normalization via `MacAddressHelper.TryNormalizeMac`.
+10. **Configurable Auto-Lock**: `CmbSettingsAutoLock` dropdown provides 1, 5, 15, 30, 60 minutes, or Never timeouts.
+
+### 4.2 Architectural Findings Resolved
+- **Finding A (Native FreeRDP Cleanup)**: Obsolete native FreeRDP P/Invoke stubs and dead `PanelSession` removed.
+- **Finding B (Sensitive Clipboard & Resume Auto-Wipe)**: Copied passwords and recovery keys are flagged with `android.content.extra.IS_SENSITIVE` on Android 13+ and automatically purged via `CheckAndWipeExpiredClipboard()` on app resume.
+- **Finding C (Foreground Service & Android 14+ Permissions)**: Service declared as `connectedDevice` with `POST_NOTIFICATIONS` runtime permission request.
+- **Finding D (Intent Handoff Parameter Integrity)**: Parameterized `rdp://` URI handoff with fallback to Google Play Store.
+- **Finding E (Search Debounce & Status Feedback)**: 150ms debounce on search queries with distinct feedback for empty vault vs no matching query.
+

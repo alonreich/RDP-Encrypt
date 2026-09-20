@@ -94,6 +94,14 @@ public static class RdpLauncher
             queryList.Add($"username=s:{encodedUser}");
         }
 
+        if (!string.IsNullOrWhiteSpace(profile.GatewayHost))
+        {
+            string encGateway = global::Android.Net.Uri.Encode(profile.GatewayHost.Trim()) ?? profile.GatewayHost.Trim();
+            queryList.Add($"gatewayhostname=s:{encGateway}");
+            queryList.Add("gatewayusagemethod=i:1");
+            queryList.Add("gatewayprofileusagemethod=i:1");
+        }
+
         string uriString = $"rdp://{string.Join("&", queryList)}";
 
         var rdpUri = global::Android.Net.Uri.Parse(uriString);

@@ -56,7 +56,7 @@ public partial class MainView : UserControl
         public string CustomWidth;
         public string CustomHeight;
         public int MultiMonIndex;
-        public bool SmartSizing;
+        public bool PreserveNative;
         public bool EnableWol;
         public string WolMac;
         public string WolPort;
@@ -254,20 +254,22 @@ public partial class MainView : UserControl
             ConfirmDeleteProfile();
         };
 
-        // Custom resolution field toggle and SmartSizing auto-default in editor
+        // Custom resolution field toggle and PreserveNative auto-default in editor
         CmbProfileResolution.SelectionChanged += (_, _) =>
         {
             int idx = CmbProfileResolution.SelectedIndex;
             PnlProfileCustomRes.IsVisible = idx == 8;
             if (idx == 7) // Match Mobile Device Screen
             {
-                ChkProfileSmartSizing.IsChecked = true;
+                ChkProfilePreserveNative.IsChecked = false;
             }
             else if (idx >= 0 && idx <= 6) // Desktop presets including 1920x1080
             {
-                ChkProfileSmartSizing.IsChecked = false;
+                ChkProfilePreserveNative.IsChecked = true;
             }
+            UpdateProfilePreserveNativeHint();
         };
+        ChkProfilePreserveNative.IsCheckedChanged += (_, _) => UpdateProfilePreserveNativeHint();
 
         void ScrollToWol()
         {
@@ -318,9 +320,26 @@ public partial class MainView : UserControl
 
         // Resolution, Auto-Lock & Security Defaults in Settings
         CmbSettingsAutoLock.SelectionChanged += (_, _) => SaveSettingsDefaults();
-        CmbSettingsResolution.SelectionChanged += (_, _) => SaveSettingsDefaults();
+        CmbSettingsResolution.SelectionChanged += (_, _) =>
+        {
+            int idx = CmbSettingsResolution.SelectedIndex;
+            if (idx == 6) // Match Mobile Device Screen
+            {
+                ChkSettingsPreserveNative.IsChecked = false;
+            }
+            else
+            {
+                ChkSettingsPreserveNative.IsChecked = true;
+            }
+            UpdateSettingsPreserveNativeHint();
+            SaveSettingsDefaults();
+        };
         CmbSettingsMultiMon.SelectionChanged += (_, _) => SaveSettingsDefaults();
-        ChkSettingsSmartSizing.IsCheckedChanged += (_, _) => SaveSettingsDefaults();
+        ChkSettingsPreserveNative.IsCheckedChanged += (_, _) =>
+        {
+            UpdateSettingsPreserveNativeHint();
+            SaveSettingsDefaults();
+        };
         ChkSettingsSuppressCert.IsCheckedChanged += (_, _) => SaveSettingsDefaults();
 
         BtnCloseSettings.Click += (_, _) =>
@@ -331,6 +350,34 @@ public partial class MainView : UserControl
 
         // 10. WOL Skip Wait
         BtnSkipWolWait.Click += (_, _) => SkipWolWait();
+    }
+
+    private void UpdateProfilePreserveNativeHint()
+    {
+        if (ChkProfilePreserveNative.IsChecked == true)
+        {
+            TxtProfilePreserveNativeHint.Text = "💡 Recommended: Windows resolution stays strictly at full 1920x1080 in both portrait and landscape. Nothing is squashed or distorted. You scroll side-to-side and up/down to reach all points of the screen.";
+            TxtProfilePreserveNativeHint.Foreground = new SolidColorBrush(Color.Parse("#2FBF71"));
+        }
+        else
+        {
+            TxtProfilePreserveNativeHint.Text = "⚠️ Warning: Squeezes the whole desktop into your phone screen. Apps and icons will appear squashed when holding the phone vertically in portrait mode.";
+            TxtProfilePreserveNativeHint.Foreground = new SolidColorBrush(Color.Parse("#E5A93C"));
+        }
+    }
+
+    private void UpdateSettingsPreserveNativeHint()
+    {
+        if (ChkSettingsPreserveNative.IsChecked == true)
+        {
+            TxtSettingsPreserveNativeHint.Text = "💡 Recommended: Keeps remote Windows sessions at full 1920x1080 in both portrait and landscape. Prevents remote apps and desktop icons from being squashed.";
+            TxtSettingsPreserveNativeHint.Foreground = new SolidColorBrush(Color.Parse("#2FBF71"));
+        }
+        else
+        {
+            TxtSettingsPreserveNativeHint.Text = "⚠️ Warning: Squeezes remote desktops into your phone screen. Apps and icons will appear squashed when holding the phone vertically in portrait mode.";
+            TxtSettingsPreserveNativeHint.Foreground = new SolidColorBrush(Color.Parse("#E5A93C"));
+        }
     }
 
     private void SetupPasswordToggle(TextBox tb, Button btn)
@@ -992,9 +1039,11 @@ public partial class MainView : UserControl
         });
 
         string wolBadge = profile.EnableWol ? "  •  WOL" : "";
-        string resBadge = string.IsNullOrWhiteSpace(profile.ResolutionPreset) || profile.ResolutionPreset.Equals("InheritGlobal", StringComparison.OrdinalIgnoreCase)
-            ? ""
-            : $"  •  {profile.ResolutionPreset}";
+        string resText = string.IsNullOrWhiteSpace(profile.ResolutionPreset) || profile.ResolutionPreset.Equals("InheritGlobal", StringComparison.OrdinalIgnoreCase)
+            ? (_payload?.Settings?.DefaultResolution ?? "1920x1080")
+            : profile.ResolutionPreset;
+        bool isPreserveNative = profile.SmartSizingOverride != TriStateOverride.Enabled;
+        string resBadge = isPreserveNative ? $"  •  {resText} (Scrollable)" : $"  •  {resText} (Scaled)";
 
         info.Children.Add(new TextBlock
         {
@@ -1127,7 +1176,7 @@ public partial class MainView : UserControl
             CustomWidth = TxtProfileCustomWidth.Text ?? "1920",
             CustomHeight = TxtProfileCustomHeight.Text ?? "1080",
             MultiMonIndex = CmbProfileMultiMon.SelectedIndex,
-            SmartSizing = ChkProfileSmartSizing.IsChecked == true,
+            PreserveNative = ChkProfilePreserveNative.IsChecked == true,
             EnableWol = ChkProfileEnableWol.IsChecked == true,
             WolMac = TxtProfileWolMac.Text ?? "",
             WolPort = TxtProfileWolPort.Text ?? "9",
@@ -1150,7 +1199,7 @@ public partial class MainView : UserControl
             || (TxtProfileCustomWidth.Text ?? "") != _editorInitialState.CustomWidth
             || (TxtProfileCustomHeight.Text ?? "") != _editorInitialState.CustomHeight
             || CmbProfileMultiMon.SelectedIndex != _editorInitialState.MultiMonIndex
-            || (ChkProfileSmartSizing.IsChecked == true) != _editorInitialState.SmartSizing
+            || (ChkProfilePreserveNative.IsChecked == true) != _editorInitialState.PreserveNative
             || (ChkProfileEnableWol.IsChecked == true) != _editorInitialState.EnableWol
             || (TxtProfileWolMac.Text ?? "") != _editorInitialState.WolMac
             || (TxtProfileWolPort.Text ?? "") != _editorInitialState.WolPort
@@ -1195,7 +1244,8 @@ public partial class MainView : UserControl
             TxtProfileCustomWidth.Text = "1920";
             TxtProfileCustomHeight.Text = "1080";
             CmbProfileMultiMon.SelectedIndex = 0;
-            ChkProfileSmartSizing.IsChecked = false;
+            ChkProfilePreserveNative.IsChecked = true;
+            UpdateProfilePreserveNativeHint();
 
             ChkProfileEnableWol.IsChecked = false;
             PnlWolDetails.IsVisible = false;
@@ -1244,12 +1294,13 @@ public partial class MainView : UserControl
                 _ => 0                          // Default (Follow Global)
             };
 
-            // Smart Sizing override
-            ChkProfileSmartSizing.IsChecked = profile.SmartSizingOverride switch
+            // Preserve native override (SmartSizing: Enabled = squashed; Disabled or Inherit = preserve native)
+            ChkProfilePreserveNative.IsChecked = profile.SmartSizingOverride switch
             {
-                TriStateOverride.Enabled => true,
-                _ => false
+                TriStateOverride.Enabled => false,
+                _ => true
             };
+            UpdateProfilePreserveNativeHint();
 
             ChkProfileEnableWol.IsChecked = profile.EnableWol;
             PnlWolDetails.IsVisible = profile.EnableWol;
@@ -1355,9 +1406,9 @@ public partial class MainView : UserControl
             _ => TriStateOverride.InheritGlobal
         };
 
-        TriStateOverride smartSizingOverride = ChkProfileSmartSizing.IsChecked == true
-            ? TriStateOverride.Enabled
-            : TriStateOverride.Disabled;
+        TriStateOverride smartSizingOverride = ChkProfilePreserveNative.IsChecked == true
+            ? TriStateOverride.Disabled
+            : TriStateOverride.Enabled;
 
         if (_payload == null || _vaultFile == null || _masterKey == null) return;
 
@@ -1473,7 +1524,8 @@ public partial class MainView : UserControl
         };
 
         CmbSettingsMultiMon.SelectedIndex = (_payload?.Settings?.DefaultUseMultiMon == true) ? 1 : 0;
-        ChkSettingsSmartSizing.IsChecked = _payload?.Settings?.DefaultSmartSizing ?? false;
+        ChkSettingsPreserveNative.IsChecked = !(_payload?.Settings?.DefaultSmartSizing ?? false);
+        UpdateSettingsPreserveNativeHint();
 
         string machineId = VaultCrypto.CurrentMachineId();
         bool enrolled = _vaultFile?.Seals?.Any(s => s.MachineId == machineId && !string.IsNullOrEmpty(s.KeyId) && !string.IsNullOrEmpty(s.TpmBlob)) == true;
@@ -1529,7 +1581,7 @@ public partial class MainView : UserControl
             _payload.Settings.DefaultHeight = h;
 
             _payload.Settings.DefaultUseMultiMon = CmbSettingsMultiMon.SelectedIndex == 1;
-            _payload.Settings.DefaultSmartSizing = ChkSettingsSmartSizing.IsChecked == true;
+            _payload.Settings.DefaultSmartSizing = ChkSettingsPreserveNative.IsChecked != true;
             _payload.Settings.SuppressCertWarnings = ChkSettingsSuppressCert.IsChecked == true;
 
             VaultCrypto.Save(_vaultFile, _masterKey, _payload, VaultPath);

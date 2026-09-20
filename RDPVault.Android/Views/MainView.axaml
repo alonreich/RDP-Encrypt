@@ -340,9 +340,9 @@
                                 <ComboBoxItem Content="Span All Remote Monitors (Multi-monitor)"/>
                             </ComboBox>
 
-                            <CheckBox Name="ChkProfileSmartSizing" Content="Allow client scaling (Uncheck for true 1:1 unscaled desktop)" Foreground="#EDEDED" IsChecked="False"/>
-                            <TextBlock Text="💡 Unchecked (Recommended): Locks remote desktop to true native 1920x1080 with 0% scaling or distortion. Dynamic resolution updates are disabled to protect your Windows desktop monitor layout."
-                                       FontSize="11" Foreground="#8A8A93" TextWrapping="Wrap"/>
+                            <CheckBox Name="ChkProfilePreserveNative" Content="Keep Native 1920x1080 (Never squash or distort — scroll to view)" Foreground="#EDEDED" IsChecked="True" FontSize="13"/>
+                            <TextBlock Name="TxtProfilePreserveNativeHint" Text="💡 Recommended: Windows resolution stays strictly at full 1920x1080 in both portrait and landscape. Nothing is squashed or distorted. You scroll side-to-side and up/down to reach all points of the screen."
+                                       FontSize="11" Foreground="#2FBF71" TextWrapping="Wrap"/>
                         </StackPanel>
                     </Border>
 
@@ -464,9 +464,9 @@
                                 <ComboBoxItem Content="Use All Remote Displays (Span all monitors)"/>
                             </ComboBox>
 
-                            <CheckBox Name="ChkSettingsSmartSizing" Content="Allow client scaling by default (Uncheck for true 1:1 unscaled desktop)" Foreground="#EDEDED" IsChecked="False"/>
-                            <TextBlock Text="💡 Unchecked (Recommended): Locks remote sessions to true native 1920x1080 with 0% scaling or distortion. Disables dynamic resolution updates to preserve Windows desktop monitors."
-                                       FontSize="11" Foreground="#8A8A93" TextWrapping="Wrap"/>
+                            <CheckBox Name="ChkSettingsPreserveNative" Content="Keep Native 1920x1080 by default (Never squash or distort — scroll to view)" Foreground="#EDEDED" IsChecked="True" FontSize="13"/>
+                            <TextBlock Name="TxtSettingsPreserveNativeHint" Text="💡 Recommended: Keeps remote Windows sessions at full 1920x1080 in both portrait and landscape. Prevents remote apps and desktop icons from being squashed."
+                                       FontSize="11" Foreground="#2FBF71" TextWrapping="Wrap"/>
                         </StackPanel>
                     </Border>
 
@@ -585,6 +585,15 @@
                             </StackPanel>
                             <Button Grid.Column="1" Name="BtnLaunchViewPassword" Content="👁 Password" Background="#1C1C21" Foreground="#EDEDED"
                                     BorderBrush="#2E2E35" Height="30" FontSize="11" Padding="8,0" Margin="8,0,0,0"/>
+                        </Grid>
+                    </Border>
+
+                    <!-- Screen Scroll & Pan Guidance -->
+                    <Border Background="#141417" BorderBrush="#24242A" BorderThickness="1" CornerRadius="4" Padding="10,8">
+                        <Grid ColumnDefinitions="Auto,*">
+                            <TextBlock Text="💡 " FontSize="12" VerticalAlignment="Top"/>
+                            <TextBlock Grid.Column="1" Text="To scroll side-to-side and up/down without squashing: In Remote Desktop, tap the top bar and tap the 🔍 (Pan/Zoom) icon. Your 1920x1080 desktop stays full size!"
+                                       FontSize="11" Foreground="#8AB4F8" TextWrapping="Wrap"/>
                         </Grid>
                     </Border>
 

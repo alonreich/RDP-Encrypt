@@ -78,7 +78,7 @@ build.cmd              rem clean, publish, then replace the GitHub release
 build.cmd --no-publish rem clean and publish only
 ```
 
-The output is a single file: `compiled\RDPVault.exe`. Publishing deletes every previous release and tag, creates one new release tagged `vYYYY.MM.DD` with that one `.exe` attached, and verifies the uploaded asset's SHA-256 matches the file that was just built.
+The build outputs are `compiled\RDPVault.exe` (Windows desktop) and `compiled\RDPVault.apk` (Android mobile). The automated CI pipeline builds both artifacts on every release commit, tagging `vYYYY.MM.DD` with both assets attached.
 
 ## Technical summary
 

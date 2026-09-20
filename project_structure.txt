@@ -2,29 +2,42 @@
 PROJECT_STRUCTURE.TXT  —  RDP VAULT
 SOURCE OF TRUTH & GUIDANCE FOR ANY AI AGENT (OR HUMAN) WORKING ON THIS PROJECT
 ================================================================================
-Last updated : 2026-09-19
-Version      : 2026.09.19
-Status       : Production release. Compiled and tested with .NET 9 SDK on Windows 10/11 x64.
-               All 20 initial audit items, review items R1-R5, performance/resilience items
-               R6-R17, and September 2026 Audit Items A1-A10 resolved. Tactical UI/UX overlay
-               with live Wake-on-LAN countdown, unlock step telemetry, and search filtering
-               fully operational.
+Last updated : 2026-09-20
+Version      : 2026.09.20
+Status       : Production release. Compiled and tested with .NET 9 SDK on Windows 10/11 x64
+               and Android 14+ (API 34). Full multi-platform distribution: Windows single-file
+               executable (RDPVault.exe) and Android companion package (RDPVault.apk) sharing
+               a unified cryptographic core and vault file format. All security audits, UI/UX,
+               fast-switching lifecycle, and credential isolation requirements resolved.
 
 --------------------------------------------------------------------------------
 SECTION 0 — TL;DR (READ THIS FIRST)
 --------------------------------------------------------------------------------
-RDP Vault is a self-contained single-file Avalonia UI application for Windows.
+RDP Vault is a multi-platform security vault for Windows and Android.
 It stores RDP connection profiles (hosts, ports, usernames, optional passwords)
-inside ONE encrypted file ("vault.rdpv"). It launches connections through
-Windows' own mstsc.exe and removes the local traces that mstsc leaves behind
+inside ONE encrypted file ("vault.rdpv"). 
+
+On Windows:
+It is a self-contained single-file Avalonia UI application. It launches connections
+through Windows' own mstsc.exe and removes the local traces that mstsc leaves behind
 (registry history, Default.rdp, jump lists, recent items, and — when the user
 opts in — UserAssist, prefetch and saved TERMSRV credentials). It supports
 automatic re-locking, an optional (off by default) self-destruct, a printed
 Recovery Code, Windows Hello quick unlock backed by the machine TPM, and
 one-click desktop shortcuts.
 
-If you are an AI agent asked to modify this project: read SECTIONS 4, 5, 6, 10
-and 13 before touching anything. Do not weaken the crypto. Do not write any
+On Android:
+It is a mobile companion application (RDPVault.Android) sharing the identical
+cryptographic core (RDPVault.Core) and vault.rdpv file format. It seals master
+keys inside the device's hardware Secure Element / ARM TrustZone TEE via Android
+Keystore and StrongBox Keymaster, gated by Class 3 Strong Biometrics (fingerprint/3D face).
+It provides zero-compromise session continuity across orientation flips via a
+bound ForegroundService (RdpSessionService), standard RDP intent handoff (rdp://),
+automatic certificate warning suppression, and zero-clipboard credential isolation
+(passwords never touch the Android system clipboard or IME caches).
+
+If you are an AI agent asked to modify this project: read SECTIONS 4, 5, 6, 10,
+13, and 18 before touching anything. Do not weaken the crypto. Do not write any
 secret to disk outside vault.rdpv. Do not reintroduce anything from the
 "REGRESSIONS TO NEVER REINTRODUCE" list in SECTION 13.
 
@@ -53,11 +66,13 @@ Usage model : Portable (run the exe from a USB stick next to its vault.rdpv) or
 SECTION 2 — TECHNOLOGY STACK (EXACT)
 --------------------------------------------------------------------------------
 Language        : C# 12, nullable reference types ENABLED, implicit usings ON.
+
+WINDOWS DESKTOP STACK:
 Platform        : .NET 9, TFM net9.0-windows10.0.19041.0 (WinRT projections for
                   the Windows Hello APIs).
 UI framework    : Avalonia UI 11.1.3 (XAML + code-behind; the shared dialogs are
                   built in code — see Dialogs.cs).
-Output type     : WinExe, published SELF-CONTAINED SINGLE FILE.
+Output type     : WinExe, published SELF-CONTAINED SINGLE FILE (compiled\RDPVault.exe).
 
   *** PACKAGING & PERFORMANCE CHARACTERISTICS: ***
   1. PublishSingleFile=true, SelfContained=true, PublishReadyToRun=false.
@@ -75,7 +90,7 @@ Output type     : WinExe, published SELF-CONTAINED SINGLE FILE.
   5. PublishAot=false and PublishTrimmed=false: ShellLink.cs uses COM interfaces (IShellLinkW,
      IPersistFile) and WinRT projections plus managed Argon2 are not compatible with full AOT/trimming.
 
-NuGet packages (exactly five):
+NuGet packages:
   1. Isopoh.Cryptography.Argon2   — Argon2id KDF (managed).
   2-5. Avalonia, Avalonia.Desktop, Avalonia.Themes.Fluent, Avalonia.Fonts.Inter
 
@@ -90,37 +105,83 @@ Windows-only APIs used:
   - manage-bde (spawned) for the BitLocker status read-out
   - System.Net.Sockets (UdpClient) for Wake-on-LAN (WOL) magic packet delivery
 
-Build command (canonical):
-  build.cmd                 clean, publish, then REPLACE the GitHub release
-  build.cmd --no-publish    clean and publish only, touch no release
-The single artifact is compiled\RDPVault.exe. build.cmd itself runs:
-  dotnet publish RDPVault\RDPVault.csproj -c Release -r win-x64 ^
-      -p:PublishSingleFile=true -p:SelfContained=true -p:TreatWarningsAsErrors=true -o obj\SingleFile_final
-Release asset upload uses developer_tools\UploadAsset.ps1 leveraging Windows
-native curl.exe with SChannel to ensure reliable, non-hanging HTTP PUT/POST transfers.
+ANDROID MOBILE COMPANION STACK:
+Platform        : .NET 9, TFM net9.0-android34.0 (Android 14+ / API 34).
+UI framework    : Avalonia UI 11.1.3 (Avalonia.Android, SingleViewApplicationLifetime, MainView.axaml).
+Output type     : Android Application Package (compiled\RDPVault.apk).
+Signing         : RSA-2048 production keystore (rdpvault-release.keystore), 4-byte zipaligned,
+                  APK Signature Schemes v1, v2, v3 via apksigner.
+
+Android APIs & Architecture:
+  - Android Keystore & StrongBox Keymaster (Hardware Security Module / ARM TrustZone TEE).
+  - AndroidX Biometric (BiometricPrompt.CryptoObject) with Class 3 Strong Biometrics.
+  - RdpSessionService: Bound Android ForegroundService hosting active socket connections
+    and memory-protected credentials for screen-flip session continuity.
+  - Activity Lifecycle Synchronization: OnPause / OnResume reflective hooks into
+    AvaloniaView.OnVisibilityChanged preventing ChoreographerTimer deadlocks on fast switching.
+  - Standard Android RDP Intent handoff (rdp://) targeting Microsoft Remote Desktop
+    (com.microsoft.rdc.androidx / com.microsoft.rdc.android) and aRDP with Play Store fallback.
+  - Zero-Clipboard Credential Isolation: Passwords bypass system clipboard completely.
+
+Build commands (canonical):
+  Windows:  build.cmd                 clean, publish, then REPLACE the GitHub release
+            build.cmd --no-publish    clean and publish only, touch no release
+  Android:  build-apk.cmd             compile, align, and sign compiled\RDPVault.apk
+  CI/CD  :  .github\workflows\build-and-release.yml builds both assets and deploys release.
+
+Artifacts: compiled\RDPVault.exe and compiled\RDPVault.apk.
 Exit codes: 0 = built and published, 1 = build failed (release untouched),
 2 = built fine but the release step stopped.
 Dev machine needs: .NET 9 SDK, plus gh (signed in) to publish. Target machines
-need Windows 10/11 only — the build is self-contained, so no runtime install is
-required. See SECTION 14 for the release/distribution rules.
+need Windows 10/11 only or Android 14+ — the builds are self-contained. See SECTION 14.
 
 --------------------------------------------------------------------------------
 SECTION 3 — REPOSITORY / FILE MAP
 --------------------------------------------------------------------------------
 RDP_Encrypt\                       (repo root, c:\Full_Control\RDP_Encrypt)
 ├── project_structure.txt          ← THIS FILE. Update it when reality changes.
-├── README.md                      ← end-user manual + the single download link.
-├── build.cmd                      ← build + release pipeline (SECTION 14).
+├── README.md                      ← End-user manual + official download links.
+├── ANDROID_ARCHITECTURE.md        ← Android companion architecture & design spec.
+├── build.cmd                      ← Windows build + release pipeline (SECTION 14).
+├── build-apk.cmd                  ← Android APK build and signing pipeline.
 ├── installer.cmd / uninstaller.cmd
-├── build.log                      ← generated; overwritten by every build.cmd run.
-├── compiled\RDPVault.exe          ← THE build output. Exactly one file, always.
+├── build.log                      ← Generated; overwritten by every build run.
+├── compiled\
+│   ├── RDPVault.exe               ← Windows desktop binary (self-contained single-file).
+│   └── RDPVault.apk               ← Android mobile APK (aligned & v1/v2/v3 signed).
+├── .github\workflows\
+│   └── build-and-release.yml      ← Automated dual-target CI/CD release workflow.
 ├── developer_tools\
 │   └── UploadAsset.ps1            ← SChannel curl-based GitHub release asset publisher.
 ├── AvaloniaPort\                  ← LEGACY prototype, not built or shipped.
-│                                     Nothing references it. Delete when convenient.
-└── RDPVault\
+├── RDPVault.Core\                 ← Shared .NET 9 BCL library linking core components:
+│   ├── RDPVault.Core.csproj
+│   ├── AppPaths.cs                (linked)
+│   ├── Crypto.cs                  (linked)
+│   ├── Models.cs                  (linked)
+│   └── RecoveryKeyGenerator.cs    (linked)
+├── RDPVault.Android\              ← Android mobile companion application:
+│   ├── AndroidManifest.xml        Hardware configChanges, permissions, package queries.
+│   ├── MainActivity.cs            AvaloniaActivity, fast-switch lifecycle hooks (OnPause/Resume).
+│   ├── App.axaml / .cs            SingleView mobile startup initialization.
+│   ├── RDPVault.Android.csproj
+│   ├── rdpvault-release.keystore  RSA-2048 production release keystore.
+│   ├── Rdp\
+│   │   ├── FreeRdpClient.cs       Underlying connection protocol handlers.
+│   │   └── RdpLauncher.cs         Intent handoff, zero-clipboard credentials, cert suppression.
+│   ├── Resources\
+│   │   ├── values\styles.xml      MainTheme, windowDisablePreview, dark background canvas.
+│   │   └── mipmap-*\              High-DPI launcher icon assets.
+│   ├── Security\
+│   │   └── AndroidHardwareKeyStore.cs StrongBox HSM / ARM TrustZone AES-GCM wrap keys.
+│   ├── Services\
+│   │   └── RdpSessionService.cs   Bound ForegroundService maintaining session continuity.
+│   └── Views\
+│       ├── MainView.axaml         Mobile UI (Setup Wizard, Biometric unlock, Editor, Overlay).
+│       └── MainView.axaml.cs      Code-behind event handling, safe-area offsets, dialogs.
+└── RDPVault\                      ← Windows desktop application:
     ├── RDPVault.csproj
-    ├── app.manifest               ← asInvoker execution level for instant sub-600ms startup.
+    ├── app.manifest               asInvoker execution level for instant sub-600ms startup.
     ├── AppPaths.cs                The ONLY place file names/paths live.
     ├── Models.cs                  RdpProfile, VaultSettings, VaultPolicy, FailState,
     │                              VaultFile, TriStateOverride, MacAddressHelper,

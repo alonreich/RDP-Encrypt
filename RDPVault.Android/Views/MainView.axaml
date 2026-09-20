@@ -293,11 +293,7 @@
                             <TextBox Name="TxtProfileUser" Watermark="e.g. Administrator or DOMAIN\User" Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="40"/>
 
                             <TextBlock Text="PASSWORD" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
-                            <Grid ColumnDefinitions="*,Auto">
-                                <TextBox Grid.Column="0" Name="TxtProfilePass" PasswordChar="●" Watermark="Remote desktop password" Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="40"/>
-                                <Button Grid.Column="1" Name="BtnToggleProfilePass" Content="👁" Background="#1C1C21" Foreground="#8A8A93"
-                                        BorderBrush="#2E2E35" Height="40" Width="40" Margin="4,0,0,0" VerticalContentAlignment="Center" HorizontalContentAlignment="Center"/>
-                            </Grid>
+                            <TextBox Name="TxtProfilePass" PasswordChar="●" Watermark="Remote desktop password" Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="40"/>
 
                             <TextBlock Text="RD GATEWAY SERVER (OPTIONAL)" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
                             <TextBox Name="TxtProfileGateway" Watermark="e.g. gateway.company.com (RD Gateway)" Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="40"/>
@@ -576,16 +572,12 @@
                         </Grid>
                     </Border>
 
-                    <!-- First-time credential tip with zero-clipboard password reveal -->
+                    <!-- First-time credential tip -->
                     <Border Name="CardLaunchPasswordTip" Background="#18181D" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="4" Padding="10,8" IsVisible="False">
-                        <Grid ColumnDefinitions="*,Auto">
-                            <StackPanel Grid.Column="0" Spacing="2">
-                                <TextBlock Text="AUTHENTICATION NOTICE" FontSize="10" FontWeight="Bold" Foreground="#8AB4F8"/>
-                                <TextBlock Text="Enter password once in Remote Desktop &amp; check 'Store user account' for auto-logins." FontSize="10" Foreground="#8A8A93" TextWrapping="Wrap"/>
-                            </StackPanel>
-                            <Button Grid.Column="1" Name="BtnLaunchViewPassword" Content="👁 Password" Background="#1C1C21" Foreground="#EDEDED"
-                                    BorderBrush="#2E2E35" Height="30" FontSize="11" Padding="8,0" Margin="8,0,0,0"/>
-                        </Grid>
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="AUTHENTICATION NOTICE" FontSize="10" FontWeight="Bold" Foreground="#8AB4F8"/>
+                            <TextBlock Text="Enter password once in Microsoft Remote Desktop &amp; check 'Store user account' for permanent automatic logins." FontSize="10" Foreground="#8A8A93" TextWrapping="Wrap"/>
+                        </StackPanel>
                     </Border>
 
                     <!-- Screen Scroll & Pan Guidance -->
@@ -684,38 +676,6 @@
                         <Button Grid.Column="2" Name="BtnSubmitVerifyPassForRecovery" Content="Generate Code" Background="#005FB8" Foreground="White"
                                 Height="42" CornerRadius="6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" FontWeight="SemiBold"/>
                     </Grid>
-                </StackPanel>
-            </Border>
-        </Border>
-
-        <!-- Ephemeral Password Reveal Modal Overlay (Zero-Clipboard Security) -->
-        <Border Name="OverlayShowPassword" Background="#E00A0A0C" IsVisible="False" ZIndex="250">
-            <Border Background="#141417" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="8"
-                    Margin="24" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="440" Padding="20">
-                <StackPanel Spacing="14">
-                    <StackPanel Spacing="4">
-                        <TextBlock Text="CREDENTIAL DETAILS" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
-                        <TextBlock Name="TxtShowPassProfileTitle" Text="Connection Name" FontSize="16" FontWeight="SemiBold" Foreground="#EDEDED"/>
-                    </StackPanel>
-
-                    <TextBlock Text="Password" FontSize="12" Foreground="#8A8A93"/>
-                    <Grid ColumnDefinitions="*,Auto">
-                        <TextBox Grid.Column="0" Name="TxtRevealedPassword" PasswordChar="●" IsReadOnly="True"
-                                 Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" Height="42" FontSize="15" FontFamily="Monospace"/>
-                        <Button Grid.Column="1" Name="BtnToggleRevealedPassword" Content="👁" Background="#1C1C21" Foreground="#8A8A93"
-                                BorderBrush="#2E2E35" Height="42" Width="42" Margin="4,0,0,0" VerticalContentAlignment="Center" HorizontalContentAlignment="Center"/>
-                    </Grid>
-
-                    <Border Background="#1A1813" BorderBrush="#664D03" BorderThickness="1" CornerRadius="6" Padding="12">
-                        <StackPanel Spacing="4">
-                            <TextBlock Text="🔒 ZERO-CLIPBOARD SECURITY MANDATE" FontSize="11" FontWeight="Bold" Foreground="#FFC107"/>
-                            <TextBlock Text="For your security, credentials are NEVER placed onto the system clipboard. Enter this password once in Microsoft Remote Desktop and check 'Store user account' for permanent automatic zero-click logins."
-                                       FontSize="11" Foreground="#EDEDED" TextWrapping="Wrap"/>
-                        </StackPanel>
-                    </Border>
-
-                    <Button Name="BtnDismissShowPassword" Content="Close" Background="#005FB8" Foreground="White"
-                            Height="42" CornerRadius="6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" FontWeight="SemiBold"/>
                 </StackPanel>
             </Border>
         </Border>

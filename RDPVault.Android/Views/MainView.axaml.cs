@@ -117,20 +117,10 @@ public partial class MainView : UserControl
         SetupPasswordToggle(TxtPassword, BtnToggleUnlockPass);
         SetupPasswordToggle(TxtRecoveryNewPass, BtnToggleRecoveryNewPass);
         SetupPasswordToggle(TxtRecoveryConfirmPass, BtnToggleRecoveryConfirmPass);
-        SetupPasswordToggle(TxtProfilePass, BtnToggleProfilePass);
         SetupPasswordToggle(TxtSettingsCurrentPass, BtnToggleSettingsCurrentPass);
         SetupPasswordToggle(TxtSettingsNewPass, BtnToggleSettingsNewPass);
         SetupPasswordToggle(TxtSettingsConfirmPass, BtnToggleSettingsConfirmPass);
         SetupPasswordToggle(TxtVerifyPassForRecovery, BtnToggleVerifyRecoveryPass);
-        SetupPasswordToggle(TxtRevealedPassword, BtnToggleRevealedPassword);
-        BtnDismissShowPassword.Click += (_, _) =>
-        {
-            OverlayShowPassword.IsVisible = false;
-            TxtRevealedPassword.Text = "";
-            TxtRevealedPassword.PasswordChar = '●';
-            BtnToggleRevealedPassword.Content = "👁";
-        };
-        BtnLaunchViewPassword.Click += (_, _) => ShowPasswordRevealModal(_activeLaunchProfile);
 
         // 2. Numeric input filtering
         RestrictToDigits(TxtProfilePort);
@@ -415,16 +405,6 @@ public partial class MainView : UserControl
     /// </summary>
     public bool HandleBackPressed()
     {
-        // 0. Revealed password overlay
-        if (OverlayShowPassword.IsVisible)
-        {
-            OverlayShowPassword.IsVisible = false;
-            TxtRevealedPassword.Text = "";
-            TxtRevealedPassword.PasswordChar = '●';
-            BtnToggleRevealedPassword.Content = "👁";
-            return true;
-        }
-
         // 1. Password verification for recovery overlay
         if (OverlayPromptPasswordForRecovery.IsVisible)
         {
@@ -1086,31 +1066,6 @@ public partial class MainView : UserControl
             Spacing = 8
         };
 
-        if (profile.HasPassword)
-        {
-            var btnShowPass = new Button
-            {
-                Content = "👁 View Password",
-                Background = new SolidColorBrush(Color.Parse("#1C1C21")),
-                Foreground = new SolidColorBrush(Color.Parse("#EDEDED")),
-                BorderBrush = new SolidColorBrush(Color.Parse("#2E2E35")),
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(4),
-                Height = 34,
-                Padding = new Thickness(10, 0),
-                VerticalAlignment = VerticalAlignment.Center,
-                VerticalContentAlignment = VerticalAlignment.Center,
-                HorizontalContentAlignment = HorizontalAlignment.Center,
-                FontSize = 12
-            };
-            btnShowPass.Click += (_, e) =>
-            {
-                e.Handled = true;
-                ShowPasswordRevealModal(profile);
-            };
-            actionsRow.Children.Add(btnShowPass);
-        }
-
         var btnEdit = new Button
         {
             Content = "✏ Edit",
@@ -1235,7 +1190,6 @@ public partial class MainView : UserControl
             TxtProfileUser.Text = "";
             TxtProfilePass.Text = "";
             TxtProfilePass.PasswordChar = '●';
-            BtnToggleProfilePass.Content = "👁";
             TxtProfileGateway.Text = "";
 
             // Resolution defaults
@@ -1265,7 +1219,6 @@ public partial class MainView : UserControl
             TxtProfileUser.Text = profile.Username;
             TxtProfilePass.Text = profile.Password;
             TxtProfilePass.PasswordChar = '●';
-            BtnToggleProfilePass.Content = "👁";
             TxtProfileGateway.Text = profile.GatewayHost;
 
             // Map resolution preset
@@ -1833,16 +1786,6 @@ public partial class MainView : UserControl
         catch { }
 
         _lastSensitiveCopiedText = null;
-    }
-
-    private void ShowPasswordRevealModal(RdpProfile? profile)
-    {
-        if (profile == null) return;
-        TxtShowPassProfileTitle.Text = $"{profile.Name}  •  {profile.Host}:{profile.Port}";
-        TxtRevealedPassword.Text = profile.Password;
-        TxtRevealedPassword.PasswordChar = '●';
-        BtnToggleRevealedPassword.Content = "👁";
-        OverlayShowPassword.IsVisible = true;
     }
 
     private async Task StartSessionAsync(RdpProfile profile)

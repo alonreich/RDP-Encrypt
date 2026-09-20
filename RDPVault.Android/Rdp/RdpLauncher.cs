@@ -5,6 +5,7 @@ using Android.Content;
 using Android.Content.PM;
 using Android.OS;
 using RDPVault;
+using RDPVault.Android.Services;
 
 namespace RDPVault.Android.Rdp;
 
@@ -142,9 +143,14 @@ public static class RdpLauncher
         string uriString = $"rdp://{string.Join("&", queryList)}";
 
         var rdpUri = global::Android.Net.Uri.Parse(uriString);
-
         var intent = new Intent(Intent.ActionView, rdpUri);
         intent.AddFlags(ActivityFlags.NewTask);
+
+        // Arm the accessibility auto-type service if a password is present
+        if (!string.IsNullOrEmpty(profile.Password))
+        {
+            RdpAutoTypeService.Arm(profile.Host, profile.Username, profile.Password, timeoutSeconds: 45);
+        }
 
         var pm = context.PackageManager;
 

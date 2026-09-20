@@ -1,0 +1,365 @@
+using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using Android.AccessibilityServices;
+using Android.App;
+using Android.Content;
+using Android.OS;
+using Android.Provider;
+using Android.Text;
+using Android.Views.Accessibility;
+
+namespace RDPVault.Android.Services;
+
+/// <summary>
+/// Android Accessibility Service that automatically and securely injects remote desktop credentials
+/// into Microsoft Remote Desktop without touching the system clipboard or storing credentials in external apps.
+/// </summary>
+[Service(
+    Name = "com.rdpvault.app.services.RdpAutoTypeService",
+    Permission = "android.permission.BIND_ACCESSIBILITY_SERVICE",
+    Exported = true,
+    Label = "@string/accessibility_service_label"
+)]
+[IntentFilter(new[] { "android.accessibilityservice.AccessibilityService" })]
+[MetaData("android.accessibilityservice", Resource = "@xml/accessibility_service_config")]
+public class RdpAutoTypeService : AccessibilityService
+{
+    public static RdpAutoTypeService? Instance { get; private set; }
+
+    private static readonly object _lock = new();
+    private static string? _armedHost;
+    private static string? _armedUsername;
+    private static string? _armedPassword;
+    private static DateTime _armExpiry = DateTime.MinValue;
+    private static System.Threading.Timer? _expiryTimer;
+    private static bool _hasInjected;
+
+    public override void OnCreate()
+    {
+        base.OnCreate();
+        Instance = this;
+    }
+
+    protected override void OnServiceConnected()
+    {
+        base.OnServiceConnected();
+        Instance = this;
+
+        try
+        {
+            var info = ServiceInfo ?? new AccessibilityServiceInfo();
+            info.EventTypes = EventTypes.WindowStateChanged | EventTypes.WindowContentChanged;
+            info.FeedbackType = FeedbackFlags.Generic;
+            info.Flags = AccessibilityServiceFlags.Default | AccessibilityServiceFlags.RetrieveInteractiveWindows;
+            info.PackageNames = new[]
+            {
+                "com.microsoft.rdc.androidx",
+                "com.microsoft.rdc.android",
+                "com.iiordanov.freeaRDP",
+                "com.iiordanov.aRDP"
+            };
+            info.NotificationTimeout = 50;
+            SetServiceInfo(info);
+        }
+        catch (Exception ex)
+        {
+            global::Android.Util.Log.Warn("RDPVault", $"OnServiceConnected error: {ex.Message}");
+        }
+    }
+
+    public override bool OnUnbind(Intent? intent)
+    {
+        Instance = null;
+        Disarm();
+        return base.OnUnbind(intent);
+    }
+
+    public override void OnInterrupt()
+    {
+    }
+
+    /// <summary>
+    /// Arms the auto-type injector with credentials for an upcoming connection launch.
+    /// The password is held ephemerally in volatile memory for at most timeoutSeconds,
+    /// and is wiped immediately upon injection or expiry.
+    /// </summary>
+    public static void Arm(string host, string username, string password, int timeoutSeconds = 30)
+    {
+        if (string.IsNullOrEmpty(password)) return;
+
+        lock (_lock)
+        {
+            _armedHost = host;
+            _armedUsername = username;
+            _armedPassword = password;
+            _armExpiry = DateTime.UtcNow.AddSeconds(timeoutSeconds);
+            _hasInjected = false;
+
+            _expiryTimer?.Dispose();
+            _expiryTimer = new System.Threading.Timer(_ => Disarm(), null, timeoutSeconds * 1000, System.Threading.Timeout.Infinite);
+        }
+    }
+
+    /// <summary>
+    /// Immediately clears and wipes all armed credentials from memory.
+    /// </summary>
+    public static void Disarm()
+    {
+        lock (_lock)
+        {
+            _armedHost = null;
+            _armedUsername = null;
+            _armedPassword = null;
+            _armExpiry = DateTime.MinValue;
+            _hasInjected = false;
+            _expiryTimer?.Dispose();
+            _expiryTimer = null;
+        }
+    }
+
+    public static bool IsArmed
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return !_hasInjected && !string.IsNullOrEmpty(_armedPassword) && DateTime.UtcNow <= _armExpiry;
+            }
+        }
+    }
+
+    public override void OnAccessibilityEvent(AccessibilityEvent? e)
+    {
+        if (e == null) return;
+        if (!IsArmed) return;
+
+        string pkg = e.PackageName?.ToString() ?? "";
+        if (!pkg.Equals("com.microsoft.rdc.androidx", StringComparison.OrdinalIgnoreCase) &&
+            !pkg.Equals("com.microsoft.rdc.android", StringComparison.OrdinalIgnoreCase) &&
+            !pkg.Equals("com.iiordanov.freeaRDP", StringComparison.OrdinalIgnoreCase) &&
+            !pkg.Equals("com.iiordanov.aRDP", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        TryInjectCredentials();
+    }
+
+    private void TryInjectCredentials()
+    {
+        lock (_lock)
+        {
+            if (!IsArmed) return;
+        }
+
+        AccessibilityNodeInfo? root = RootInActiveWindow;
+        if (root == null) return;
+
+        try
+        {
+            var editTexts = new List<AccessibilityNodeInfo>();
+            FindEditTextNodes(root, editTexts);
+
+            if (editTexts.Count == 0) return;
+
+            AccessibilityNodeInfo? passwordField = null;
+            AccessibilityNodeInfo? usernameField = null;
+
+            foreach (var node in editTexts)
+            {
+                if (node.IsPassword || IsPasswordField(node))
+                {
+                    passwordField = node;
+                }
+                else
+                {
+                    usernameField = node;
+                }
+            }
+
+            // Fallback resolution for dialogs with 2 fields (User + Pass) or 1 field (Pass)
+            if (passwordField == null && editTexts.Count >= 2)
+            {
+                usernameField = editTexts[0];
+                passwordField = editTexts[1];
+            }
+            else if (passwordField == null && editTexts.Count == 1)
+            {
+                passwordField = editTexts[0];
+            }
+
+            if (passwordField != null)
+            {
+                string targetPass;
+                string targetUser;
+                lock (_lock)
+                {
+                    if (!IsArmed || string.IsNullOrEmpty(_armedPassword)) return;
+                    targetPass = _armedPassword;
+                    targetUser = _armedUsername ?? "";
+                    _hasInjected = true;
+                }
+
+                // 1. Fill username if field is empty and we have a target user
+                if (usernameField != null && !string.IsNullOrEmpty(targetUser))
+                {
+                    string currentText = usernameField.Text?.ToString() ?? "";
+                    if (string.IsNullOrWhiteSpace(currentText))
+                    {
+                        var userBundle = new Bundle();
+                        userBundle.PutCharSequence(AccessibilityNodeInfo.ActionArgumentSetTextCharSequence, targetUser);
+                        usernameField.PerformAction(global::Android.Views.Accessibility.Action.SetText, userBundle);
+                    }
+                }
+
+                // 2. Inject password into password field
+                var passBundle = new Bundle();
+                passBundle.PutCharSequence(AccessibilityNodeInfo.ActionArgumentSetTextCharSequence, targetPass);
+                bool setPassSuccess = passwordField.PerformAction(global::Android.Views.Accessibility.Action.SetText, passBundle);
+
+                // 3. Immediately wipe password from memory
+                Disarm();
+
+                if (setPassSuccess)
+                {
+                    global::Android.Util.Log.Info("RDPVault", "RdpAutoTypeService: Password successfully injected into RDP dialog.");
+
+                    // 4. Click Connect/OK button after brief delay to complete zero-touch login
+                    Task.Run(async () =>
+                    {
+                        await Task.Delay(200);
+                        try
+                        {
+                            var freshRoot = RootInActiveWindow;
+                            if (freshRoot != null)
+                            {
+                                var connectBtn = FindConnectButton(freshRoot);
+                                connectBtn?.PerformAction(global::Android.Views.Accessibility.Action.Click);
+                            }
+                        }
+                        catch { }
+                    });
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            global::Android.Util.Log.Warn("RDPVault", $"AutoType error: {ex.Message}");
+        }
+    }
+
+    private static void FindEditTextNodes(AccessibilityNodeInfo node, List<AccessibilityNodeInfo> result)
+    {
+        if (node.ClassName?.ToString()?.Contains("EditText", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            result.Add(node);
+        }
+
+        for (int i = 0; i < node.ChildCount; i++)
+        {
+            var child = node.GetChild(i);
+            if (child != null)
+            {
+                FindEditTextNodes(child, result);
+            }
+        }
+    }
+
+    private static bool IsPasswordField(AccessibilityNodeInfo node)
+    {
+        if (node.IsPassword) return true;
+
+        var inputType = (InputTypes)node.InputType;
+        if ((inputType & InputTypes.TextVariationPassword) != 0 ||
+            (inputType & InputTypes.TextVariationWebPassword) != 0 ||
+            (inputType & InputTypes.NumberVariationPassword) != 0)
+        {
+            return true;
+        }
+
+        string id = node.ViewIdResourceName?.ToLowerInvariant() ?? "";
+        if (id.Contains("password") || id.Contains("pass")) return true;
+
+        string hint = node.HintText?.ToString()?.ToLowerInvariant() ?? "";
+        if (hint.Contains("password")) return true;
+
+        return false;
+    }
+
+    private static AccessibilityNodeInfo? FindConnectButton(AccessibilityNodeInfo node)
+    {
+        if (node.IsClickable)
+        {
+            string text = (node.Text?.ToString() ?? node.ContentDescription?.ToString() ?? "").Trim().ToLowerInvariant();
+            if (text == "connect" || text == "ok" || text == "sign in" || text == "continue" || text == "log in")
+            {
+                return node;
+            }
+        }
+
+        for (int i = 0; i < node.ChildCount; i++)
+        {
+            var child = node.GetChild(i);
+            if (child != null)
+            {
+                var found = FindConnectButton(child);
+                if (found != null) return found;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Checks whether the RDP Vault Accessibility Service is enabled in Android system settings.
+    /// </summary>
+    public static bool IsServiceEnabled(Context context)
+    {
+        if (Instance != null) return true;
+
+        try
+        {
+            int accessibilityEnabled = Settings.Secure.GetInt(context.ContentResolver, Settings.Secure.AccessibilityEnabled, 0);
+            if (accessibilityEnabled != 1) return false;
+
+            string? services = Settings.Secure.GetString(context.ContentResolver, Settings.Secure.EnabledAccessibilityServices);
+            if (!string.IsNullOrEmpty(services))
+            {
+                var colonSplitter = services.Split(':');
+                string targetClass = "com.rdpvault.app.services.RdpAutoTypeService";
+                foreach (var s in colonSplitter)
+                {
+                    if (s.Contains(targetClass, StringComparison.OrdinalIgnoreCase) ||
+                        s.Contains("RdpAutoTypeService", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            global::Android.Util.Log.Warn("RDPVault", $"IsServiceEnabled check failed: {ex.Message}");
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Opens the Android System Accessibility Settings screen.
+    /// </summary>
+    public static void OpenAccessibilitySettings(Context context)
+    {
+        try
+        {
+            var intent = new Intent(Settings.ActionAccessibilitySettings);
+            intent.AddFlags(ActivityFlags.NewTask);
+            context.StartActivity(intent);
+        }
+        catch (Exception ex)
+        {
+            global::Android.Util.Log.Warn("RDPVault", $"Failed to open accessibility settings: {ex.Message}");
+        }
+    }
+}

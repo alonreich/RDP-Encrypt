@@ -170,12 +170,17 @@ RDP_Encrypt\                       (repo root, c:\Full_Control\RDP_Encrypt)
 │   │   ├── FreeRdpClient.cs       Underlying connection protocol handlers.
 │   │   └── RdpLauncher.cs         Intent handoff, zero-clipboard credentials, cert suppression.
 │   ├── Resources\
-│   │   ├── values\styles.xml      MainTheme, windowDisablePreview, dark background canvas.
-│   │   └── mipmap-*\              High-DPI launcher icon assets.
+│   │   ├── values\
+│   │   │   ├── styles.xml      MainTheme, windowDisablePreview, dark background canvas.
+│   │   │   └── strings.xml     Accessibility service labels & descriptions.
+│   │   ├── xml\
+│   │   │   └── accessibility_service_config.xml Scoped target packages & capabilities.
+│   │   └── mipmap-*\           High-DPI launcher icon assets.
 │   ├── Security\
 │   │   └── AndroidHardwareKeyStore.cs StrongBox HSM / ARM TrustZone AES-GCM wrap keys.
 │   ├── Services\
-│   │   └── RdpSessionService.cs   Bound ForegroundService maintaining session continuity.
+│   │   ├── RdpSessionService.cs   Bound ForegroundService maintaining session continuity.
+│   │   └── RdpAutoTypeService.cs  Accessibility Service for zero-clipboard auto-type injection.
 │   └── Views\
 │       ├── MainView.axaml         Mobile UI (Setup Wizard, Biometric unlock, Editor, Overlay).
 │       └── MainView.axaml.cs      Code-behind event handling, safe-area offsets, dialogs.
@@ -1165,11 +1170,38 @@ A parallel mobile software distribution branch sharing the identical cryptograph
        - Android Intent / URI Security: Android OS logs all cross-app Intent URIs in system logs (Logcat). To prevent credential
          theft by background apps reading OS logs, Microsoft Remote Desktop deliberately rejects and drops any password parameter
          passed via the `rdp://` URI scheme.
-       - Anti-Keylogger Protection: Android kernel and Google Play security policies prohibit third-party apps from simulating
-         touch input or typing keystrokes into external applications.
-       - One-Time Permanent Solution: Users enter their password once directly inside Microsoft Remote Desktop and check
-         "Store user account" (or "Save password"). Microsoft Remote Desktop secures the credential inside the hardware KeyStore,
-         allowing all subsequent connections from RDPVault to authenticate instantly with zero prompts.
+      Option B Auto-Type Implementation:
+        - Replaces the requirement to store passwords inside Microsoft Remote Desktop with an ephemeral,
+          zero-touch Accessibility Auto-Typer that injects the credential on-the-fly and immediately clears memory.
+
+ 12. OPTION B — ACCESSIBILITY AUTO-TYPER: ZERO-TOUCH CREDENTIAL INJECTION (ZERO-CLIPBOARD & ZERO-STORE):
+     - Zero-Clipboard & Zero-Store Security Model:
+       * Passwords NEVER touch the Android system clipboard (`ClipData` / `ClipboardManager`), eliminating exposure
+         to third-party clipboard monitors and keyboard history caches (e.g. Gboard, SwiftKey).
+       * Passwords are NEVER saved in Microsoft Remote Desktop's local database or keystore, preserving the zero-knowledge
+         architecture of RDP Vault.
+     - Architecture & Component Stack:
+       * RdpAutoTypeService (Services/RdpAutoTypeService.cs): Inherits from `Android.AccessibilityServices.AccessibilityService`,
+         configured via `Resources/xml/accessibility_service_config.xml`.
+       * Package Scoping: Strictly restricted by Android OS filter to target RDP client packages only:
+         `com.microsoft.rdc.androidx`, `com.microsoft.rdc.android`, `com.iiordanov.freeaRDP`, and `com.iiordanov.aRDP`.
+         The OS guarantees zero visibility into any other apps (browsers, banking, messaging).
+       * Ephemeral Credential Arming: When launching a session, `RdpAutoTypeService.Arm(host, username, password, 45)` stores
+         credentials in volatile memory for at most 45 seconds backed by an automated self-wiping `System.Threading.Timer`.
+       * In-Memory Injection: Listens for `WindowStateChanged` / `WindowContentChanged` events in Microsoft Remote Desktop.
+         Locates the password `EditText` node in the accessibility hierarchy (via `IsPassword`, `InputTypes`, and view resource ID),
+         and directly injects the password into the view buffer using `AccessibilityNodeInfo.ActionArgumentSetTextCharSequence`.
+       * Immediate Memory Wipe: Calls `Disarm()` immediately upon successful node injection, zeroing in-memory buffers.
+       * Automated Session Start: Dispatches an asynchronous click event to the "Connect" / "OK" button after a 200ms stabilization
+         delay, delivering a completely automated zero-touch login experience.
+     - User Consent & First-Time Activation Flow:
+       * `OverlayEnableAccessibility`: Displays a clear, non-intrusive onboarding dialog upon session launch if the user has
+         a saved password and the accessibility service is disabled. Explains the security benefits and provides a 1-tap shortcut
+         directly to Android Accessibility Settings (`Settings.ActionAccessibilitySettings`).
+       * PanelSettings Indicator: Added dedicated "AUTO-TYPE PASSWORD INJECTION" card in settings displaying real-time service
+         status (Active / Disabled) with a direct configuration button.
+       * Graceful Fallback: If the user prefers not to grant accessibility permissions, "Connect Anyway (Manual Entry)" proceeds
+         with standard launch without blocking the connection.
 
 --------------------------------------------------------------------------------
 END OF FILE — keep synchronized with the code.

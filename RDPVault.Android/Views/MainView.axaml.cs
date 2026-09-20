@@ -24,6 +24,7 @@ using Avalonia.Platform.Storage;
 using RDPVault;
 using RDPVault.Android.Rdp;
 using RDPVault.Android.Security;
+using RDPVault.Android.Services;
 
 namespace RDPVault.Android.Views;
 
@@ -338,7 +339,32 @@ public partial class MainView : UserControl
             PanelUnlocked.IsVisible = true;
         };
 
-        // 10. WOL Skip Wait
+        // 10. Auto-Type Accessibility
+        BtnSettingsAccessibility.Click += (_, _) =>
+        {
+            var ctx = (global::Android.Content.Context?)MainActivity.Instance ?? global::Android.App.Application.Context;
+            RdpAutoTypeService.OpenAccessibilitySettings(ctx);
+        };
+        BtnOpenAccessibilitySettings.Click += (_, _) =>
+        {
+            OverlayEnableAccessibility.IsVisible = false;
+            var ctx = (global::Android.Content.Context?)MainActivity.Instance ?? global::Android.App.Application.Context;
+            RdpAutoTypeService.OpenAccessibilitySettings(ctx);
+        };
+        BtnContinueWithoutAccessibility.Click += async (_, _) =>
+        {
+            OverlayEnableAccessibility.IsVisible = false;
+            if (_activeLaunchProfile != null)
+            {
+                await ProceedLaunchAsync(_activeLaunchProfile);
+            }
+        };
+        BtnCancelAccessibilityPrompt.Click += (_, _) =>
+        {
+            OverlayEnableAccessibility.IsVisible = false;
+        };
+
+        // 11. WOL Skip Wait
         BtnSkipWolWait.Click += (_, _) => SkipWolWait();
     }
 
@@ -405,6 +431,13 @@ public partial class MainView : UserControl
     /// </summary>
     public bool HandleBackPressed()
     {
+        // 0. Auto-Type accessibility prompt modal
+        if (OverlayEnableAccessibility.IsVisible)
+        {
+            OverlayEnableAccessibility.IsVisible = false;
+            return true;
+        }
+
         // 1. Password verification for recovery overlay
         if (OverlayPromptPasswordForRecovery.IsVisible)
         {
@@ -1488,6 +1521,13 @@ public partial class MainView : UserControl
         BtnToggleBiometrics.Content = enrolled
             ? "Remove Biometric Seal"
             : "Enroll Biometrics";
+
+        var ctx = (global::Android.Content.Context?)MainActivity.Instance ?? global::Android.App.Application.Context;
+        bool autoTypeActive = RdpAutoTypeService.IsServiceEnabled(ctx);
+        TxtAccessibilityStatus.Text = autoTypeActive
+            ? "✓ Active: Zero-clipboard auto-type enabled for Microsoft Remote Desktop."
+            : "⚠️ Disabled: Tap below to enable RDP Vault in Android Accessibility Settings.";
+        TxtAccessibilityStatus.Foreground = new SolidColorBrush(Color.Parse(autoTypeActive ? "#2FBF71" : "#E5A93C"));
     }
 
     private void SaveSettingsDefaults()
@@ -1791,6 +1831,18 @@ public partial class MainView : UserControl
     private async Task StartSessionAsync(RdpProfile profile)
     {
         _activeLaunchProfile = profile;
+        var ctx = (global::Android.Content.Context?)MainActivity.Instance ?? global::Android.App.Application.Context;
+        if (profile.HasPassword && !RdpAutoTypeService.IsServiceEnabled(ctx))
+        {
+            OverlayEnableAccessibility.IsVisible = true;
+            return;
+        }
+
+        await ProceedLaunchAsync(profile);
+    }
+
+    private async Task ProceedLaunchAsync(RdpProfile profile)
+    {
         _connectCts = new System.Threading.CancellationTokenSource();
         var ct = _connectCts.Token;
         _skipWolWait = false;
@@ -1802,6 +1854,21 @@ public partial class MainView : UserControl
         TxtLaunchCountdown.IsVisible = false;
         BtnSkipWolWait.IsVisible = false;
         CardLaunchPasswordTip.IsVisible = profile.HasPassword;
+        if (profile.HasPassword)
+        {
+            var ctx = (global::Android.Content.Context?)MainActivity.Instance ?? global::Android.App.Application.Context;
+            bool autoTypeReady = RdpAutoTypeService.IsServiceEnabled(ctx);
+            if (autoTypeReady)
+            {
+                TxtLaunchPasswordTipTitle.Text = "⚡ ZERO-CLIPBOARD AUTO-TYPE ACTIVE";
+                TxtLaunchPasswordTipBody.Text = "RDP Vault will automatically inject your password directly into Microsoft Remote Desktop without touching the Android clipboard.";
+            }
+            else
+            {
+                TxtLaunchPasswordTipTitle.Text = "🔐 MANUAL PASSWORD ENTRY REQUIRED";
+                TxtLaunchPasswordTipBody.Text = "Auto-Type accessibility service is disabled. You will need to type your password into Remote Desktop.";
+            }
+        }
         TxtLaunchSubStatus.Text = "Display & Security";
         var (w, h, isDevice) = profile.ResolveResolution(_payload?.Settings);
         TxtLaunchStep.Text = isDevice

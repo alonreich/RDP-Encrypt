@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="app_name">RDP Vault</string>
+  <string name="accessibility_service_label">RDP Vault Auto-Type</string>
+  <string name="accessibility_service_desc">Securely and automatically injects remote desktop credentials into Microsoft Remote Desktop without touching the system clipboard.</string>
+</resources>

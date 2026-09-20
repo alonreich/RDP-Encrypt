@@ -466,6 +466,18 @@
                         </StackPanel>
                     </Border>
 
+                    <!-- Auto-Type Password Injector Card -->
+                    <Border Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16">
+                        <StackPanel Spacing="10">
+                            <TextBlock Text="AUTO-TYPE PASSWORD INJECTION" FontSize="11" FontWeight="Bold" Foreground="#8A8A93" LetterSpacing="1"/>
+                            <TextBlock Text="Directly injects remote desktop passwords into Microsoft Remote Desktop with zero clipboard usage and zero credential storage in external apps."
+                                       FontSize="12" Foreground="#8A8A93" TextWrapping="Wrap"/>
+                            <TextBlock Name="TxtAccessibilityStatus" Text="Checking accessibility status..." FontSize="12" Foreground="#2FBF71" TextWrapping="Wrap"/>
+                            <Button Name="BtnSettingsAccessibility" Content="⚙ Configure Accessibility Auto-Type" Background="#2E2E35" Foreground="#EDEDED"
+                                    Height="42" CornerRadius="6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
+                        </StackPanel>
+                    </Border>
+
                     <!-- Vault Backup & File Transfer Card -->
                     <Border Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16">
                         <StackPanel Spacing="10">
@@ -572,11 +584,11 @@
                         </Grid>
                     </Border>
 
-                    <!-- First-time credential tip -->
+                    <!-- Auto-Type / Credential notice -->
                     <Border Name="CardLaunchPasswordTip" Background="#18181D" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="4" Padding="10,8" IsVisible="False">
                         <StackPanel Spacing="2">
-                            <TextBlock Text="AUTHENTICATION NOTICE" FontSize="10" FontWeight="Bold" Foreground="#8AB4F8"/>
-                            <TextBlock Text="Enter password once in Microsoft Remote Desktop &amp; check 'Store user account' for permanent automatic logins." FontSize="10" Foreground="#8A8A93" TextWrapping="Wrap"/>
+                            <TextBlock Name="TxtLaunchPasswordTipTitle" Text="ZERO-CLIPBOARD AUTO-TYPE" FontSize="10" FontWeight="Bold" Foreground="#8AB4F8"/>
+                            <TextBlock Name="TxtLaunchPasswordTipBody" Text="🔒 Auto-Type Active: Password will be injected directly into Microsoft Remote Desktop with zero clipboard exposure." FontSize="10" Foreground="#2FBF71" TextWrapping="Wrap"/>
                         </StackPanel>
                     </Border>
 
@@ -675,6 +687,39 @@
                                 Height="42" CornerRadius="6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
                         <Button Grid.Column="2" Name="BtnSubmitVerifyPassForRecovery" Content="Generate Code" Background="#005FB8" Foreground="White"
                                 Height="42" CornerRadius="6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" FontWeight="SemiBold"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
+        </Border>
+
+        <!-- Enable Accessibility Auto-Type Modal Overlay -->
+        <Border Name="OverlayEnableAccessibility" Background="#E00A0A0C" IsVisible="False" ZIndex="260">
+            <Border Background="#141417" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="8"
+                    Margin="24" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="440" Padding="20">
+                <StackPanel Spacing="14">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="🔒 ZERO-CLIPBOARD AUTO-TYPE" FontSize="11" FontWeight="Bold" Foreground="#8AB4F8" LetterSpacing="1"/>
+                        <TextBlock Text="Enable Auto-Type in Accessibility" FontSize="17" FontWeight="Bold" Foreground="#FFFFFF"/>
+                    </StackPanel>
+
+                    <TextBlock Text="To inject your password directly into Microsoft Remote Desktop with zero clipboard usage and zero credential storage in external apps, turn ON RDP Vault in Android Accessibility settings."
+                               FontSize="13" Foreground="#EDEDED" TextWrapping="Wrap"/>
+
+                    <Border Background="#1A1813" BorderBrush="#664D03" BorderThickness="1" CornerRadius="6" Padding="12">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="💡 HOW TO ACTIVATE (ONE-TIME STEP):" FontSize="11" FontWeight="Bold" Foreground="#FFC107"/>
+                            <TextBlock Text="1. Tap 'Open Accessibility Settings' below.&#x0a;2. Find 'RDP Vault Auto-Type' in the list.&#x0a;3. Turn it ON and confirm."
+                                       FontSize="12" Foreground="#EDEDED" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Grid RowDefinitions="Auto,8,Auto,8,Auto">
+                        <Button Grid.Row="0" Name="BtnOpenAccessibilitySettings" Content="⚙ Open Accessibility Settings" Background="#005FB8" Foreground="White"
+                                Height="42" CornerRadius="6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" FontWeight="SemiBold"/>
+                        <Button Grid.Row="2" Name="BtnContinueWithoutAccessibility" Content="Connect Anyway (Manual Entry)" Background="#2E2E35" Foreground="#EDEDED"
+                                Height="38" CornerRadius="6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
+                        <Button Grid.Row="4" Name="BtnCancelAccessibilityPrompt" Content="Cancel" Background="#1C1C21" Foreground="#8A8A93"
+                                Height="36" CornerRadius="6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
                     </Grid>
                 </StackPanel>
             </Border>

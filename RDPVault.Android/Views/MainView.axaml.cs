@@ -33,6 +33,7 @@ public partial class MainView : UserControl
     private string _activeRecoveryCode = "";
     private IntPtr _activeRdpContext = IntPtr.Zero;
     private System.Threading.CancellationTokenSource? _connectCts;
+    private bool _biometricPromptSuppressed;
 
     private static string ResolveVaultPath()
     {
@@ -79,10 +80,29 @@ public partial class MainView : UserControl
 
     private void WireEvents()
     {
-        // 1. First-Time Setup Wizard
+        // 1. Password Visibility Eye Toggles
+        SetupPasswordToggle(TxtFirstRunPass, BtnToggleFirstRunPass);
+        SetupPasswordToggle(TxtFirstRunConfirm, BtnToggleFirstRunConfirm);
+        SetupPasswordToggle(TxtPassword, BtnToggleUnlockPass);
+        SetupPasswordToggle(TxtRecoveryNewPass, BtnToggleRecoveryNewPass);
+        SetupPasswordToggle(TxtRecoveryConfirmPass, BtnToggleRecoveryConfirmPass);
+        SetupPasswordToggle(TxtProfilePass, BtnToggleProfilePass);
+        SetupPasswordToggle(TxtSettingsCurrentPass, BtnToggleSettingsCurrentPass);
+        SetupPasswordToggle(TxtSettingsNewPass, BtnToggleSettingsNewPass);
+        SetupPasswordToggle(TxtSettingsConfirmPass, BtnToggleSettingsConfirmPass);
+        SetupPasswordToggle(TxtVerifyPassForRecovery, BtnToggleVerifyRecoveryPass);
+
+        // 2. Numeric input filtering
+        RestrictToDigits(TxtProfilePort);
+        RestrictToDigits(TxtProfileWolPort);
+        RestrictToDigits(TxtProfileWolWait);
+        RestrictToDigits(TxtProfileCustomWidth);
+        RestrictToDigits(TxtProfileCustomHeight);
+
+        // 3. First-Time Setup Wizard
         BtnFirstRunCreate.Click += async (_, _) => await CreateVaultFirstTimeAsync();
 
-        // 2. Recovery Code Display
+        // 4. Recovery Code Display
         BtnCopyRecoveryCode.Click += async (_, _) => await CopyRecoveryCodeToClipboardAsync();
         ChkConfirmRecoverySaved.IsCheckedChanged += (_, _) =>
         {
@@ -94,8 +114,12 @@ public partial class MainView : UserControl
             SwitchToUnlocked();
         };
 
-        // 3. Lock Screen
-        BtnBiometricUnlock.Click += async (_, _) => await UnlockWithBiometricsAsync();
+        // 5. Lock Screen
+        BtnBiometricUnlock.Click += async (_, _) =>
+        {
+            _biometricPromptSuppressed = false;
+            await UnlockWithBiometricsAsync();
+        };
         BtnUnlock.Click += async (_, _) => await UnlockWithPasswordAsync();
         TxtPassword.KeyDown += async (_, e) =>
         {
@@ -103,11 +127,11 @@ public partial class MainView : UserControl
         };
         BtnShowRecovery.Click += (_, _) => ShowRecoveryUnlock();
 
-        // 4. Recovery Unlock
+        // 6. Recovery Unlock
         BtnSubmitRecoveryUnlock.Click += async (_, _) => await SubmitRecoveryUnlockAsync();
         BtnCancelRecoveryUnlock.Click += (_, _) => ShowLockScreen();
 
-        // 5. Unlocked Screen
+        // 7. Unlocked Screen
         BtnAddProfile.Click += (_, _) => ShowProfileEditor(null);
         BtnSettings.Click += (_, _) => ShowSettings();
         BtnLock.Click += (_, _) => LockVault();
@@ -118,7 +142,7 @@ public partial class MainView : UserControl
             RefreshProfilesList();
         };
 
-        // 6. Profile Editor (Both Sticky Top Header and Bottom Buttons)
+        // 8. Profile Editor (Sticky Top Header and Bottom Buttons)
         BtnSaveProfile.Click += (_, _) => SaveProfile();
         BtnTopSaveProfile.Click += (_, _) => SaveProfile();
         BtnCancelProfile.Click += (_, _) =>
@@ -131,14 +155,34 @@ public partial class MainView : UserControl
             PanelProfileEditor.IsVisible = false;
             PanelUnlocked.IsVisible = true;
         };
-        BtnDeleteProfile.Click += (_, _) => DeleteProfile();
-        BtnTopDeleteProfile.Click += (_, _) => DeleteProfile();
+
+        // Delete with explicit confirmation
+        BtnDeleteProfile.Click += (_, _) =>
+        {
+            if (_editingProfile != null)
+            {
+                TxtConfirmDeleteMessage.Text = $"Are you sure you want to delete '{_editingProfile.Name}' ({_editingProfile.Host})? This action cannot be undone.";
+                OverlayConfirmDelete.IsVisible = true;
+            }
+        };
+        BtnCancelDelete.Click += (_, _) => OverlayConfirmDelete.IsVisible = false;
+        BtnConfirmDelete.Click += (_, _) =>
+        {
+            OverlayConfirmDelete.IsVisible = false;
+            ConfirmDeleteProfile();
+        };
+
+        // Custom resolution field toggle in editor
+        CmbProfileResolution.SelectionChanged += (_, _) =>
+        {
+            PnlProfileCustomRes.IsVisible = CmbProfileResolution.SelectedIndex == 8;
+        };
 
         void ScrollToWol()
         {
             Dispatcher.UIThread.Post(() =>
             {
-                ScrollProfileEditor.Offset = new Vector(0, 260);
+                ScrollProfileEditor.Offset = new Vector(0, 320);
             });
         }
         TxtProfileWolMac.GotFocus += (_, _) => ScrollToWol();
@@ -148,30 +192,158 @@ public partial class MainView : UserControl
         {
             Dispatcher.UIThread.Post(() =>
             {
-                ScrollProfileEditor.Offset = new Vector(0, 420);
+                ScrollProfileEditor.Offset = new Vector(0, 520);
             });
         };
 
-        // 7. Settings
+        // 9. Settings
         BtnToggleBiometrics.Click += async (_, _) => await ToggleBiometricsAsync();
-        BtnViewRecoveryCode.Click += (_, _) => ViewCurrentRecoveryCode();
-        BtnChangeMasterPassword.Click += async (_, _) => await ChangeMasterPasswordAsync();
-        ChkSettingsSuppressCert.IsCheckedChanged += (_, _) =>
+        BtnRegenerateRecoveryCode.Click += (_, _) =>
         {
-            if (_payload?.Settings != null && _vaultFile != null && _masterKey != null)
-            {
-                _payload.Settings.SuppressCertWarnings = ChkSettingsSuppressCert.IsChecked == true;
-                VaultCrypto.Save(_vaultFile, _masterKey, _payload, VaultPath);
-            }
+            TxtVerifyPassForRecovery.Text = "";
+            TxtVerifyPassForRecoveryError.IsVisible = false;
+            OverlayPromptPasswordForRecovery.IsVisible = true;
         };
+        BtnCancelVerifyPassForRecovery.Click += (_, _) =>
+        {
+            OverlayPromptPasswordForRecovery.IsVisible = false;
+        };
+        BtnSubmitVerifyPassForRecovery.Click += async (_, _) => await SubmitRegenerateRecoveryCodeAsync();
+
+        BtnChangeMasterPassword.Click += async (_, _) => await ChangeMasterPasswordAsync();
+
+        // Resolution & Security Defaults in Settings
+        CmbSettingsResolution.SelectionChanged += (_, _) => SaveSettingsDefaults();
+        CmbSettingsMultiMon.SelectionChanged += (_, _) => SaveSettingsDefaults();
+        ChkSettingsSmartSizing.IsCheckedChanged += (_, _) => SaveSettingsDefaults();
+        ChkSettingsSuppressCert.IsCheckedChanged += (_, _) => SaveSettingsDefaults();
+
         BtnCloseSettings.Click += (_, _) =>
         {
             PanelSettings.IsVisible = false;
             PanelUnlocked.IsVisible = true;
         };
 
-        // 8. RDP Session
+        // 10. RDP Session
         BtnDisconnectSession.Click += (_, _) => DisconnectSession();
+    }
+
+    private void SetupPasswordToggle(TextBox tb, Button btn)
+    {
+        btn.Click += (_, _) =>
+        {
+            if (tb.PasswordChar == '\0')
+            {
+                tb.PasswordChar = '●';
+                btn.Content = "👁";
+            }
+            else
+            {
+                tb.PasswordChar = '\0';
+                btn.Content = "👁‍🗨";
+            }
+        };
+    }
+
+    private static void RestrictToDigits(TextBox tb)
+    {
+        tb.TextInput += (_, e) =>
+        {
+            if (e.Text != null && !e.Text.All(char.IsDigit))
+            {
+                e.Handled = true;
+            }
+        };
+    }
+
+    /// <summary>
+    /// Handles physical Android back button presses.
+    /// Returns true if back press was consumed by closing an overlay, modal, or sub-screen;
+    /// returns false if at root level (letting the OS minimize the app).
+    /// </summary>
+    public bool HandleBackPressed()
+    {
+        // 1. Password verification for recovery overlay
+        if (OverlayPromptPasswordForRecovery.IsVisible)
+        {
+            OverlayPromptPasswordForRecovery.IsVisible = false;
+            return true;
+        }
+
+        // 2. Delete confirmation modal
+        if (OverlayConfirmDelete.IsVisible)
+        {
+            OverlayConfirmDelete.IsVisible = false;
+            return true;
+        }
+
+        // 3. Launch overlay cancel
+        if (OverlayLaunch.IsVisible)
+        {
+            _connectCts?.Cancel();
+            OverlayLaunch.IsVisible = false;
+            return true;
+        }
+
+        // 4. Profile editor -> return to connections list
+        if (PanelProfileEditor.IsVisible)
+        {
+            PanelProfileEditor.IsVisible = false;
+            PanelUnlocked.IsVisible = true;
+            return true;
+        }
+
+        // 5. Settings -> return to connections list
+        if (PanelSettings.IsVisible)
+        {
+            PanelSettings.IsVisible = false;
+            PanelUnlocked.IsVisible = true;
+            return true;
+        }
+
+        // 6. Recovery unlock -> return to lock screen
+        if (PanelRecoveryUnlock.IsVisible)
+        {
+            ShowLockScreen();
+            return true;
+        }
+
+        // 7. Active session -> disconnect
+        if (PanelSession.IsVisible)
+        {
+            DisconnectSession();
+            return true;
+        }
+
+        // 8. Recovery display -> enter vault if already initialized
+        if (PanelRecoveryDisplay.IsVisible && _payload != null)
+        {
+            PanelRecoveryDisplay.IsVisible = false;
+            SwitchToUnlocked();
+            return true;
+        }
+
+        // 9. Active search query -> clear search filter
+        if (PanelUnlocked.IsVisible && !string.IsNullOrEmpty(TxtSearch.Text))
+        {
+            TxtSearch.Text = "";
+            RefreshProfilesList();
+            return true;
+        }
+
+        // 10. Root level (Unlocked list, Lock screen, or Setup wizard)
+        return false;
+    }
+
+    /// <summary>
+    /// Auto-locks the vault when returning from background if unlocked.
+    /// </summary>
+    public void AutoLockIfUnlocked()
+    {
+        if (_masterKey != null)
+        {
+            LockVault();
+        }
     }
 
     private void ShowPanel(Control panel)
@@ -204,7 +376,11 @@ public partial class MainView : UserControl
     {
         ShowPanel(PanelFirstRun);
         TxtFirstRunPass.Text = "";
+        TxtFirstRunPass.PasswordChar = '●';
+        BtnToggleFirstRunPass.Content = "👁";
         TxtFirstRunConfirm.Text = "";
+        TxtFirstRunConfirm.PasswordChar = '●';
+        BtnToggleFirstRunConfirm.Content = "👁";
         TxtFirstRunError.IsVisible = false;
         PnlFirstRunProgress.IsVisible = false;
         BtnFirstRunCreate.IsEnabled = true;
@@ -214,7 +390,7 @@ public partial class MainView : UserControl
         ChkFirstRunBiometrics.IsEnabled = bioAvail;
         if (!bioAvail)
         {
-            ChkFirstRunBiometrics.Content = "Biometrics unavailable (Not enrolled in device settings)";
+            ChkFirstRunBiometrics.Content = "Fingerprint / Face unavailable (Not enrolled in device settings)";
         }
     }
 
@@ -244,6 +420,11 @@ public partial class MainView : UserControl
         string recoveryCode = "";
         var payload = new VaultPayload();
         payload.Settings.SuppressCertWarnings = true;
+        payload.Settings.DefaultResolution = "1920x1080";
+        payload.Settings.DefaultWidth = 1920;
+        payload.Settings.DefaultHeight = 1080;
+        payload.Settings.DefaultSmartSizing = true;
+        payload.Settings.DefaultUseMultiMon = false; // Safe single-monitor default for mobile
 
         try
         {
@@ -260,7 +441,7 @@ public partial class MainView : UserControl
                 try
                 {
                     var (success, _) = await AndroidHardwareKeyStore.AuthenticateBiometricAsync(
-                        MainActivity.Instance, "Enroll Biometrics", "Confirm fingerprint or face to protect your master key", "Skip Biometrics");
+                        MainActivity.Instance, "Enroll Biometrics", "Confirm fingerprint or face to protect your master key", "Skip");
 
                     if (success)
                     {
@@ -282,7 +463,7 @@ public partial class MainView : UserControl
                 }
                 catch
                 {
-                    // Fall back cleanly to password-only vault if user cancels or hardware errors
+                    // Fall back cleanly to password-only vault if canceled
                 }
             }
 
@@ -325,6 +506,25 @@ public partial class MainView : UserControl
         {
             await top.Clipboard.SetTextAsync(_activeRecoveryCode);
             TxtCopyNotice.IsVisible = true;
+
+            // Auto-wipe recovery code from clipboard after 60 seconds
+            string codeToWipe = _activeRecoveryCode;
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(60000);
+                await Dispatcher.UIThread.InvokeAsync(async () =>
+                {
+                    try
+                    {
+                        string? current = await top.Clipboard.GetTextAsync();
+                        if (current == codeToWipe)
+                        {
+                            await top.Clipboard.ClearAsync();
+                        }
+                    }
+                    catch { }
+                });
+            });
         }
     }
 
@@ -334,6 +534,8 @@ public partial class MainView : UserControl
     {
         ShowPanel(PanelLocked);
         TxtPassword.Text = "";
+        TxtPassword.PasswordChar = '●';
+        BtnToggleUnlockPass.Content = "👁";
         TxtLockError.IsVisible = false;
         PnlUnlockProgress.IsVisible = false;
         BtnUnlock.IsEnabled = true;
@@ -354,6 +556,15 @@ public partial class MainView : UserControl
         string machineId = VaultCrypto.CurrentMachineId();
         bool hasBioSeal = _vaultFile?.Seals?.Any(s => s.MachineId == machineId && !string.IsNullOrEmpty(s.KeyId) && !string.IsNullOrEmpty(s.TpmBlob)) == true;
         PnlBiometricCard.IsVisible = hasBioSeal;
+
+        // Auto-prompt biometrics if enrolled on this device and not previously dismissed
+        if (hasBioSeal && !_biometricPromptSuppressed && MainActivity.Instance != null)
+        {
+            Dispatcher.UIThread.Post(async () =>
+            {
+                await UnlockWithBiometricsAsync();
+            }, DispatcherPriority.Background);
+        }
     }
 
     private async Task UnlockWithBiometricsAsync()
@@ -364,19 +575,19 @@ public partial class MainView : UserControl
         var seal = _vaultFile.Seals.FirstOrDefault(s => s.MachineId == machineId && !string.IsNullOrEmpty(s.KeyId) && !string.IsNullOrEmpty(s.TpmBlob));
         if (seal == null)
         {
-            TxtLockError.Text = "Biometrics not enrolled for this device. Unlock with Master Password.";
+            TxtLockError.Text = "Biometrics not enrolled for this device. Please unlock with Master Password.";
             TxtLockError.IsVisible = true;
             return;
         }
 
         try
         {
-            // 1. Authenticate user biometrically via native Android BiometricPrompt
             var (success, error) = await AndroidHardwareKeyStore.AuthenticateBiometricAsync(
-                MainActivity.Instance, "Unlock RDP Vault", "Confirm fingerprint or face to unseal vault", "Use Master Password");
+                MainActivity.Instance, "Unlock RDP Vault", "Touch sensor to unlock your connections", "Use Master Password");
 
             if (!success)
             {
+                _biometricPromptSuppressed = true;
                 if (!string.IsNullOrEmpty(error) && !error.Contains("cancel", StringComparison.OrdinalIgnoreCase))
                 {
                     TxtLockError.Text = "Biometrics: " + error;
@@ -385,7 +596,6 @@ public partial class MainView : UserControl
                 return;
             }
 
-            // 2. User verified! StrongBox/Keymaster authorizes operations within 30s window
             string[] parts = seal.TpmBlob.Split(':');
             if (parts.Length != 2) throw new FormatException("Invalid seal format.");
             byte[] iv = Convert.FromBase64String(parts[0]);
@@ -396,11 +606,13 @@ public partial class MainView : UserControl
 
             _masterKey = masterKey;
             _payload = payload;
+            _biometricPromptSuppressed = false;
 
             SwitchToUnlocked();
         }
-        catch (Exception ex)
+        catch (Exception)
         {
+            _biometricPromptSuppressed = true;
             TxtLockError.Text = "Biometric seal outdated or invalid. Please unlock with Master Password once to automatically repair.";
             TxtLockError.IsVisible = true;
         }
@@ -459,13 +671,11 @@ public partial class MainView : UserControl
                     VaultCrypto.Save(file, master, payload, VaultPath, newSeals: newSeals);
                     _vaultFile = file;
                 }
-                catch
-                {
-                    // Non-fatal if hardware key repair fails
-                }
+                catch { }
             }
 
             TxtPassword.Text = "";
+            _biometricPromptSuppressed = false;
             SwitchToUnlocked();
         }
         catch (Exception ex)
@@ -485,7 +695,11 @@ public partial class MainView : UserControl
         ShowPanel(PanelRecoveryUnlock);
         TxtRecoveryInput.Text = "";
         TxtRecoveryNewPass.Text = "";
+        TxtRecoveryNewPass.PasswordChar = '●';
+        BtnToggleRecoveryNewPass.Content = "👁";
         TxtRecoveryConfirmPass.Text = "";
+        TxtRecoveryConfirmPass.PasswordChar = '●';
+        BtnToggleRecoveryConfirmPass.Content = "👁";
         TxtRecoveryUnlockError.IsVisible = false;
         PnlRecoveryUnlockProgress.IsVisible = false;
     }
@@ -567,8 +781,8 @@ public partial class MainView : UserControl
         string machineId = VaultCrypto.CurrentMachineId();
         bool hasBio = _vaultFile?.Seals?.Any(s => s.MachineId == machineId && !string.IsNullOrEmpty(s.KeyId) && !string.IsNullOrEmpty(s.TpmBlob)) == true;
         TxtUnlockedStatus.Text = hasBio
-            ? "Vault Unlocked (StrongBox Protected)"
-            : "Vault Unlocked (Master Password Mode)";
+            ? "Vault Unlocked (Fingerprint / Face Protected)"
+            : "Vault Unlocked (Password Mode)";
 
         RefreshProfilesList();
     }
@@ -583,6 +797,7 @@ public partial class MainView : UserControl
             _masterKey = null;
         }
         _vaultFile = null;
+        _biometricPromptSuppressed = false;
 
         ShowLockScreen();
     }
@@ -627,12 +842,16 @@ public partial class MainView : UserControl
             CornerRadius = new CornerRadius(8),
             BorderBrush = new SolidColorBrush(Color.Parse("#2E2E35")),
             BorderThickness = new Thickness(1),
-            Padding = new Thickness(14)
+            Padding = new Thickness(14),
+            Cursor = new Cursor(StandardCursorType.Hand)
         };
+
+        // Tapping the card itself directly starts the connection
+        border.PointerPressed += async (_, _) => await StartSessionAsync(profile);
 
         var grid = new Grid
         {
-            ColumnDefinitions = new ColumnDefinitions("*,Auto,8,Auto")
+            ColumnDefinitions = new ColumnDefinitions("*,Auto,8,Auto,8,Auto")
         };
 
         var info = new StackPanel
@@ -651,13 +870,53 @@ public partial class MainView : UserControl
         });
 
         string wolBadge = profile.EnableWol ? "  •  WOL" : "";
+        string resBadge = string.IsNullOrWhiteSpace(profile.ResolutionPreset) || profile.ResolutionPreset.Equals("InheritGlobal", StringComparison.OrdinalIgnoreCase)
+            ? ""
+            : $"  •  {profile.ResolutionPreset}";
+
         info.Children.Add(new TextBlock
         {
-            Text = $"{profile.Host}:{profile.Port}  •  {profile.Username}{wolBadge}",
+            Text = $"{profile.Host}:{profile.Port}  •  {profile.Username}{wolBadge}{resBadge}",
             FontSize = 12,
             Foreground = new SolidColorBrush(Color.Parse("#8A8A93")),
             TextTrimming = TextTrimming.CharacterEllipsis
         });
+
+        // Copy Password Button (if password is saved)
+        Button? btnCopyPass = null;
+        if (profile.HasPassword)
+        {
+            btnCopyPass = new Button
+            {
+                Content = "📋 Pass",
+                Background = new SolidColorBrush(Color.Parse("#1C1C21")),
+                Foreground = new SolidColorBrush(Color.Parse("#EDEDED")),
+                BorderBrush = new SolidColorBrush(Color.Parse("#2E2E35")),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Height = 38,
+                Padding = new Thickness(10, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                VerticalContentAlignment = VerticalAlignment.Center,
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+                FontSize = 12
+            };
+            btnCopyPass.Click += async (_, e) =>
+            {
+                e.Handled = true;
+                await CopyPasswordToClipboardAsync(profile.Password, profile.Name);
+                btnCopyPass.Content = "✓ Copied";
+                btnCopyPass.Foreground = new SolidColorBrush(Color.Parse("#2FBF71"));
+                _ = Task.Delay(2000).ContinueWith(_ =>
+                {
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        btnCopyPass.Content = "📋 Pass";
+                        btnCopyPass.Foreground = new SolidColorBrush(Color.Parse("#EDEDED"));
+                    });
+                });
+            };
+        }
 
         var btnEdit = new Button
         {
@@ -665,13 +924,17 @@ public partial class MainView : UserControl
             Background = new SolidColorBrush(Color.Parse("#2E2E35")),
             Foreground = new SolidColorBrush(Color.Parse("#EDEDED")),
             CornerRadius = new CornerRadius(4),
-            Height = 36,
-            Padding = new Thickness(12, 0),
+            Height = 38,
+            Padding = new Thickness(14, 0),
             VerticalAlignment = VerticalAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center,
             HorizontalContentAlignment = HorizontalAlignment.Center
         };
-        btnEdit.Click += (_, _) => ShowProfileEditor(profile);
+        btnEdit.Click += (_, e) =>
+        {
+            e.Handled = true;
+            ShowProfileEditor(profile);
+        };
 
         var btnConnect = new Button
         {
@@ -679,20 +942,32 @@ public partial class MainView : UserControl
             Background = new SolidColorBrush(Color.Parse("#005FB8")),
             Foreground = Brushes.White,
             CornerRadius = new CornerRadius(4),
-            Height = 36,
-            Padding = new Thickness(14, 0),
+            Height = 38,
+            Padding = new Thickness(16, 0),
             VerticalAlignment = VerticalAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center,
             HorizontalContentAlignment = HorizontalAlignment.Center,
             FontWeight = FontWeight.SemiBold
         };
-        btnConnect.Click += async (_, _) => await StartSessionAsync(profile);
+        btnConnect.Click += async (_, e) =>
+        {
+            e.Handled = true;
+            await StartSessionAsync(profile);
+        };
 
         Grid.SetColumn(info, 0);
-        Grid.SetColumn(btnEdit, 1);
-        Grid.SetColumn(btnConnect, 3);
         grid.Children.Add(info);
+
+        if (btnCopyPass != null)
+        {
+            Grid.SetColumn(btnCopyPass, 1);
+            grid.Children.Add(btnCopyPass);
+        }
+
+        Grid.SetColumn(btnEdit, 3);
         grid.Children.Add(btnEdit);
+
+        Grid.SetColumn(btnConnect, 5);
         grid.Children.Add(btnConnect);
 
         border.Child = grid;
@@ -712,7 +987,18 @@ public partial class MainView : UserControl
             TxtProfilePort.Text = "3389";
             TxtProfileUser.Text = "";
             TxtProfilePass.Text = "";
+            TxtProfilePass.PasswordChar = '●';
+            BtnToggleProfilePass.Content = "👁";
             TxtProfileDomain.Text = "";
+
+            // Resolution defaults
+            CmbProfileResolution.SelectedIndex = 0;
+            PnlProfileCustomRes.IsVisible = false;
+            TxtProfileCustomWidth.Text = "1920";
+            TxtProfileCustomHeight.Text = "1080";
+            CmbProfileMultiMon.SelectedIndex = 0;
+            ChkProfileSmartSizing.IsChecked = true;
+
             ChkProfileEnableWol.IsChecked = false;
             TxtProfileWolMac.Text = "";
             TxtProfileWolPort.Text = "9";
@@ -720,7 +1006,6 @@ public partial class MainView : UserControl
             TxtProfileNotes.Text = "";
             ChkProfileSuppressCert.IsChecked = _payload?.Settings?.SuppressCertWarnings ?? true;
             BtnDeleteProfile.IsVisible = false;
-            BtnTopDeleteProfile.IsVisible = false;
         }
         else
         {
@@ -730,7 +1015,43 @@ public partial class MainView : UserControl
             TxtProfilePort.Text = profile.Port.ToString();
             TxtProfileUser.Text = profile.Username;
             TxtProfilePass.Text = profile.Password;
+            TxtProfilePass.PasswordChar = '●';
+            BtnToggleProfilePass.Content = "👁";
             TxtProfileDomain.Text = profile.GatewayHost;
+
+            // Map resolution preset
+            string preset = profile.ResolutionPreset ?? "InheritGlobal";
+            CmbProfileResolution.SelectedIndex = preset.ToLowerInvariant() switch
+            {
+                "1920x1080" => 1,
+                "1280x720" => 2,
+                "1600x900" => 3,
+                "1366x768" => 4,
+                "2560x1440" => 5,
+                "3840x2160" => 6,
+                "device" => 7,
+                "custom" => 8,
+                _ => 0
+            };
+            PnlProfileCustomRes.IsVisible = CmbProfileResolution.SelectedIndex == 8;
+            TxtProfileCustomWidth.Text = (profile.Width > 0 ? profile.Width : 1920).ToString();
+            TxtProfileCustomHeight.Text = (profile.Height > 0 ? profile.Height : 1080).ToString();
+
+            // Multi-Mon override
+            CmbProfileMultiMon.SelectedIndex = profile.MultiMonOverride switch
+            {
+                TriStateOverride.Disabled => 1, // Single Monitor Only
+                TriStateOverride.Enabled => 2,  // Span All Monitors
+                _ => 0                          // Default (Follow Global)
+            };
+
+            // Smart Sizing override
+            ChkProfileSmartSizing.IsChecked = profile.SmartSizingOverride switch
+            {
+                TriStateOverride.Disabled => false,
+                _ => true
+            };
+
             ChkProfileEnableWol.IsChecked = profile.EnableWol;
             TxtProfileWolMac.Text = profile.WolMacAddress;
             TxtProfileWolPort.Text = profile.WolPort.ToString();
@@ -743,7 +1064,6 @@ public partial class MainView : UserControl
                 _ => _payload?.Settings?.SuppressCertWarnings ?? true
             };
             BtnDeleteProfile.IsVisible = true;
-            BtnTopDeleteProfile.IsVisible = true;
         }
 
         ScrollProfileEditor.Offset = new Vector(0, 0);
@@ -782,6 +1102,39 @@ public partial class MainView : UserControl
         int wolWait = 5;
         int.TryParse(TxtProfileWolWait.Text, out wolWait);
 
+        // Resolution preset resolution
+        string resPreset = CmbProfileResolution.SelectedIndex switch
+        {
+            1 => "1920x1080",
+            2 => "1280x720",
+            3 => "1600x900",
+            4 => "1366x768",
+            5 => "2560x1440",
+            6 => "3840x2160",
+            7 => "Device",
+            8 => "Custom",
+            _ => "InheritGlobal"
+        };
+
+        int customWidth = 1920;
+        int.TryParse(TxtProfileCustomWidth.Text, out customWidth);
+        if (customWidth <= 0) customWidth = 1920;
+
+        int customHeight = 1080;
+        int.TryParse(TxtProfileCustomHeight.Text, out customHeight);
+        if (customHeight <= 0) customHeight = 1080;
+
+        TriStateOverride multiMonOverride = CmbProfileMultiMon.SelectedIndex switch
+        {
+            1 => TriStateOverride.Disabled, // Single Monitor Only
+            2 => TriStateOverride.Enabled,  // Span All Monitors
+            _ => TriStateOverride.InheritGlobal
+        };
+
+        TriStateOverride smartSizingOverride = ChkProfileSmartSizing.IsChecked == true
+            ? TriStateOverride.Enabled
+            : TriStateOverride.Disabled;
+
         if (_payload == null || _vaultFile == null || _masterKey == null) return;
 
         if (_editingProfile == null)
@@ -794,6 +1147,11 @@ public partial class MainView : UserControl
                 Username = TxtProfileUser.Text?.Trim() ?? "",
                 Password = TxtProfilePass.Text ?? "",
                 GatewayHost = TxtProfileDomain.Text?.Trim() ?? "",
+                ResolutionPreset = resPreset,
+                Width = customWidth,
+                Height = customHeight,
+                MultiMonOverride = multiMonOverride,
+                SmartSizingOverride = smartSizingOverride,
                 EnableWol = ChkProfileEnableWol.IsChecked == true,
                 WolMacAddress = TxtProfileWolMac.Text?.Trim() ?? "",
                 WolPort = wolPort > 0 ? wolPort : 9,
@@ -811,6 +1169,11 @@ public partial class MainView : UserControl
             _editingProfile.Username = TxtProfileUser.Text?.Trim() ?? "";
             _editingProfile.Password = TxtProfilePass.Text ?? "";
             _editingProfile.GatewayHost = TxtProfileDomain.Text?.Trim() ?? "";
+            _editingProfile.ResolutionPreset = resPreset;
+            _editingProfile.Width = customWidth;
+            _editingProfile.Height = customHeight;
+            _editingProfile.MultiMonOverride = multiMonOverride;
+            _editingProfile.SmartSizingOverride = smartSizingOverride;
             _editingProfile.EnableWol = ChkProfileEnableWol.IsChecked == true;
             _editingProfile.WolMacAddress = TxtProfileWolMac.Text?.Trim() ?? "";
             _editingProfile.WolPort = wolPort > 0 ? wolPort : 9;
@@ -826,7 +1189,7 @@ public partial class MainView : UserControl
         RefreshProfilesList();
     }
 
-    private void DeleteProfile()
+    private void ConfirmDeleteProfile()
     {
         if (_editingProfile != null && _payload != null && _vaultFile != null && _masterKey != null)
         {
@@ -845,20 +1208,77 @@ public partial class MainView : UserControl
     {
         ShowPanel(PanelSettings);
         TxtSettingsCurrentPass.Text = "";
+        TxtSettingsCurrentPass.PasswordChar = '●';
+        BtnToggleSettingsCurrentPass.Content = "👁";
         TxtSettingsNewPass.Text = "";
+        TxtSettingsNewPass.PasswordChar = '●';
+        BtnToggleSettingsNewPass.Content = "👁";
         TxtSettingsConfirmPass.Text = "";
+        TxtSettingsConfirmPass.PasswordChar = '●';
+        BtnToggleSettingsConfirmPass.Content = "👁";
         TxtChangePasswordError.IsVisible = false;
         PnlChangePassProgress.IsVisible = false;
         ChkSettingsSuppressCert.IsChecked = _payload?.Settings?.SuppressCertWarnings ?? true;
 
+        // Resolution preset in settings
+        string defRes = _payload?.Settings?.DefaultResolution ?? "1920x1080";
+        CmbSettingsResolution.SelectedIndex = defRes.ToLowerInvariant() switch
+        {
+            "1280x720" => 1,
+            "1600x900" => 2,
+            "1366x768" => 3,
+            "2560x1440" => 4,
+            "3840x2160" => 5,
+            "device" => 6,
+            _ => 0 // 1920x1080
+        };
+
+        CmbSettingsMultiMon.SelectedIndex = (_payload?.Settings?.DefaultUseMultiMon == true) ? 1 : 0;
+        ChkSettingsSmartSizing.IsChecked = _payload?.Settings?.DefaultSmartSizing ?? true;
+
         string machineId = VaultCrypto.CurrentMachineId();
         bool enrolled = _vaultFile?.Seals?.Any(s => s.MachineId == machineId && !string.IsNullOrEmpty(s.KeyId) && !string.IsNullOrEmpty(s.TpmBlob)) == true;
         TxtBiometricStatus.Text = enrolled
-            ? "StrongBox Biometrics: Active on this device"
-            : "Biometrics: Not enrolled on this device";
+            ? "Fingerprint / Face Unlock: Active on this device"
+            : "Fingerprint / Face Unlock: Not enrolled on this device";
         BtnToggleBiometrics.Content = enrolled
             ? "Remove Biometric Seal"
             : "Enroll Biometrics";
+    }
+
+    private void SaveSettingsDefaults()
+    {
+        if (_payload?.Settings != null && _vaultFile != null && _masterKey != null)
+        {
+            _payload.Settings.DefaultResolution = CmbSettingsResolution.SelectedIndex switch
+            {
+                1 => "1280x720",
+                2 => "1600x900",
+                3 => "1366x768",
+                4 => "2560x1440",
+                5 => "3840x2160",
+                6 => "Device",
+                _ => "1920x1080"
+            };
+
+            var (w, h) = _payload.Settings.DefaultResolution switch
+            {
+                "1280x720" => (1280, 720),
+                "1600x900" => (1600, 900),
+                "1366x768" => (1366, 768),
+                "2560x1440" => (2560, 1440),
+                "3840x2160" => (3840, 2160),
+                _ => (1920, 1080)
+            };
+            _payload.Settings.DefaultWidth = w;
+            _payload.Settings.DefaultHeight = h;
+
+            _payload.Settings.DefaultUseMultiMon = CmbSettingsMultiMon.SelectedIndex == 1;
+            _payload.Settings.DefaultSmartSizing = ChkSettingsSmartSizing.IsChecked == true;
+            _payload.Settings.SuppressCertWarnings = ChkSettingsSuppressCert.IsChecked == true;
+
+            VaultCrypto.Save(_vaultFile, _masterKey, _payload, VaultPath);
+        }
     }
 
     private async Task ToggleBiometricsAsync()
@@ -876,7 +1296,7 @@ public partial class MainView : UserControl
             VaultCrypto.Save(_vaultFile, _masterKey, _payload, VaultPath, newSeals: updated);
             _vaultFile.Seals = updated;
 
-            TxtBiometricStatus.Text = "Biometrics: Not enrolled on this device";
+            TxtBiometricStatus.Text = "Fingerprint / Face Unlock: Not enrolled on this device";
             BtnToggleBiometrics.Content = "Enroll Biometrics";
         }
         else
@@ -905,7 +1325,7 @@ public partial class MainView : UserControl
                     VaultCrypto.Save(_vaultFile, _masterKey, _payload, VaultPath, newSeals: seals);
                     _vaultFile.Seals = seals;
 
-                    TxtBiometricStatus.Text = "StrongBox Biometrics: Active on this device";
+                    TxtBiometricStatus.Text = "Fingerprint / Face Unlock: Active on this device";
                     BtnToggleBiometrics.Content = "Remove Biometric Seal";
                 }
                 else if (!string.IsNullOrEmpty(err) && !err.Contains("cancel", StringComparison.OrdinalIgnoreCase))
@@ -920,12 +1340,33 @@ public partial class MainView : UserControl
         }
     }
 
-    private void ViewCurrentRecoveryCode()
+    private async Task SubmitRegenerateRecoveryCodeAsync()
     {
-        // View recovery code notice
-        if (_vaultFile != null && !string.IsNullOrEmpty(_vaultFile.RecoverySalt))
+        string pass = TxtVerifyPassForRecovery.Text ?? "";
+        if (string.IsNullOrEmpty(pass))
         {
-            ShowRecoveryDisplay("Recovery Code is active. To obtain a fresh printed copy, use Change Master Password.");
+            TxtVerifyPassForRecoveryError.Text = "Please enter your master password.";
+            TxtVerifyPassForRecoveryError.IsVisible = true;
+            return;
+        }
+
+        try
+        {
+            if (_vaultFile == null || _masterKey == null || _payload == null) return;
+
+            // Verify master password
+            await Task.Run(() => VaultCrypto.Open(_vaultFile, pass));
+
+            string freshCode = "";
+            VaultCrypto.Save(_vaultFile, _masterKey, _payload, VaultPath, regenerateRecovery: true, recoveryCodeOut: c => freshCode = c);
+
+            OverlayPromptPasswordForRecovery.IsVisible = false;
+            ShowRecoveryDisplay(freshCode);
+        }
+        catch
+        {
+            TxtVerifyPassForRecoveryError.Text = "Incorrect master password. Please try again.";
+            TxtVerifyPassForRecoveryError.IsVisible = true;
         }
     }
 
@@ -992,28 +1433,65 @@ public partial class MainView : UserControl
         OverlayLaunch.IsVisible = false;
     }
 
+    private async Task CopyPasswordToClipboardAsync(string password, string profileName)
+    {
+        if (string.IsNullOrEmpty(password)) return;
+        var top = TopLevel.GetTopLevel(this);
+        if (top?.Clipboard != null)
+        {
+            await top.Clipboard.SetTextAsync(password);
+
+            // Auto-wipe password from clipboard after 30 seconds
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(30000);
+                await Dispatcher.UIThread.InvokeAsync(async () =>
+                {
+                    try
+                    {
+                        string? current = await top.Clipboard.GetTextAsync();
+                        if (current == password)
+                        {
+                            await top.Clipboard.ClearAsync();
+                        }
+                    }
+                    catch { }
+                });
+            });
+        }
+    }
+
     private async Task StartSessionAsync(RdpProfile profile)
     {
         _connectCts = new System.Threading.CancellationTokenSource();
         var ct = _connectCts.Token;
 
-        TxtLaunchTitle.Text = profile.EnableWol ? "WAKE-ON-LAN & CONNECT" : "CONNECTING TO REMOTE DESKTOP";
+        TxtLaunchTitle.Text = profile.EnableWol ? "WAKING COMPUTER & CONNECTING" : "CONNECTING TO REMOTE COMPUTER";
         TxtLaunchTarget.Text = $"{profile.Name}  •  {profile.Host}:{profile.Port}";
         ProgLaunch.IsIndeterminate = true;
         ProgLaunch.Value = 0;
         TxtLaunchCountdown.IsVisible = false;
-        TxtLaunchStep.Text = "Initializing connection...";
+        TxtLaunchStep.Text = "Preparing connection...";
         TxtLaunchSubStatus.Text = "";
         BtnCancelLaunch.IsEnabled = true;
         OverlayLaunch.IsVisible = true;
 
         try
         {
+            // Auto-copy password to clipboard with 30s auto-wipe if saved
+            if (profile.HasPassword)
+            {
+                await CopyPasswordToClipboardAsync(profile.Password, profile.Name);
+                TxtLaunchSubStatus.Text = "Password Ready";
+                TxtLaunchStep.Text = "Password copied to clipboard (clears in 30s). Paste when prompted by Remote Desktop!";
+                await Task.Delay(1000, ct);
+            }
+
             // 1. Wake-on-LAN dispatch if enabled
             if (profile.EnableWol && !string.IsNullOrWhiteSpace(profile.WolMacAddress))
             {
-                TxtLaunchSubStatus.Text = "Broadcasting magic packet";
-                TxtLaunchStep.Text = $"Transmitting WOL packet to {profile.WolMacAddress} (Port: {profile.WolPort})...";
+                TxtLaunchSubStatus.Text = "Sending wake signal";
+                TxtLaunchStep.Text = $"Transmitting wake signal to {profile.WolMacAddress}...";
                 await DispatchWolAsync(profile);
 
                 if (profile.WolWaitSeconds > 0)
@@ -1028,8 +1506,8 @@ public partial class MainView : UserControl
                         ProgLaunch.Value = percent;
                         TxtLaunchCountdown.Text = $"{s}s remaining";
                         TxtLaunchCountdown.IsVisible = true;
-                        TxtLaunchSubStatus.Text = "Waking Remote Host";
-                        TxtLaunchStep.Text = $"Wake packet broadcasted. Waiting for remote host to boot ({s}s remaining)...";
+                        TxtLaunchSubStatus.Text = "Waking Computer";
+                        TxtLaunchStep.Text = $"Wake signal broadcasted. Waiting for computer to start ({s}s remaining)...";
 
                         await Task.Delay(1000, ct);
                     }
@@ -1040,22 +1518,22 @@ public partial class MainView : UserControl
 
             ProgLaunch.IsIndeterminate = true;
             TxtLaunchCountdown.IsVisible = false;
-            TxtLaunchSubStatus.Text = "Handoff to Remote Desktop";
-            TxtLaunchStep.Text = $"Opening Remote Desktop client for {profile.Host}:{profile.Port}...";
+            TxtLaunchSubStatus.Text = "Opening Remote Desktop";
+            TxtLaunchStep.Text = $"Launching Remote Desktop for {profile.Host}:{profile.Port}...";
 
-            // 2. Launch RDP via Mobile Intent handoff
+            // 2. Launch RDP via Mobile Intent handoff with monitor & resolution protection
             var context = (global::Android.Content.Context?)MainActivity.Instance ?? global::Android.App.Application.Context;
             var result = RdpLauncher.LaunchRdp(context, profile, _payload?.Settings, out string message);
 
             ProgLaunch.IsIndeterminate = false;
             ProgLaunch.Value = 100;
-            TxtLaunchSubStatus.Text = result == RdpLaunchStatus.Failed ? "Handoff Failed" : "Handoff Active";
+            TxtLaunchSubStatus.Text = result == RdpLaunchStatus.Failed ? "Handoff Failed" : "Connected";
             TxtLaunchStep.Text = message;
 
             if (result == RdpLaunchStatus.Success)
             {
                 MainActivity.Instance?.StartForegroundSession(profile);
-                await Task.Delay(2500, ct);
+                await Task.Delay(2000, ct);
             }
             else if (result == RdpLaunchStatus.RedirectedToStore)
             {
@@ -1068,7 +1546,7 @@ public partial class MainView : UserControl
         }
         catch (OperationCanceledException)
         {
-            // Aborted by user
+            // Canceled by user
         }
         catch (Exception ex)
         {
@@ -1144,7 +1622,7 @@ public partial class MainView : UserControl
         }
         catch
         {
-            // WOL dispatch non-fatal
+            // Non-fatal WOL dispatch
         }
     }
 

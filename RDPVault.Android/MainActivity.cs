@@ -85,9 +85,12 @@ public class MainActivity : AvaloniaMainActivity<App>
     private static readonly System.Reflection.MethodInfo? OnVisibilityChangedMethod =
         ViewField?.FieldType.GetMethod("OnVisibilityChanged", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public, null, new[] { typeof(bool) }, null);
 
+    private DateTime _lastBackgroundedUtc = DateTime.MinValue;
+
     protected override void OnPause()
     {
         base.OnPause();
+        _lastBackgroundedUtc = DateTime.UtcNow;
         try
         {
             // Explicitly notify Avalonia view that it is no longer visible so the render timer unsubscribes cleanly
@@ -125,7 +128,29 @@ public class MainActivity : AvaloniaMainActivity<App>
                 androidView.Invalidate();
             }
 
-            // 4. Force visual tree invalidation on Avalonia dispatcher
+            // 4. Auto-lock verification: if backgrounded for more than 30 seconds and not running an active session
+            if (_lastBackgroundedUtc != DateTime.MinValue && (_sessionService == null || !_sessionService.IsConnected))
+            {
+                TimeSpan elapsed = DateTime.UtcNow - _lastBackgroundedUtc;
+                if (elapsed.TotalSeconds >= 30)
+                {
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                    {
+                        try
+                        {
+                            if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.ISingleViewApplicationLifetime singleView
+                                && singleView.MainView is Views.MainView mainView)
+                            {
+                                mainView.AutoLockIfUnlocked();
+                            }
+                        }
+                        catch { }
+                    });
+                }
+            }
+            _lastBackgroundedUtc = DateTime.MinValue;
+
+            // 5. Force visual tree invalidation on Avalonia dispatcher
             Avalonia.Threading.Dispatcher.UIThread.Post(() =>
             {
                 try
@@ -146,7 +171,19 @@ public class MainActivity : AvaloniaMainActivity<App>
 
     public override void OnBackPressed()
     {
-        // Preserve activity in background instead of destroying process on physical back press
+        try
+        {
+            if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.ISingleViewApplicationLifetime singleView
+                && singleView.MainView is Views.MainView mainView
+                && mainView.HandleBackPressed())
+            {
+                // Back press was handled internally by navigating back to previous screen
+                return;
+            }
+        }
+        catch { }
+
+        // Preserve activity in background instead of destroying process on root back press
         MoveTaskToBack(true);
     }
 

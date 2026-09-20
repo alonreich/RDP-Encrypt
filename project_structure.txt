@@ -1028,8 +1028,28 @@ A parallel mobile software distribution branch sharing the identical cryptograph
       preventing any flash of default Android white canvas.
     - Activity Preservation on Back Navigation: Overridden OnBackPressed with MoveTaskToBack(true), keeping
       the Activity alive in memory rather than destroying and triggering framework re-initialization faults.
-    - SingleTask LaunchMode: MainActivity is configured with LaunchMode = LaunchMode.SingleTask to prevent
-      the Android OS task manager from creating duplicate or detached Activity instances.
+ 8. ANDROID UI/UX COMPREHENSIVE REFINEMENT & RESOLUTION PROTECTION (SEPTEMBER 2026):
+    - Physical Android Back Navigation: Implemented HandleBackPressed in MainView and integrated with
+      MainActivity.OnBackPressed, closing modals/sub-screens gracefully instead of minimizing the app.
+    - Zero-Distortion Resolution & Multi-Monitor Protection:
+      * Global Settings: DefaultResolution selector ("1920x1080", "1280x720", "1600x900", "1366x768",
+        "2560x1440", "3840x2160", "Device"), multi-monitor safety mode (single monitor lock to primary display),
+        and Smart Sizing default (desktopscale=100, smart sizing=1).
+      * Profile Editor Override: Full per-card resolution override (inherit, fixed presets, match device, or custom
+        width/height) with multi-monitor override. Locking to 1920x1080 standard 16:9 prevents remote Windows hosts
+        from scrambling desktop icons and displacing application windows across secondary displays upon Android connection.
+      * RdpLauncher Query Parameters: Appends desktopwidth, desktopheight, screen mode id=2, smart sizing=1,
+        use multimon=0/1, span monitors=0/1, desktopscale=100, and redirectclipboard into the rdp:// intent.
+    - Auto-Lock on Background / Inactivity: MainActivity.OnPause records timestamp; OnResume verifies if
+      backgrounded > 30s without an active ForegroundService session and locks vault automatically.
+    - Automatic Biometrics Trigger: Detects hardware biometric seals and auto-invokes BiometricPrompt on lock screen.
+    - Show/Hide Password Eye Toggles: Integrated eye visibility buttons across all 8 password fields.
+    - Password Handoff & Auto-Wipe Clipboard: Connection cards include dedicated 'Pass' copy buttons; launching
+      connections auto-copies saved passwords with a 30-second cryptographic clipboard wipe timer.
+    - Touch Targets & Card Click: Entire connection card is clickable to connect; buttons expanded to 38-44dp.
+    - Explicit Delete Confirmation Modal: Replaced immediate deletion with OverlayConfirmDelete modal.
+    - Emergency Recovery Code Regeneration: Clean password verification modal in Settings for fresh code display.
+    - Human-Friendly Terminology: Replaced low-level cryptographic jargon with plain English UI phrasing.
 
 --------------------------------------------------------------------------------
 END OF FILE — keep synchronized with the code.

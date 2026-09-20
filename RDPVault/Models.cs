@@ -126,6 +126,15 @@ public class RdpProfile
 
     [JsonIgnore] public string DisplayHost => Port == 3389 ? Host : $"{Host}:{Port}";
 
+    /// <summary>Per-profile resolution preset ("InheritGlobal", "1920x1080", "1280x720", "1600x900", "1366x768", "2560x1440", "3840x2160", "Device", "Custom").</summary>
+    public string ResolutionPreset { get; set; } = "InheritGlobal";
+
+    /// <summary>Smart sizing (fit remote desktop to viewport without distortion).</summary>
+    public bool SmartSizing { get; set; } = true;
+
+    /// <summary>Per-profile override for smart sizing.</summary>
+    public TriStateOverride SmartSizingOverride { get; set; } = TriStateOverride.InheritGlobal;
+
     public bool ResolveSuppressCertWarnings(VaultSettings? settings)
     {
         if (SuppressCertWarningsOverride == TriStateOverride.Enabled) return true;
@@ -154,6 +163,37 @@ public class RdpProfile
         if (AllowClipboardOverride == TriStateOverride.Enabled) return true;
         if (AllowClipboardOverride == TriStateOverride.Disabled) return false;
         return settings?.DefaultAllowClipboard ?? AllowClipboard;
+    }
+
+    public bool ResolveSmartSizing(VaultSettings? settings)
+    {
+        if (SmartSizingOverride == TriStateOverride.Enabled) return true;
+        if (SmartSizingOverride == TriStateOverride.Disabled) return false;
+        return settings?.DefaultSmartSizing ?? SmartSizing;
+    }
+
+    public (int width, int height, bool isDeviceNative) ResolveResolution(VaultSettings? settings)
+    {
+        string preset = ResolutionPreset;
+        if (string.Equals(preset, "InheritGlobal", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(preset))
+        {
+            preset = settings?.DefaultResolution ?? "1920x1080";
+        }
+
+        string clean = preset.Trim().ToLowerInvariant();
+        return clean switch
+        {
+            "device" or "match device" or "native" => (0, 0, true),
+            "1920x1080" or "1080p" => (1920, 1080, false),
+            "1280x720" or "720p" => (1280, 720, false),
+            "1600x900" or "900p" => (1600, 900, false),
+            "1366x768" => (1366, 768, false),
+            "2560x1440" or "1440p" or "2k" => (2560, 1440, false),
+            "3840x2160" or "4k" => (3840, 2160, false),
+            "custom" => (Width > 0 ? Width : 1920, Height > 0 ? Height : 1080, false),
+            _ => (Width > 0 ? Width : (settings?.DefaultWidth > 0 ? settings.DefaultWidth : 1920),
+                  Height > 0 ? Height : (settings?.DefaultHeight > 0 ? settings.DefaultHeight : 1080), false)
+        };
     }
 
     public RdpProfile Clone() => (RdpProfile)MemberwiseClone();
@@ -185,6 +225,18 @@ public class VaultSettings
 
     /// <summary>Global default: share local clipboard with remote sessions by default.</summary>
     public bool DefaultAllowClipboard { get; set; } = true;
+
+    /// <summary>Global default: resolution preset name ("1920x1080", "1280x720", "1600x900", "1366x768", "2560x1440", "3840x2160", "Device"). Default: 1920x1080.</summary>
+    public string DefaultResolution { get; set; } = "1920x1080";
+
+    /// <summary>Global default: width in pixels for RDP display. Default: 1920.</summary>
+    public int DefaultWidth { get; set; } = 1920;
+
+    /// <summary>Global default: height in pixels for RDP display. Default: 1080.</summary>
+    public int DefaultHeight { get; set; } = 1080;
+
+    /// <summary>Global default: smart sizing / fit to screen scaling without distortion.</summary>
+    public bool DefaultSmartSizing { get; set; } = true;
 
     /// <summary>Issue #7: now actually honoured - DeepSweep runs on lock and exit when true.</summary>
     public bool DeepSweep { get; set; } = false;

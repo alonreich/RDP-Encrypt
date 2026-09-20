@@ -59,14 +59,42 @@ public static class RdpLauncher
         // authentication level:i:0 suppresses certificate/identity verification warnings in Microsoft Remote Desktop
         int authLevel = suppressCert ? 0 : 2;
 
-        // 3. Construct standard Microsoft Remote Desktop URI
-        // Format: rdp://full%20address=s:{host}:{port}&authentication%20level=i:{authLevel}&promptcredentialonce=i:1&username=s:{username}
+        // 3. Resolve resolution and multi-monitor parameters (prevent remote desktop & monitor scramble)
+        var (width, height, isDeviceNative) = profile.ResolveResolution(settings);
+        bool smartSizing = profile.ResolveSmartSizing(settings);
+        bool useMultiMon = profile.ResolveUseMultiMon(settings);
+        bool allowClipboard = profile.ResolveAllowClipboard(settings);
+
+        // 4. Construct standard Microsoft Remote Desktop URI with display & monitor protection
+        // Format: rdp://full%20address=s:{host}:{port}&desktopwidth=i:{w}&desktopheight=i:{h}&screen%20mode%20id=i:2&smart%20sizing=i:1&use%20multimon=i:0&span%20monitors=i:0&authentication%20level=i:{authLevel}&promptcredentialonce=i:1
         string encodedAddress = global::Android.Net.Uri.Encode(fullAddress) ?? fullAddress;
         string encodedUser = string.IsNullOrWhiteSpace(profile.Username) ? "" : (global::Android.Net.Uri.Encode(profile.Username) ?? profile.Username);
 
-        string uriString = string.IsNullOrEmpty(encodedUser)
-            ? $"rdp://full%20address=s:{encodedAddress}&authentication%20level=i:{authLevel}&promptcredentialonce=i:1"
-            : $"rdp://full%20address=s:{encodedAddress}&authentication%20level=i:{authLevel}&promptcredentialonce=i:1&username=s:{encodedUser}";
+        var queryList = new List<string>
+        {
+            $"full%20address=s:{encodedAddress}",
+            $"authentication%20level=i:{authLevel}",
+            "promptcredentialonce=i:1",
+            "screen%20mode%20id=i:2",
+            $"smart%20sizing=i:{(smartSizing ? 1 : 0)}",
+            $"use%20multimon=i:{(useMultiMon ? 1 : 0)}",
+            $"span%20monitors=i:{(useMultiMon ? 1 : 0)}",
+            "desktopscale=i:100",
+            $"redirectclipboard=i:{(allowClipboard ? 1 : 0)}"
+        };
+
+        if (!isDeviceNative && width > 0 && height > 0)
+        {
+            queryList.Add($"desktopwidth=i:{width}");
+            queryList.Add($"desktopheight=i:{height}");
+        }
+
+        if (!string.IsNullOrEmpty(encodedUser))
+        {
+            queryList.Add($"username=s:{encodedUser}");
+        }
+
+        string uriString = $"rdp://{string.Join("&", queryList)}";
 
         var rdpUri = global::Android.Net.Uri.Parse(uriString);
 

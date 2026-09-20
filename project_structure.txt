@@ -994,8 +994,8 @@ A parallel mobile software distribution branch sharing the identical cryptograph
     - First-Time Setup Wizard (PanelFirstRun): Automatically detects when no vault exists on the device
       (!File.Exists(VaultPath)). Displays welcome screen with dual password fields (min 8 chars), match
       validation, and hardware StrongBox biometric enrollment toggle.
-    - Recovery Code Display (PanelRecoveryDisplay): Generates 24-character Crockford-Base32 emergency code,
-      formatted into 4-character blocks (XXXX-XXXX-XXXX-XXXX-XXXX-XXXX). Provides one-tap clipboard copy
+    - Recovery Code Display (PanelRecoveryDisplay): Generates 52-character Crockford-Base32 emergency code,
+      formatted into 4-character blocks (13 groups of 4 separated by hyphens). Provides one-tap clipboard copy
       and requires explicit confirmation checkbox before granting vault access.
     - Biometric & Password Unlock (PanelLocked): Hardware-binds 256-bit AES-GCM master wrap keys inside
       device StrongBox HSM / ARM TrustZone TEE while BiometricPrompt enforces Class 3 strong biometric presence
@@ -1035,9 +1035,9 @@ A parallel mobile software distribution branch sharing the identical cryptograph
       the Activity alive in memory rather than destroying and triggering framework re-initialization faults.
 
  8. BIDIRECTIONAL RDP HANDOFF & SESSION LIFECYCLE (NEVER GET TRAPPED):
-    - Smooth Handoff & Auto-Wipe: Tapping 'Connect' immediately prepares credentials, dispatches DNS-aware WOL,
-      copies the password to the Android system clipboard with a 60-second secure auto-wipe timer, launches
-      the Microsoft Remote Desktop intent, and immediately clears the dark launch overlay.
+    - Smooth Handoff & Zero-Clipboard Mandate: Tapping 'Connect' immediately prepares session parameters, dispatches
+      DNS-aware WOL, launches the Microsoft Remote Desktop intent with strict display/monitor protection parameters,
+      and clears the dark launch overlay. Passwords NEVER touch the Android system clipboard.
     - Ongoing Notification Controls: `RdpSessionService` creates a persistent foreground notification with two
       interactive Action Buttons directly in Android's notification pull-down drawer:
       * `[Open RDP]` (`ActionResumeRemoteDesktop`): Re-focuses Microsoft Remote Desktop without re-launching or resetting.
@@ -1056,12 +1056,14 @@ A parallel mobile software distribution branch sharing the identical cryptograph
        "Export Encrypted Vault Backup" and "Import / Restore Vault Backup" using Android's system file picker (`IStorageProvider`).
     3. Accidental Connection Launch Prevention: Removed whole-card tap-to-connect triggers that caused accidental
        connections while scrolling through lists. Replaced with dedicated 40px 'Connect' action buttons on the right.
-    4. Profile Card Action Ergonomics: Redesigned connection cards with a spacious horizontal top row (computer name,
-       host:port, badges, Connect button) and a clean secondary bottom action bar (`📋 Copy Password`, `✏ Edit`, `🗑 Delete`).
+    4. Profile Card Action Ergonomics & Zero Password Extraction: Redesigned connection cards with a spacious horizontal
+       top row (computer name, host:port, resolution badge, Connect button) and a clean secondary bottom action bar
+       (`✏ Edit`, `🗑 Delete`). Removed all password viewing or copying buttons (`View Password` / `Copy Password`)
+       to completely prevent credential extraction on mobile.
     5. Skip Wake-on-LAN Wait Countdown: Added a "Skip Countdown & Connect Now" button inside the launch overlay, letting
        users immediately connect if their computer wakes up faster than the configured timeout.
-    6. Extended Clipboard Password Auto-Wipe: Increased clipboard clearing timer from 30s to 60s, giving users ample time
-       to navigate the Microsoft Remote Desktop connection prompt without losing their copied password.
+    6. Complete Elimination of Clipboard Password Exposure: Eliminated password placement on the system clipboard.
+       Passwords never touch the clipboard, IME caches, or Android broadcast receivers.
     7. One-Tap Recovery Code Paste & Live Formatting: Added a "Paste Code from Clipboard" button on the recovery unlock
        screen along with real-time character counter (`24 / 24`) and automatic hyphenation (`XXXX-XXXX-XXXX-XXXX-XXXX-XXXX`).
     8. Sticky Settings Close Header: Added a sticky top navigation header in Settings (`Settings`, `← Back to Connections`),
@@ -1126,9 +1128,47 @@ A parallel mobile software distribution branch sharing the identical cryptograph
        - Added RequestNotificationPermissionIfNeeded() requesting POST_NOTIFICATIONS runtime permission on Android 13+ (API 33).
      Finding D - Mobile RDP Intent Handoff Integrity:
        - Confirmed robust query parameterization in RdpLauncher.cs, supporting RD Gateway, resolution presets, and client fallbacks.
-     Finding E - Debounced Search & Clear Feedback:
-       - Added 150ms debounce delay to TxtSearch.TextChanged to eliminate UI frame drops during typing.
-       - Differentiated empty vault ("No connections yet...") from zero-match search results ("No connections found matching '{query}'.").
+      Finding E - Debounced Search & Clear Feedback:
+        - Added 150ms debounce delay to TxtSearch.TextChanged to eliminate UI frame drops during typing.
+        - Differentiated empty vault ("No connections yet...") from zero-match search results ("No connections found matching '{query}'.").
+
+ 11. RESOLUTION OF RESOLUTION DISTORTION & COMPLETE REMOVAL OF PASSWORD EXTRACTION (SEPTEMBER 2026):
+     Display & Monitor Resolution Protection (1920x1080 Native Scrollable Canvas):
+       - Root Cause: In Microsoft Remote Desktop for Android, `screen mode id=2` forces "Full Screen Fit", causing the client
+         engine to squish and distort a 1920x1080 desktop canvas into a narrow mobile portrait aspect ratio.
+       - Architectural Fix (RdpLauncher.cs): When preserving native resolution (default), passes `screen mode id=1`
+         (Windowed / Fixed Canvas), `dynamic resolution=0`, and `smart sizing=0`. Protects Windows physical monitors from
+         receiving display resize PDUs (MS-RDPEDISP) that reconfigure host monitors to 1080x1920.
+       - Oversimplified UI Redesign: Replaced confusing technical jargon ("Allow client scaling") with straightforward,
+         human-understandable control:
+           "Keep Native 1920x1080 (Never squash or distort — scroll to view)" (Checked by default).
+         * Checked hint (#2FBF71 Green): "Recommended: Windows resolution stays strictly at full 1920x1080 in both portrait
+           and landscape. Nothing is squashed or distorted. You scroll side-to-side and up/down to reach all points of the screen."
+         * Unchecked hint (#E5A93C Amber): "Warning: Squeezes the whole desktop into your phone screen. Apps and icons will appear
+           squashed when holding the phone vertically in portrait mode."
+       - Profile Card Badges: Dynamic status tags display `1920x1080 (Scrollable)` or `1920x1080 (Scaled)`.
+       - In-Session Pan/Zoom Guidance: In-app connection launch overlay instructs users to tap the connection tab in Microsoft
+         Remote Desktop and toggle the 🔍 (Pan/Zoom) icon to smoothly scroll side-to-side and up/down without squashing the Windows OS.
+
+     Complete Removal of Password Viewing & Extraction Controls (Zero Credential Leakage):
+       - Profile Cards: Removed `👁 View Password` button. Cards strictly expose `✏ Edit` and `🗑 Delete`.
+       - Profile Editor / Settings: Removed eye toggle button (`BtnToggleProfilePass`). Password input remains permanently
+         masked (`●●●●●●●●`) with zero ability to unmask, toggle to plaintext, or extract.
+       - Launch Overlay: Removed `👁 Password` button from connection launch card.
+       - Ephemeral Modal Removal: Deleted `OverlayShowPassword` dialog, its backing views, and event handlers.
+       - Zero-Clipboard Mandate: No RDP password string is ever written to or read from the Android system clipboard.
+
+     Android Architectural Security Limitations Regarding Password Handover:
+       - Android App Sandboxing (Linux UID Isolation): Android strictly isolates apps into independent processes with unique
+         Linux user IDs. RDPVault cannot access, read, or write into Microsoft Remote Desktop's private files or memory.
+       - Android Intent / URI Security: Android OS logs all cross-app Intent URIs in system logs (Logcat). To prevent credential
+         theft by background apps reading OS logs, Microsoft Remote Desktop deliberately rejects and drops any password parameter
+         passed via the `rdp://` URI scheme.
+       - Anti-Keylogger Protection: Android kernel and Google Play security policies prohibit third-party apps from simulating
+         touch input or typing keystrokes into external applications.
+       - One-Time Permanent Solution: Users enter their password once directly inside Microsoft Remote Desktop and check
+         "Store user account" (or "Save password"). Microsoft Remote Desktop secures the credential inside the hardware KeyStore,
+         allowing all subsequent connections from RDPVault to authenticate instantly with zero prompts.
 
 --------------------------------------------------------------------------------
 END OF FILE — keep synchronized with the code.

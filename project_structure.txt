@@ -2,8 +2,8 @@
 PROJECT_STRUCTURE.TXT  —  RDP VAULT
 SOURCE OF TRUTH & GUIDANCE FOR ANY AI AGENT (OR HUMAN) WORKING ON THIS PROJECT
 ================================================================================
-Last updated : 2026-09-20
-Version      : 2026.09.20
+Last updated : 2026-09-21
+Version      : 2026.09.21
 Status       : Production release. Compiled and tested with .NET 9 SDK on Windows 10/11 x64
                and Android 14+ (API 34). Full multi-platform distribution: Windows single-file
                executable (RDPVault.exe) and Android companion package (RDPVault.apk) sharing
@@ -1189,8 +1189,8 @@ A parallel mobile software distribution branch sharing the identical cryptograph
        * Ephemeral Credential Arming: When launching a session, `RdpAutoTypeService.Arm(host, username, password, 45)` stores
          credentials in volatile memory for at most 45 seconds backed by an automated self-wiping `System.Threading.Timer`.
        * In-Memory Injection: Listens for `WindowStateChanged` / `WindowContentChanged` events in Microsoft Remote Desktop.
-         Locates the password `EditText` node in the accessibility hierarchy (via `IsPassword`, `InputTypes`, and view resource ID),
-         and directly injects the password into the view buffer using `AccessibilityNodeInfo.ActionArgumentSetTextCharSequence`.
+         Locates the password `EditText` node in the accessibility hierarchy (via `Password`, `InputTypes`, and view resource ID),
+         and directly injects the password into the view buffer using `AccessibilityNodeInfo.ActionArgumentSetTextCharsequence`.
        * Immediate Memory Wipe: Calls `Disarm()` immediately upon successful node injection, zeroing in-memory buffers.
        * Automated Session Start: Dispatches an asynchronous click event to the "Connect" / "OK" button after a 200ms stabilization
          delay, delivering a completely automated zero-touch login experience.

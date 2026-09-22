@@ -33,7 +33,23 @@ public class RdpAutoTypeService : AccessibilityService
     private static string? _armedPassword;
     private static DateTime _armExpiry = DateTime.MinValue;
     private static System.Threading.Timer? _expiryTimer;
+    private static System.Threading.Timer? _failureTimer;
     private static bool _hasInjected;
+
+    /// <summary>
+    /// Separate, low-importance channel for the "auto-type could not fill the password"
+    /// notice. Kept off the session channel so silencing one does not silence the other.
+    /// </summary>
+    public const string FailureChannelId = "rdpvault_autotype_status";
+    public const int FailureNotificationId = 1003;
+
+    /// <summary>
+    /// How long to wait after arming before concluding that node traversal failed.
+    /// Microsoft Remote Desktop (and aRDP) are increasingly built with Jetpack Compose,
+    /// whose view hierarchy does not always expose a classic EditText node - so the
+    /// injector CAN legitimately find nothing. Telling the user beats silence.
+    /// </summary>
+    private const int FailureNoticeSeconds = 12;
 
     public override void OnCreate()
     {
@@ -98,7 +114,76 @@ public class RdpAutoTypeService : AccessibilityService
 
             _expiryTimer?.Dispose();
             _expiryTimer = new System.Threading.Timer(_ => Disarm(), null, timeoutSeconds * 1000, System.Threading.Timeout.Infinite);
+
+            _failureTimer?.Dispose();
+            _failureTimer = new System.Threading.Timer(_ => ReportInjectionFailureIfStillArmed(), null,
+                FailureNoticeSeconds * 1000, System.Threading.Timeout.Infinite);
         }
+    }
+
+    /// <summary>
+    /// Fired ~12s after arming. If the credential is still sitting armed and un-injected,
+    /// the password box was never found: surface a notification instead of leaving the user
+    /// staring at an empty field wondering whether auto-type is broken or just slow.
+    /// </summary>
+    private static void ReportInjectionFailureIfStillArmed()
+    {
+        bool stillArmed;
+        lock (_lock)
+        {
+            stillArmed = !_hasInjected && !string.IsNullOrEmpty(_armedPassword);
+        }
+        if (!stillArmed) return;
+
+        try
+        {
+            var context = (Context?)MainActivity.Instance ?? global::Android.App.Application.Context;
+            if (context == null) return;
+
+            EnsureFailureChannel(context);
+
+            var openIntent = new Intent(context, typeof(MainActivity));
+            openIntent.AddFlags(ActivityFlags.SingleTop);
+            var pending = PendingIntent.GetActivity(context, 7, openIntent,
+                PendingIntentFlags.UpdateCurrent | PendingIntentFlags.Immutable);
+
+            string body = context.GetString(Resource.String.autotype_failed_text);
+
+            var builder = new AndroidX.Core.App.NotificationCompat.Builder(context, FailureChannelId);
+            builder.SetContentTitle(context.GetString(Resource.String.autotype_failed_title));
+            builder.SetContentText(body);
+            builder.SetStyle(new AndroidX.Core.App.NotificationCompat.BigTextStyle().BigText(body));
+            builder.SetSmallIcon(Resource.Drawable.ic_stat_vault);
+            builder.SetAutoCancel(true);
+            builder.SetPriority(AndroidX.Core.App.NotificationCompat.PriorityDefault);
+            builder.SetVisibility(AndroidX.Core.App.NotificationCompat.VisibilitySecret);
+            builder.SetContentIntent(pending);
+
+            AndroidX.Core.App.NotificationManagerCompat.From(context)?.Notify(FailureNotificationId, builder.Build());
+        }
+        catch (Exception ex)
+        {
+            global::Android.Util.Log.Warn("RDPVault", "Auto-type failure notice suppressed: " + ex.Message);
+        }
+    }
+
+    private static void EnsureFailureChannel(Context context)
+    {
+        try
+        {
+            if (Build.VERSION.SdkInt < BuildVersionCodes.O) return;
+            var channel = new NotificationChannel(
+                FailureChannelId,
+                context.GetString(Resource.String.autotype_channel_name),
+                NotificationImportance.Default)
+            {
+                Description = "Tells you when the password could not be filled in automatically."
+            };
+            channel.LockscreenVisibility = NotificationVisibility.Secret;
+            var manager = (NotificationManager?)context.GetSystemService(Context.NotificationService);
+            manager?.CreateNotificationChannel(channel);
+        }
+        catch { }
     }
 
     /// <summary>
@@ -115,7 +200,19 @@ public class RdpAutoTypeService : AccessibilityService
             _hasInjected = false;
             _expiryTimer?.Dispose();
             _expiryTimer = null;
+            _failureTimer?.Dispose();
+            _failureTimer = null;
         }
+
+        try
+        {
+            var context = (Context?)MainActivity.Instance ?? global::Android.App.Application.Context;
+            if (context != null)
+            {
+                AndroidX.Core.App.NotificationManagerCompat.From(context)?.Cancel(FailureNotificationId);
+            }
+        }
+        catch { }
     }
 
     public static bool IsArmed

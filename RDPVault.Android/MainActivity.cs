@@ -1,13 +1,16 @@
 using System;
+using System.Threading.Tasks;
 using Android.App;
 using Android.Content;
 using Android.Content.PM;
 using Android.Content.Res;
 using Android.OS;
+using Android.Views;
 using AndroidX.Biometric;
 using AndroidX.Core.Content;
 using Avalonia;
 using Avalonia.Android;
+using RDPVault.Android.Platform;
 using RDPVault.Android.Services;
 
 namespace RDPVault.Android;
@@ -22,7 +25,7 @@ namespace RDPVault.Android;
     Exported = true,
     LaunchMode = LaunchMode.SingleTask,
     WindowSoftInputMode = global::Android.Views.SoftInput.AdjustResize,
-    ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize | ConfigChanges.UiMode | ConfigChanges.SmallestScreenSize | ConfigChanges.ScreenLayout | ConfigChanges.Density)]
+    ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize | ConfigChanges.UiMode | ConfigChanges.SmallestScreenSize | ConfigChanges.ScreenLayout | ConfigChanges.Density | ConfigChanges.FontScale)]
 public class MainActivity : AvaloniaMainActivity<App>
 {
     protected override AppBuilder CustomizeAppBuilder(AppBuilder builder)
@@ -34,6 +37,7 @@ public class MainActivity : AvaloniaMainActivity<App>
                 RenderingMode = new[] { AndroidRenderingMode.Egl, AndroidRenderingMode.Software }
             });
     }
+
     private RdpSessionService? _sessionService;
     private bool _serviceBound;
     private ServiceConnection? _serviceConnection;
@@ -61,7 +65,31 @@ public class MainActivity : AvaloniaMainActivity<App>
 
     public static MainActivity? Instance { get; private set; }
 
-    public int ConfiguredLockMinutes { get; set; } = 60;
+    /// <summary>Inactivity timeout in minutes. 0 = never.</summary>
+    public int ConfiguredLockMinutes { get; set; } = 5;
+
+    /// <summary>
+    /// When true the vault is locked the moment the app leaves the screen, and the
+    /// physical Back button on the connections list locks instead of just minimising.
+    /// </summary>
+    public bool LockImmediatelyOnBackground { get; set; } = true;
+
+    /// <summary>
+    /// Set immediately before RDP Vault deliberately launches another app (Remote Desktop,
+    /// Play Store, the file picker, the share sheet, Android Settings). Without this the
+    /// "lock the instant we leave the screen" rule would slam the vault shut every time the
+    /// user opens a file picker and lose their place.
+    /// </summary>
+    private DateTime _externalActivitySuppressUntilUtc = DateTime.MinValue;
+
+    private DateTime _lastBackgroundedUtc = DateTime.MinValue;
+
+    public void BeginExternalActivity(int suppressSeconds = 120)
+    {
+        _externalActivitySuppressUntilUtc = DateTime.UtcNow.AddSeconds(suppressSeconds);
+    }
+
+    private bool IsExternalActivitySuppressed => DateTime.UtcNow < _externalActivitySuppressUntilUtc;
 
     public void RequestNotificationPermissionIfNeeded()
     {
@@ -81,16 +109,41 @@ public class MainActivity : AvaloniaMainActivity<App>
         }
     }
 
+    /// <summary>
+    /// FLAG_SECURE. Blanks the app-switcher thumbnail and blocks screenshots and screen
+    /// recording of the vault (connection list, master password field, recovery code).
+    /// Opt-out lives in Settings for users who genuinely need to screen-record.
+    /// </summary>
+    public void ApplyScreenSecurity()
+    {
+        try
+        {
+            bool allowScreenshots = AppPrefs.GetBool(AppPrefs.KeyAllowScreenshots, false);
+            if (allowScreenshots)
+            {
+                Window?.ClearFlags(WindowManagerFlags.Secure);
+            }
+            else
+            {
+                Window?.SetFlags(WindowManagerFlags.Secure, WindowManagerFlags.Secure);
+            }
+        }
+        catch (Exception ex)
+        {
+            global::Android.Util.Log.Warn("RDPVault", "FLAG_SECURE apply failed: " + ex.Message);
+        }
+    }
+
     protected override void OnCreate(Bundle? savedInstanceState)
     {
         Instance = this;
         base.OnCreate(savedInstanceState);
 
+        ApplyScreenSecurity();
         RequestNotificationPermissionIfNeeded();
 
         try
         {
-            // Bind to background session service
             var serviceIntent = new Intent(this, typeof(RdpSessionService));
             _serviceConnection = new ServiceConnection(this);
             BindService(serviceIntent, _serviceConnection, Bind.AutoCreate);
@@ -101,12 +154,56 @@ public class MainActivity : AvaloniaMainActivity<App>
         }
     }
 
-    private DateTime _lastBackgroundedUtc = DateTime.MinValue;
+    private Views.MainView? ResolveMainView()
+    {
+        try
+        {
+            if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.ISingleViewApplicationLifetime singleView
+                && singleView.MainView is Views.MainView mainView)
+            {
+                return mainView;
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    /// <summary>
+    /// Every touch, key press and trackball event in the app funnels through here.
+    /// This is what makes the FOREGROUND inactivity auto-lock real: previously the timer
+    /// only ever ran while the app was in the background, so a phone left unlocked on a
+    /// desk with RDP Vault open never locked at all.
+    /// </summary>
+    public override void OnUserInteraction()
+    {
+        base.OnUserInteraction();
+        try { ResolveMainView()?.NotifyUserActivity(); } catch { }
+    }
 
     protected override void OnPause()
     {
         base.OnPause();
         _lastBackgroundedUtc = DateTime.UtcNow;
+
+        try
+        {
+            // Pause the on-screen idle countdown; the elapsed-time check in OnResume owns
+            // the background case so the timer cannot fire twice.
+            ResolveMainView()?.SuspendIdleTimer();
+
+            bool sessionRunning = _sessionService?.IsConnected == true;
+            if (LockImmediatelyOnBackground && !sessionRunning && !IsExternalActivitySuppressed)
+            {
+                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    try { ResolveMainView()?.AutoLockIfUnlocked(); } catch { }
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            global::Android.Util.Log.Warn("RDPVault", "OnPause lock evaluation: " + ex.Message);
+        }
     }
 
     protected override void OnResume()
@@ -114,29 +211,55 @@ public class MainActivity : AvaloniaMainActivity<App>
         base.OnResume();
         try
         {
-            // 0. Reset orientation preference back to user / sensor control upon returning to RDP Vault
+            // 0. Reset orientation preference back to user / sensor control.
             RequestedOrientation = ScreenOrientation.Unspecified;
 
-            // 1. Force the native window background to dark theme color to prevent any white canvas exposure
+            // 1. Re-assert screenshot/recents protection (the Settings toggle may have changed).
+            ApplyScreenSecurity();
+
+            // 2. Force the native window background dark to prevent white canvas exposure.
             Window?.SetBackgroundDrawable(new global::Android.Graphics.Drawables.ColorDrawable(global::Android.Graphics.Color.ParseColor("#0E0E10")));
 
-            // 2. Notify MainView that the app resumed from background (dismisses stale overlays, syncs active session, wipes expired clipboard)
+            // 3. Configurable auto-lock: locked if backgrounded for longer than the timeout
+            //    and no remote session is running.
+            bool sessionRunning = _sessionService?.IsConnected == true;
+            bool shouldLock = false;
+
+            if (_lastBackgroundedUtc != DateTime.MinValue && !sessionRunning)
+            {
+                TimeSpan elapsed = DateTime.UtcNow - _lastBackgroundedUtc;
+                if (ConfiguredLockMinutes > 0 && elapsed.TotalMinutes >= ConfiguredLockMinutes)
+                {
+                    shouldLock = true;
+                }
+            }
+            _lastBackgroundedUtc = DateTime.MinValue;
+            _externalActivitySuppressUntilUtc = DateTime.MinValue;
+
+            // 4. Notify MainView that the app resumed (dismisses stale overlays, syncs the
+            //    session banner, wipes an expired sensitive clipboard, restarts the idle timer).
             Avalonia.Threading.Dispatcher.UIThread.Post(() =>
             {
                 try
                 {
-                    if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.ISingleViewApplicationLifetime singleView
-                        && singleView.MainView is Views.MainView mainView)
+                    var mainView = ResolveMainView();
+                    if (mainView == null) return;
+
+                    if (shouldLock)
                     {
-                        mainView.OnAppResumed();
-                        mainView.CheckAndWipeExpiredClipboard();
-                        mainView.InvalidateVisual();
+                        mainView.AutoLockIfUnlocked();
                     }
+
+                    mainView.OnAppResumed();
+                    mainView.CheckAndWipeExpiredClipboard();
+                    mainView.ResumeIdleTimer();
+                    mainView.InvalidateVisual();
                 }
                 catch { }
             });
 
-            // 3. Deferred invalidation pass (60ms) to ensure Skia renders after Android completes asynchronous surface rebind
+            // 5. Deferred invalidation pass (60ms) so Skia renders after Android finishes
+            //    the asynchronous EGL surface rebind.
             Task.Delay(60).ContinueWith(_ =>
             {
                 Avalonia.Threading.Dispatcher.UIThread.Post(() =>
@@ -151,29 +274,6 @@ public class MainActivity : AvaloniaMainActivity<App>
                     catch { }
                 });
             });
-
-            // 4. Configurable auto-lock verification: if backgrounded longer than configured LockMinutes and not running an active session
-            if (_lastBackgroundedUtc != DateTime.MinValue && (_sessionService == null || !_sessionService.IsConnected))
-            {
-                TimeSpan elapsed = DateTime.UtcNow - _lastBackgroundedUtc;
-                int lockMinutes = ConfiguredLockMinutes > 0 ? ConfiguredLockMinutes : 60;
-                if (ConfiguredLockMinutes > 0 && elapsed.TotalMinutes >= lockMinutes)
-                {
-                    Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-                    {
-                        try
-                        {
-                            if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.ISingleViewApplicationLifetime singleView
-                                && singleView.MainView is Views.MainView mainView)
-                            {
-                                mainView.AutoLockIfUnlocked();
-                            }
-                        }
-                        catch { }
-                    });
-                }
-            }
-            _lastBackgroundedUtc = DateTime.MinValue;
         }
         catch (Exception ex)
         {
@@ -192,19 +292,23 @@ public class MainActivity : AvaloniaMainActivity<App>
         }
     }
 
+    /// <summary>
+    /// Re-syncs the in-app session banner (e.g. after the reachability watchdog flips the
+    /// remote host to "not responding"). Does NOT clear the banner.
+    /// </summary>
+    public void NotifySessionStateChanged()
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            try { ResolveMainView()?.OnAppResumed(); } catch { }
+        });
+    }
+
     public void OnSessionEndedFromNotification()
     {
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
-            try
-            {
-                if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.ISingleViewApplicationLifetime singleView
-                    && singleView.MainView is Views.MainView mainView)
-                {
-                    mainView.OnSessionEnded();
-                }
-            }
-            catch { }
+            try { ResolveMainView()?.OnSessionEnded(); } catch { }
         });
     }
 
@@ -212,46 +316,76 @@ public class MainActivity : AvaloniaMainActivity<App>
     {
         try
         {
-            if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.ISingleViewApplicationLifetime singleView
-                && singleView.MainView is Views.MainView mainView
-                && mainView.HandleBackPressed())
+            var mainView = ResolveMainView();
+            if (mainView != null && mainView.HandleBackPressed())
             {
-                // Back press was handled internally by navigating back to previous screen
+                // Consumed internally by navigating back one screen.
                 return;
+            }
+
+            // Root level. Leaving the app with an unlocked vault sitting in memory is
+            // exactly the situation "Lock immediately" exists to prevent, so honour it here
+            // too rather than silently minimising an open vault.
+            if (LockImmediatelyOnBackground && _sessionService?.IsConnected != true)
+            {
+                mainView?.AutoLockIfUnlocked();
             }
         }
         catch { }
 
-        // Preserve activity in background instead of destroying process on root back press
+        // Preserve the activity in the background instead of destroying the process.
         MoveTaskToBack(true);
     }
 
     /// <summary>
-    /// Critical lifecycle override: Handles phone orientation changes IN-PLACE.
-    /// Because the Activity is NOT destroyed, active RDP sessions continue uninterrupted
-    /// and NO re-authentication prompt is displayed.
+    /// Orientation changes are handled IN-PLACE. The Activity is never destroyed, so an
+    /// external remote session and the unlocked vault both survive a screen flip with no
+    /// re-authentication prompt.
     /// </summary>
     public override void OnConfigurationChanged(Configuration newConfig)
     {
         base.OnConfigurationChanged(newConfig);
-
-        // Orientation flipped (e.g. Portrait <-> Landscape)
-        // Notify the viewport renderer to adjust aspect ratio or request dynamic display resize
-        if (_sessionService != null && _sessionService.IsConnected)
+        try
         {
-            // Active session maintained seamlessly without credential re-prompt
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                try { ResolveMainView()?.InvalidateVisual(); } catch { }
+            });
         }
+        catch { }
     }
 
     public bool IsSessionActive => _sessionService?.IsConnected == true;
     public RdpProfile? ActiveSessionProfile => _sessionService?.ActiveProfile;
+    public bool ActiveSessionHostUnreachable => _sessionService?.HostUnreachable == true;
 
     public void StartForegroundSession(RdpProfile profile)
     {
         try
         {
             RequestNotificationPermissionIfNeeded();
-            _sessionService?.StartSession(profile);
+            if (_sessionService != null)
+            {
+                _sessionService.StartSession(profile);
+            }
+            else
+            {
+                // The bind has not completed yet (cold start straight into Connect).
+                // Start the service explicitly so the ongoing notification still appears.
+                var intent = new Intent(this, typeof(RdpSessionService));
+                intent.SetAction(RdpSessionService.ActionStartSession);
+                intent.PutExtra(RdpSessionService.ExtraProfileName, profile.Name);
+                intent.PutExtra(RdpSessionService.ExtraProfileHost, profile.Host);
+                intent.PutExtra(RdpSessionService.ExtraProfilePort, profile.Port);
+                if (OperatingSystem.IsAndroidVersionAtLeast(26))
+                {
+                    StartForegroundService(intent);
+                }
+                else
+                {
+                    StartService(intent);
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -278,7 +412,7 @@ public class MainActivity : AvaloniaMainActivity<App>
         if (Instance == this) Instance = null;
         if (_serviceBound && _serviceConnection != null)
         {
-            UnbindService(_serviceConnection);
+            try { UnbindService(_serviceConnection); } catch { }
             _serviceBound = false;
         }
         base.OnDestroy();

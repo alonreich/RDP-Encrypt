@@ -44,6 +44,8 @@ If a `vault.rdpv` already sits next to the `.exe`, it opens straight into that v
 
 Every save writes `vault.rdpv.bak` next to the vault — the previous good copy. Copy `vault.rdpv` somewhere safe anyway. Losing both the file and your Recovery Code means losing the contents; there is no reset and no support line.
 
+On Android the vault lives inside the app's private storage, which **Android deletes when the app is uninstalled** or the phone is reset. Use **Settings → Vault Backup → Share backup** to send the encrypted file to your PC or cloud drive. The backup is still encrypted; it is useless to anyone without your master password.
+
 ## What it does not protect against
 
 Being straight about the limits:
@@ -52,16 +54,22 @@ Being straight about the limits:
 - Memory forensics against a running, unlocked instance. The master key is wiped on lock, and profile passwords in RAM are shielded with ephemeral AES-256-GCM session encryption (`VaultMemoryGuard`) rather than cleartext strings. However, unmanaged memory during active connection setup may still be vulnerable to aggressive kernel-level inspection.
 - Windows Event Logs, EDR/telemetry records of `mstsc.exe` running, and anything logged on the *remote* server. RDP Vault does not touch those — clearing them needs admin rights and is conspicuous in itself.
 - Recovery of deleted files by forensic carving. Deleting is not shredding, and on SSDs even overwriting is not a guarantee.
+- On Android, RDP Vault cannot disconnect your remote session for you. Android forbids one app terminating another app's session, so "End Session" only stops RDP Vault tracking it — you sign out inside Remote Desktop. The app says so rather than pretending otherwise.
+- Once a connection is handed to Microsoft Remote Desktop, what that app does with the session, its logs and its own stored state is outside RDP Vault's control.
+- Aggressive vendor battery managers (Xiaomi MIUI, Samsung OneUI power saving) can kill the background process and drop the ongoing notification while a session is still running in the other app. Exempt RDP Vault from battery optimisation if that happens.
 - BitLocker. RDP Vault checks whether the drive holding the vault is encrypted and warns you if it is not. It does not, and cannot, encrypt the drive for you, and it will not refuse to open your own vault.
 
 ## Android Companion (Parallel Distribution Branch)
 
-RDP Vault provides an Android mobile APK companion sharing the exact same cryptographic core and `vault.rdpv` file format:
+RDP Vault provides an Android mobile APK companion sharing the exact same cryptographic core and `vault.rdpv` file format. Requires **Android 9 (API 28) or newer**, and a separate RDP client app (Microsoft Remote Desktop is free; the app offers to install it):
 
-- **Mobile TPM Equivalent**: Backed by Android Keystore and StrongBox Keymaster. Master keys are sealed in the device's hardware Secure Element / ARM TrustZone TEE, requiring Class 3 Strong Biometrics (fingerprint or 3D face unlock). Unexportable even under device root or memory dump compromise.
-- **Screen-Flip Continuity (Zero Mid-Session Re-Authentication)**: Active connections and memory-protected credentials are hosted inside an Android `ForegroundService` (`RdpSessionService`). Rotating the phone between portrait and landscape adapts the display viewport in-place without restarting the activity, dropping connections, or prompting for biometrics.
-- **Mobile RDP Client Intent Handoff & Strict Credential Isolation**: Connects directly via standard Android RDP Intent handoff (`rdp://`) into Microsoft Remote Desktop or compatible clients with automatic certificate warning suppression (`authentication level=i:0`). Decrypted passwords never linger in cleartext and connection launches support a 30-second auto-clearing clipboard buffer for seamless sign-in. Automatically redirects to Google Play Store if no client is installed.
-- **Resolution & Multi-Monitor Protection**: Global and per-connection display resolution presets (1080p, 720p, 900p, 1440p, 4K, device native, or custom) paired with Smart Sizing and single-monitor primary locks. Standard 1920x1080 locks prevent the remote Windows host from scrambling desktop icons and displacing application windows across secondary displays upon Android connection.
+- **Mobile TPM Equivalent**: Master keys are sealed inside the phone's hardware Secure Element (StrongBox Keymaster) or ARM TrustZone TEE and are released only by a Class 3 strong biometric, bound through `BiometricPrompt.CryptoObject`. They cannot be exported, even from a rooted device. Adding a new fingerprint to the phone cancels the seal on purpose — unlock once with your master password and the app offers to rebuild it.
+- **It hands off, it does not host**: RDP Vault stores and protects your connections, then opens them in Microsoft Remote Desktop (or aRDP) through a standard Android `rdp://` intent. It contains no RDP protocol stack of its own, so it cannot — and never claims to — connect or disconnect a session itself. The in-app banner says "handed off", and tells you when the remote PC stops responding.
+- **Passwords stay inside the vault**: a saved remote password is visible only while you are editing that specific connection. Nothing else in the app can show, copy, export or share it, and it is never placed on the Android clipboard. Auto-Type (an optional accessibility service scoped to RDP client apps only) types it straight into Remote Desktop and wipes it from memory immediately; if that fails, the app tells you to read it under Edit and type it yourself.
+- **Locks like a vault should**: locks after a configurable idle timeout — on screen as well as in the background — and, by default, the instant the app leaves the screen. Screenshots, screen recording and the app-switcher preview are blocked by default. A running remote session never triggers a lock.
+- **Checks before it switches apps**: a one-second reachability check tells you "your PC is asleep" in plain words, instead of leaving Remote Desktop to spin for thirty seconds and emit `0x204`. Offers to send a Wake-on-LAN signal right there — and says so honestly when you are on mobile data, where Wake-on-LAN cannot work.
+- **Resolution & Multi-Monitor Protection**: global and per-connection presets (1080p, 720p, 900p, 1440p, 4K, phone-native, or custom), with a single-monitor lock that stops the remote Windows host rearranging desktop icons across secondary displays. "Keep native size" preserves the real desktop resolution and lets you scroll, rather than squashing it into the phone's aspect ratio.
+- **Your vault lives only on the phone**: uninstalling the app deletes it. Settings has a one-tap **Share backup** (Quick Share, Drive, email) of the still-encrypted vault, and the app reminds you when there are unbacked-up changes.
 
 ## Android Installation & Zero-Clipboard Setup Guide
 

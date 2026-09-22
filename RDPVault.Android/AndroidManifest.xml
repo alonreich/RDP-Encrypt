@@ -1,20 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
           package="com.rdpvault.app"
-          android:versionCode="1"
-          android:versionName="1.1.0">
+          android:versionCode="2"
+          android:versionName="1.2.0">
 
-    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35" />
+    <!-- minSdk 28 (Android 9): StrongBox Keymaster, Class 3 BiometricPrompt and
+         ClipboardManager.ClearPrimaryClip all require API 28. Optimised for API 34/35. -->
+    <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="35" />
 
-    <!-- Network permissions for RDP socket connections and Wake-on-LAN -->
+    <!-- Network permissions for reachability pre-flight and Wake-on-LAN -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
 
-    <!-- Hardware-backed security: Mobile TPM equivalent via BiometricPrompt -->
+    <!-- Hardware-backed security: mobile TPM equivalent via BiometricPrompt + Keystore -->
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
 
-    <!-- Foreground Service & Session Continuity across Screen Flips -->
+    <!-- Foreground Service & session continuity across screen flips -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -30,6 +33,10 @@
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="market" />
         </intent>
+        <intent>
+            <action android:name="android.intent.action.SEND" />
+            <data android:mimeType="*/*" />
+        </intent>
         <package android:name="com.microsoft.rdc.androidx" />
         <package android:name="com.microsoft.rdc.android" />
         <package android:name="com.iiordanov.freeaRDP" />
@@ -41,6 +48,20 @@
         android:icon="@mipmap/icon"
         android:roundIcon="@mipmap/icon"
         android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:theme="@style/MainTheme">
+
+        <!-- Scoped FileProvider used ONLY to hand an already-encrypted vault backup
+             (or a recovery-code text file) to the Android share sheet. Nothing else
+             in the app sandbox is exposed. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="com.rdpvault.app.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Only the transient share staging folder is exposed. vault.rdpv itself
+         (FilesDir) is never shared through this provider. -->
+    <cache-path name="rdpvault_share" path="share/" />
+</paths>

@@ -211,6 +211,12 @@ public enum SweepScope
 public class VaultSettings
 {
     public int LockMinutes { get; set; } = 60;
+
+    /// <summary>
+    /// Android (mobile) only: lock the vault the instant the app leaves the screen,
+    /// ignoring LockMinutes. Desktop ignores this flag.
+    /// </summary>
+    public bool LockImmediatelyOnBackground { get; set; } = false;
     public bool KillSessionsOnUsbRemoval { get; set; } = true;
     public bool ForceMultiMon { get; set; } = false;
 

@@ -3,12 +3,15 @@ PROJECT_STRUCTURE.TXT  —  RDP VAULT
 SOURCE OF TRUTH & GUIDANCE FOR ANY AI AGENT (OR HUMAN) WORKING ON THIS PROJECT
 ================================================================================
 Last updated : 2026-09-21
-Version      : 2026.09.21
-Status       : Production release. Compiled and tested with .NET 9 SDK on Windows 10/11 x64
-               and Android 14+ (API 34). Full multi-platform distribution: Windows single-file
-               executable (RDPVault.exe) and Android companion package (RDPVault.apk) sharing
-               a unified cryptographic core and vault file format. All security audits, UI/UX,
-               fast-switching lifecycle, and credential isolation requirements resolved.
+Version      : 2026.09.21b  (Android companion 1.2.0)
+Status       : Windows: production release, compiled and tested with .NET 9 SDK on Windows 10/11 x64.
+               Android: 1.2.0 audit revision - BUILT AND VERIFIED (see SECTION 19.E).
+               compiled\RDPVault.apk 41 MiB, versionCode 2 / versionName 1.2.0,
+               SHA-256 233d609d10ac3999ab48d3e73754a18de072c392724f21849108cb114ac7b3dc.
+               Minimum Android is now 9 (API 28); built against API 34/35.
+               SECTION 19 supersedes any statement in SECTION 18 that contradicts it. In particular
+               SECTION 18's claims about biometric key binding (19.C.1) and about hosting FreeRDP
+               connections (19.C.4) were NOT true of the 1.1.0 code and are corrected there.
 
 --------------------------------------------------------------------------------
 SECTION 0 — TL;DR (READ THIS FIRST)
@@ -954,14 +957,19 @@ A parallel mobile software distribution branch sharing the identical cryptograph
     inside the dedicated Secure Element (StrongBox HSM / ARM TrustZone TEE).
     Requires Class 3 Strong Biometrics (Fingerprint / 3D Face) via BiometricPrompt.CryptoObject.
     Keys cannot be extracted even under device root/firmware compromise.
+    *** CORRECTION (SECTION 19.C.1): this was ASPIRATIONAL, not true, in 1.1.0 - the key was
+    generated without SetUserAuthenticationRequired(true) and BiometricPrompt was never given a
+    CryptoObject. It became true in 1.2.0. Read 19.C.1 before touching this code. ***
 
  3. ZERO MID-SESSION RE-AUTHENTICATION ON SCREEN FLIP:
     - AndroidManifest.xml configChanges:
       android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|uiMode|density"
       prevents Activity destruction on phone rotation; events handled in-place via OnConfigurationChanged.
     - RdpSessionService:
-      Bound Android ForegroundService hosts active FreeRDP connections, sockets, and memory-protected
-      credentials. Screen flips simply adapt the viewport without session drops or auth prompts.
+      Bound Android ForegroundService tracks the hand-off and holds session metadata.
+      *** CORRECTION (SECTION 19.C.4): it does NOT host FreeRDP connections or sockets - this app
+      embeds no RDP protocol stack at all. *** Screen flips adapt the viewport in place; the remote
+      session itself lives inside the external RDP client and is unaffected.
     - Auto-lock timer is suspended while a foreground session is active.
 
  4. MOBILE RDP CLIENT INTENT HANDOFF & STRICT CREDENTIAL ISOLATION:
@@ -1204,6 +1212,448 @@ A parallel mobile software distribution branch sharing the identical cryptograph
          providing instantaneous zero-friction installation without Android 13+ Restricted Settings UI graying.
        * Graceful Fallback: If the user prefers not to grant accessibility permissions, "Connect Anyway (Manual Password)" proceeds
          with standard launch without blocking the connection.
+
+--------------------------------------------------------------------------------
+SECTION 19 — ANDROID UI/UX & LOGIC AUDIT, SEPTEMBER 2026 (RELEASE 1.2.0)
+--------------------------------------------------------------------------------
+Scope: RDPVault.Android only. Windows desktop behaviour is unchanged except for one
+additive, backward-compatible field on VaultSettings (19.C.1).
+
+THE ONE ITEM DELIBERATELY NOT "FIXED" IS 19.A.1. READ IT BEFORE CHANGING ANY
+PASSWORD-VISIBILITY CODE.
+
+================================================================================
+19.A — PRODUCT DECISIONS THAT LOOK LIKE BUGS AND ARE NOT
+================================================================================
+
+ 19.A.1  STORED REMOTE PASSWORDS ARE NOT VIEWABLE OUTSIDE THE PROFILE EDITOR.
+         *** THIS IS INTENTIONAL. DO NOT "FIX" IT. ***
+
+         Policy, in full:
+           - A remote desktop password can be TYPED and CHANGED while editing the
+             connection it belongs to, and REVEALED there with the eye toggle
+             (BtnToggleProfilePass in Views/MainView.axaml).
+           - Nowhere else in the app may a stored password be shown, copied,
+             exported, logged, or placed on the clipboard. Not on connection
+             cards, not in the launch overlay, not in Settings, not in a
+             notification, not in logcat.
+           - There is no "copy password" affordance anywhere, at all.
+           - The only automated path out of the vault is RdpAutoTypeService,
+             which holds the credential in volatile memory for at most 45 seconds
+             and wipes it the instant it is injected.
+
+         Rationale (owner's decision, 2026-09-21): once a password is set there is
+         no routine reason to look at it. Every viewing surface is another place a
+         credential can leak — a shoulder, a screenshot, a screen recorder, a
+         clipboard monitor, a keyboard history cache. Confining the reveal to
+         explicit edit mode keeps exactly one place where the secret can surface,
+         and that place already requires an unlocked vault plus a deliberate
+         navigation into that specific profile.
+
+         Consequence that is accepted, not overlooked: if Auto-Type cannot find
+         Microsoft Remote Desktop's password field, the user must open
+         Edit on that connection, read the password there, and type it. The app
+         now says exactly that, in the launch overlay and in the Auto-Type failure
+         notification, instead of leaving the user stranded.
+
+         REGRESSION GUARD: any future change that adds a password reveal, copy,
+         share, export or log outside the profile editor is a regression against
+         this section.
+
+ 19.A.2  "END SESSION" CANNOT DISCONNECT MICROSOFT REMOTE DESKTOP.
+         Android sandboxing forbids one app terminating another app's session.
+         The UI must never claim otherwise. See 19.B.2.
+
+================================================================================
+19.B — TEN UI/UX ISSUES RESOLVED (audit list)
+================================================================================
+
+ 19.B.1  (See 19.A.1 — closed as "working as designed", with the dead-end removed:
+         the reveal now exists inside the profile editor and the app tells the user
+         where to find it when Auto-Type fails.)
+
+ 19.B.2  "END SESSION" NO LONGER LIES.
+         Before: the red End Session button hid the banner and stopped a
+         notification while the RDP session carried on inside Microsoft Remote
+         Desktop. The banner read "ACTIVE REMOTE SESSION" as a statement of fact
+         even when the connection had already failed.
+         After: BtnEndActiveSession opens OverlayEndSession, which states plainly
+         that RDP Vault cannot disconnect the other app, and offers
+           [Open Remote Desktop and disconnect there] / [Just stop tracking it here].
+         The banner heading is now "HANDED OFF TO REMOTE DESKTOP", and the
+         notification action is "Stop tracking", not "End Session".
+         See also 19.C.2 (reachability watchdog).
+
+ 19.B.3  AUTO-LOCK IS REAL.
+         Before: default 60 minutes; evaluated only in Activity.OnResume, so an
+         app left open on screen NEVER locked, and Back merely minimised an
+         unlocked vault.
+         After:
+           - New vaults default to LockMinutes = 1 and
+             LockImmediatelyOnBackground = true.
+           - MainView runs a DispatcherTimer (10s tick) driven by
+             NotifyUserActivity(), which is fed by tunnelled pointer/key/text
+             events AND by MainActivity.OnUserInteraction(). Idle on-screen now
+             locks.
+           - MainActivity.OnPause locks immediately when configured, unless a
+             remote session is running or BeginExternalActivity() was called
+             (file picker, share sheet, Remote Desktop, Android Settings).
+           - Back at root locks before MoveTaskToBack when the setting is on.
+           - Auto-lock never fires during a connect (OverlayLaunch visible) or
+             while a hand-off is being tracked.
+
+ 19.B.4  SCREEN CAPTURE AND RECENTS ARE BLOCKED.
+         FLAG_SECURE is applied in MainActivity.OnCreate and re-applied in
+         OnResume via ApplyScreenSecurity(). The app-switcher thumbnail is blank
+         and screenshots / screen recordings of the vault are refused.
+         Opt-out: Settings > Screen privacy > "Allow screenshots and screen
+         recording (not recommended)", stored in AppPrefs (device-local, not in
+         the vault, so it survives a lock).
+         android:allowBackup=false plus Resources/xml/data_extraction_rules.xml
+         additionally forbid cloud backup and device-to-device transfer of the
+         vault and the prefs.
+
+ 19.B.5  THE AUTO-TYPE PROMPT ASKS ONCE.
+         Before: a four-button wall of text including an adb command, on every
+         single connect, forever.
+         After: OverlayEnableAccessibility carries "Don't ask me again"
+         (ChkDontAskAccessibilityAgain -> AppPrefs.KeyAutoTypePromptSuppressed).
+         The adb line is gone from user-facing copy (it lives in this document,
+         19.E). Settings shows a "Show the Auto-Type prompt again when connecting"
+         button whenever the prompt is suppressed and the service is off.
+
+ 19.B.6  OPENING SETTINGS NO LONGER REWRITES SETTINGS.
+         Before: ShowSettings() assigned ComboBox.SelectedIndex during load, each
+         assignment fired SelectionChanged, and SaveSettingsDefaults() persisted
+         half-initialised state — silently flipping the user's scaling choice just
+         because they looked at the screen.
+         After: _suppressSettingsSave guards the whole population block and every
+         write-back handler. Settings are written only in response to real user
+         input.
+
+ 19.B.7  THE RECOVERY CODE HAS THREE ESCAPE ROUTES AND A LOCKED DOOR.
+         Before: clipboard only; physical Back skipped past the "I saved it"
+         checkbox; changing the master password silently invalidated the old code.
+         After:
+           - [Save as file] writes a .txt through the system save picker.
+           - [Share] uses ACTION_SEND with EXTRA_TEXT (no plaintext file is ever
+             written to disk for this path).
+           - [Copy to clipboard] remains, labelled with its 60-second auto-wipe.
+           - HandleBackPressed() refuses to leave PanelRecoveryDisplay until
+             ChkConfirmRecoverySaved is ticked, and explains why.
+           - Both "Change master password" and "Generate fresh recovery code" now
+             warn in advance that the existing code stops working.
+
+ 19.B.8  RESOLUTION LABELS TELL THE TRUTH.
+         Before: the checkbox read "Keep Native 1920x1080" even when the user had
+         chosen 4K, 720p or a custom size.
+         After: CurrentEditorResolutionLabel() / CurrentSettingsResolutionLabel()
+         rewrite both the checkbox text and the hint from the live selection,
+         including "Custom" (reads back the width/height boxes as you type) and
+         "Match Mobile Device Screen" (which correctly says there is nothing to
+         preserve). The two controls no longer contradict each other.
+
+ 19.B.9  TEXT AND CONTROLS SCALE.
+         Fixed Height="44" on interactive controls became MinHeight, so a phone
+         set to a large system font grows the control instead of clipping the text
+         inside it. UserControl.Styles sets project-wide minimums
+         (Button/TextBox/ComboBox MinHeight 44/40, FontSize floors). No
+         user-facing text is below 12px; body copy is 13px. Long labels wrap
+         instead of trimming. ConfigChanges now includes FontScale so a font-size
+         change re-lays out in place.
+
+ 19.B.10 THE CONNECTION FORM IS A FORM AGAIN.
+         Before: one long wall — multi-monitor mode, MS-RDPEDISP, WOL,
+         certificates — then 400px of blank space, then a SECOND Cancel/Save pair
+         duplicating the sticky header.
+         After: name / host / port / user / password are immediately visible;
+         everything else is behind "▸ Advanced options", auto-expanded when the
+         profile actually uses it. Exactly one Save and one Cancel, in the sticky
+         header. Bottom padding is 40px because adjustResize plus BringIntoView
+         now handles the keyboard (19.B.18). Validation errors that refer to an
+         advanced field open that section before complaining about it.
+
+================================================================================
+19.B (continued) — TEN SUGGESTIONS RESOLVED (owner's list)
+================================================================================
+
+ 19.B.11 RECOVERY CODE CARET NO LONGER JUMPS TO THE END.
+         OnRecoveryInputChanged() counts significant (non-hyphen) characters to
+         the left of the caret, reformats, then maps that logical position back
+         into the hyphenated string, stepping over a separator when the caret
+         lands immediately before one. IsSignificantRecoveryChar() mirrors
+         RecoveryCode.Normalize() exactly (including the Crockford I/L->1, O->0,
+         U->V folds) so the arithmetic cannot drift from the normaliser.
+         Mid-string editing, deletion and correction now behave normally.
+         A [Clear] button was added beside the live "n / 52 characters" counter.
+
+ 19.B.12 Covered by 19.B.8.
+
+ 19.B.13 Covered by 19.B.5.
+
+ 19.B.14 CONNECTION STATUS BADGES ARE CHIPS ON THEIR OWN ROW.
+         Before: host, port, username, WOL and resolution crammed into one line
+         that ellipsised off the right edge, hiding whether WOL was armed.
+         After: name and host:port / user on top, then a wrapping chip row —
+         [🖥 <res> · scroll | fit to phone], [⚡ Wake-on-LAN], [🌐 RD Gateway],
+         [🔑 Password saved | No password saved]. Chips wrap instead of trimming.
+         (Spacing is per-chip Margin: WrapPanel.ItemSpacing/LineSpacing do not
+         exist in Avalonia 11.1, which this project pins.)
+
+ 19.B.15 Covered by 19.B.10 — the duplicate bottom Cancel/Save pair is gone, the
+         header is [←] [title] [Save], and the form ends on the red Delete button.
+
+ 19.B.16 THE "✕ DISMISS" CONTROL ON THE SESSION BANNER IS GONE.
+         While a hand-off is being tracked the banner stays put, so there is
+         always a one-tap route back to the remote desktop or to the End Session
+         explainer. Nothing can strand the user with a running session and no way
+         back.
+
+ 19.B.17 Covered by 19.B.3 — the foreground inactivity timer is the substance of
+         this suggestion.
+
+ 19.B.18 KEYBOARD SCROLLING IS AUTOMATIC.
+         The hardcoded 320px / 520px ScrollProfileEditor.Offset jumps are gone. A
+         bubbling GotFocus handler on PanelProfileEditor and PanelSettings calls
+         BringIntoView() on whatever gained focus, so any field slides above the
+         soft keyboard on any screen size, density or keyboard height.
+
+ 19.B.19 VAULT BACKUPS GO STRAIGHT TO THE SHARE SHEET.
+         Settings > Vault Backup now leads with [📤 Share backup], which stages an
+         encrypted copy into the app's own cache/share folder and hands it to
+         ACTION_SEND through a scoped FileProvider
+         (authority com.rdpvault.app.fileprovider, Resources/xml/file_paths.xml,
+         cache-path "share" only). One tap to Quick Share, Drive or email. Stale
+         staged copies are deleted on every share. [💾 Save to file] and
+         [📥 Restore backup] remain.
+
+ 19.B.20 REACHABILITY PRE-FLIGHT BEFORE HAND-OFF.
+         Before switching apps, RDP Vault runs a 1.5s TCP connect to host:port
+         (Net/HostProbe.cs). If it fails, the launch overlay says so in plain
+         language — including "you are on mobile data, this is probably a
+         LAN-only PC" — instead of letting Microsoft Remote Desktop spin for 30
+         seconds and emit 0x204. The card offers
+           [⚡ Send Wake-on-LAN signal] (only when a MAC is set AND the phone is on
+           Wi-Fi/Ethernet) / [Check again] / [Connect anyway],
+         and loops until the host answers or the user decides. Toggle:
+         Settings > "Check the PC is awake before opening Remote Desktop".
+
+================================================================================
+19.C — ARCHITECTURAL FINDINGS RESOLVED
+================================================================================
+
+ 19.C.1  *** CRITICAL: BIOMETRICS WERE DECORATIVE. NOW THEY ARE BINDING. ***
+         Before (shipped in 1.1.0): AndroidHardwareKeyStore.GenerateHardwareKey()
+         accepted a `requireBiometrics` parameter AND IGNORED IT. It never called
+         SetUserAuthenticationRequired(true). BiometricPrompt was shown, and then
+         a Cipher was obtained and used SEPARATELY — the two events were
+         unrelated. The master key could be unsealed from the Keystore with no
+         biometric at all. Every "StrongBox / TrustZone / Class 3 gate" claim in
+         SECTION 18.2 was false in code.
+
+         After:
+           - GenerateHardwareKey sets SetUserAuthenticationRequired(true),
+             SetUserAuthenticationValidityDurationSeconds(-1) ("authorise every
+             single use, strong biometric only"; API 30+ maps this onto
+             AUTH_BIOMETRIC_STRONG), SetInvalidatedByBiometricEnrollment(true) and
+             SetRandomizedEncryptionRequired(true).
+           - EVERY seal/unseal goes through BiometricPrompt.CryptoObject.
+             AuthenticateWithCryptoAsync() returns the Cipher the Keymaster
+             authorised, and that exact Cipher performs the DoFinal.
+             EnrollAndSealAsync() and AuthenticateAndUnsealAsync() are the only
+             supported entry points.
+           - A failed enrolment deletes the orphan key alias.
+
+         CONSEQUENCE, BY DESIGN: enrolling a new fingerprint or face, or removing
+         the screen lock, now DESTROYS the seal instead of silently extending
+         vault access to the new finger. The app detects this
+         (IsKeyInvalidated / HasKey) and says so in words.
+
+         REGRESSION GUARD: calling BiometricPrompt without a CryptoObject, or
+         generating a wrap key without SetUserAuthenticationRequired(true), is a
+         regression against this section.
+
+ 19.C.2  THE SESSION BANNER NO LONGER GUESSES.
+         RdpSessionService now TCP-probes the target every 20s (2.5s timeout, two
+         consecutive failures) and reports "not responding" in both the ongoing
+         notification and the in-app banner (which turns red). It still never
+         claims to know that the RDP session itself is alive — RDP Vault does not
+         own that socket. All strings are phrased "handed off" / "responding" /
+         "not responding". The service also gained ActionStartSession, so a
+         cold-start Connect that outruns the bind still posts its foreground
+         notification within Android's 5-second window, and a proper monochrome
+         status icon (Resources/drawable/ic_stat_vault.xml) instead of
+         android.R.drawable.ic_menu_share.
+
+ 19.C.3  SEAL REPAIR IS CONSENTED, NOT SILENT.
+         Before: after a password unlock the app silently called
+         GenerateHardwareKey(newKeyId) with no requireBiometrics argument and
+         re-sealed. With 19.C.1 in force a re-seal now requires a real biometric
+         authorisation, so a silent repair is impossible by construction — and it
+         was never desirable. After: a dead seal is detected (HasKey / a
+         KeyPermanentlyInvalidated unseal) and OverlayRepairBiometrics asks the
+         user, explaining that the old seal was destroyed on purpose rather than
+         quietly extended to a newly enrolled fingerprint.
+         Recovery-code unlock additionally deletes every stale hardware alias,
+         because VaultCrypto.Save drops all seals on a password change anyway.
+
+ 19.C.4  THE DEAD FreeRDP STUB IS NEUTRALISED AND THE DOCS CORRECTED.
+         Rdp/FreeRdpClient.cs now declares no types at all (comments only); it was
+         kept as an empty file because this workspace had no delete permission.
+         SECTION 18.3's claim that RdpSessionService "hosts active FreeRDP
+         connections, sockets" was untrue and is corrected here: RDP Vault for
+         Android embeds NO RDP protocol stack. Every session is an Android
+         rdp:// VIEW Intent handed to an external client. Do not reintroduce
+         P/Invoke bindings in that file.
+
+ 19.C.5  THE APP NO LONGER ROTATES ITSELF BEFORE LEAVING.
+         RdpLauncher used to set RequestedOrientation = SensorLandscape on RDP
+         Vault's OWN activity for widescreen profiles. Android cannot set another
+         app's orientation, so the only visible effect was RDP Vault whipping into
+         landscape for a frame before handing off. Removed.
+
+ 19.C.6  WAKE-ON-LAN IS HONEST AND ROUTABLE.
+         - Magic packets now also go to the SUBNET-DIRECTED broadcast address
+           computed from the device's own IPv4 interfaces
+           (HostProbe.GetDirectedBroadcastAddresses); many OEM Android builds drop
+           255.255.255.255.
+         - The pointless duplicate packets aimed at the host's RDP port are gone.
+         - If the phone is not on Wi-Fi/Ethernet, RDP Vault says the wake-up
+           cannot reach the PC and SKIPS the countdown instead of making the user
+           sit out 25 seconds of theatre. The profile editor says the same thing
+           inline when WOL is enabled.
+         - CHANGE_WIFI_MULTICAST_STATE was added; it also satisfies Android 14's
+           permission requirement for the connectedDevice foreground service type.
+
+ 19.C.7  SETTINGS WRITE STORMS ELIMINATED — see 19.B.6.
+
+ 19.C.8  VAULT IMPORT IS VALIDATED.
+         Before: "longer than 16 bytes" — a photo would have been accepted and
+         written over a live vault. After: TryValidateVaultBytes() deserialises
+         the candidate as a VaultFile and requires a KDF salt plus Wrap and Data
+         blobs before anything is overwritten. The restore confirmation now states
+         how many connections are about to be replaced and that the backup's OWN
+         master password will be required.
+
+ 19.C.9  minSdkVersion RAISED 26 -> 28 AND THE DOCS CORRECTED.
+         StrongBox Keymaster, Class 3 BiometricPrompt and
+         ClipboardManager.ClearPrimaryClip all require API 28. Devices on API
+         26-27 could previously install the APK and hit degraded paths.
+         SupportedOSPlatformVersion follows. Accurate statement: Android 9 (API
+         28) minimum, built and tested against API 34/35.
+
+ 19.C.10 DATA-LOSS REMINDER (storage finding).
+         vault.rdpv lives in Context.FilesDir, which Android destroys on
+         uninstall. The connections list now shows an amber banner —
+         "THIS VAULT EXISTS ONLY ON THIS PHONE" — whenever the vault has changed
+         since the last export and the user has not dismissed it for that change.
+         State is tracked in AppPrefs (MarkVaultChanged / MarkVaultExported /
+         ShouldNagAboutBackup), never inside the encrypted payload, so the
+         reminder survives a lock.
+
+ 19.C.11 AUTO-TYPE FAILURE IS ANNOUNCED (accessibility finding).
+         Microsoft Remote Desktop and aRDP increasingly use Jetpack Compose, whose
+         hierarchy does not always expose a classic EditText, so node traversal
+         can legitimately find nothing. RdpAutoTypeService now arms a 12-second
+         watchdog; if the credential is still armed and un-injected it posts a
+         notification on its own low-importance channel telling the user to open
+         RDP Vault, edit the connection, read the password there (see 19.A.1) and
+         type it. Disarm() cancels the watchdog and the notification.
+
+================================================================================
+19.D — NEW / CHANGED FILES (1.2.0, Android)
+================================================================================
+ RDPVault/Models.cs
+   + VaultSettings.LockImmediatelyOnBackground (bool, default false).
+     Additive and JSON-backward-compatible. Windows ignores it.
+
+ RDPVault.Android/Platform/AppPrefs.cs                      NEW
+   Device-local, NON-SECRET SharedPreferences: Auto-Type prompt suppression,
+   screenshot opt-out, pre-flight toggle, backup-reminder bookkeeping.
+   Nothing secret is ever written here.
+
+ RDPVault.Android/Net/HostProbe.cs                          NEW
+   TCP reachability, active-network classification, WOL capability check,
+   subnet-directed broadcast computation.
+
+ RDPVault.Android/Resources/xml/file_paths.xml              NEW  (share scope)
+ RDPVault.Android/Resources/xml/data_extraction_rules.xml   NEW  (no cloud backup)
+ RDPVault.Android/Resources/drawable/ic_stat_vault.xml      NEW  (status icon)
+
+ Rewritten: Security/AndroidHardwareKeyStore.cs, MainActivity.cs,
+            Services/RdpSessionService.cs, Views/MainView.axaml,
+            Views/MainView.axaml.cs
+ Patched:   Rdp/RdpLauncher.cs, Services/RdpAutoTypeService.cs,
+            AndroidManifest.xml, Resources/values/strings.xml,
+            RDPVault.Android.csproj
+ Emptied:   Rdp/FreeRdpClient.cs (declares no types; see 19.C.4)
+
+================================================================================
+19.E — DEVELOPER NOTES
+================================================================================
+ One-line Auto-Type activation over adb (kept OUT of the app UI on purpose):
+   adb shell settings put secure enabled_accessibility_services \
+     com.rdpvault.app/com.rdpvault.app.services.RdpAutoTypeService
+
+ BUILD STATUS: BUILT AND VERIFIED, 2026-09-22.
+   Toolchain : .NET SDK 9.0.318 + android workload 35.0.105, JDK 21, Android SDK
+               platform 35 / build-tools 35.0.0, on linux-x64.
+   Command   : dotnet publish RDPVault.Android.csproj -c Release -p:AndroidPackageFormat=apk
+   Result    : 0 errors, 0 C# warnings. Avalonia XAML compiled, so all 178 named
+               controls in MainView.axaml resolve against the code-behind.
+               The only remaining warnings are the pre-existing XA0141 16 KB
+               page-size notices from SkiaSharp / HarfBuzzSharp native libs, which
+               are already listed in WarningsNotAsErrors.
+   Artifact  : com.rdpvault.app-Signed.apk, 43,095,286 bytes.
+               apksigner: v1 (JAR) true, v2 true, v3 true (verified with
+               --min-sdk-version 21; verifying at the APK's own minSdk 28 reports
+               v1/v2 as false because they are not REQUIRED there - not a defect).
+               zipalign -c 4: OK. Merged manifest confirmed: minSdkVersion 28,
+               targetSdkVersion 35, FileProvider authority com.rdpvault.app.fileprovider,
+               RdpSessionService foregroundServiceType=connectedDevice (0x10),
+               RdpAutoTypeService with BIND_ACCESSIBILITY_SERVICE + intent-filter,
+               allowBackup=false, dataExtractionRules wired, configChanges
+               0x40001F80 (orientation|screenSize|screenLayout|smallestScreenSize|
+               uiMode|density|fontScale). ABIs: arm64-v8a, armeabi-v7a, x86_64.
+
+   THE AndroidX BINDING NAMES FLAGGED AS RISKY IN THE PREVIOUS REVISION ALL COMPILE:
+   BiometricPrompt.ErrorNegativeButton / ErrorUserCanceled / ErrorCanceled,
+   BiometricManager.BiometricErrorSecurityUpdateRequired, KeyGenParameterSpec.Builder
+   .SetUserAuthenticationValidityDurationSeconds / .SetInvalidatedByBiometricEnrollment,
+   BiometricPrompt.CryptoObject, AndroidX.Core.Content.FileProvider.
+
+ DEFECTS FOUND BY THE BUILD AND FIXED IN 1.2.0 (all three are now in the shipped APK):
+  B1. RdpSessionService.cs - error CS0104: OperationCanceledException was ambiguous
+      between Android.OS.OperationCanceledException and System.OperationCanceledException,
+      because the file has `using Android.OS;`. Now fully qualified as System.*.
+      This was the ONLY hard compile error in the whole revision.
+  B2. RdpSessionService.cs / RdpAutoTypeService.cs - CS8602 on
+      NotificationManagerCompat.From(), which is annotated as returning a nullable
+      reference. Now null-conditional (`?.Notify` / `?.Cancel`).
+  B3. Resources/xml/data_extraction_rules.xml - the Android backup domain is spelled
+      `sharedpref`, NOT `shared_pref`. The wrong spelling is silently accepted by aapt
+      and only misbehaves at runtime on API 31+. Corrected in both the cloud-backup and
+      device-transfer blocks.
+
+ PUBLISHING: NOT DONE. The build environment has no linked GitHub account
+ (api.github.com returns 403 for alonreich/RDP-Encrypt), so the release asset could not
+ be uploaded from here. Publish from the dev machine with a signed-in gh:
+   build-apk.cmd --publish
+ or upload the existing artifact directly:
+   gh release upload <tag> compiled\RDPVault.apk --clobber
+
+ REGRESSIONS TO NEVER REINTRODUCE (Android), in addition to SECTION 13:
+  1. A password reveal, copy, share or log anywhere outside the profile editor.
+  2. BiometricPrompt without a CryptoObject, or a wrap key without
+     SetUserAuthenticationRequired(true).
+  3. Any UI string claiming RDP Vault "connected", "disconnected" or "ended" a
+     remote session it does not own.
+  4. Writing vault settings from a control handler during screen population.
+  5. Hardcoded pixel scroll offsets, fixed control Height, or a resolution label
+     that names a resolution the user did not choose.
+  6. Re-arming the Auto-Type prompt on every connect with no way to opt out.
+  7. Removing FLAG_SECURE without an explicit user opt-out.
+  8. Overwriting vault.rdpv with bytes that have not been parsed as a VaultFile.
 
 --------------------------------------------------------------------------------
 END OF FILE — keep synchronized with the code.

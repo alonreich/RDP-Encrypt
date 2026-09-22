@@ -66,18 +66,10 @@ public static class RdpLauncher
         bool useMultiMon = profile.ResolveUseMultiMon(settings);
         bool allowClipboard = profile.ResolveAllowClipboard(settings);
 
-        // If launching a desktop widescreen resolution (e.g. 1920x1080), request sensor landscape orientation
-        // so that the incoming Remote Desktop client immediately opens in native 16:9 widescreen, preventing
-        // the remote desktop from squashing/smooshing into portrait (1080x1920).
-        var activity = (context as Activity) ?? MainActivity.Instance;
-        if (!isDeviceNative && width > height && activity != null)
-        {
-            try
-            {
-                activity.RequestedOrientation = ScreenOrientation.SensorLandscape;
-            }
-            catch { }
-        }
+        // NOTE (audit Finding 5): RDP Vault used to force its OWN activity into
+        // SensorLandscape here. Android cannot set the orientation of another app, so all
+        // that ever happened was RDP Vault visibly whipping into landscape for a frame
+        // before handing off. The remote client picks its own orientation. Removed.
 
         // 4. Construct standard Microsoft Remote Desktop URI with display & monitor protection
         // Format: rdp://full%20address=s:{host}:{port}&desktopwidth=i:{w}&desktopheight=i:{h}&screen%20mode%20id=i:{mode}&smart%20sizing=i:{sizing}&dynamic%20resolution=i:0&use%20multimon=i:0&span%20monitors=i:0&authentication%20level=i:{authLevel}&promptcredentialonce=i:1
@@ -151,6 +143,11 @@ public static class RdpLauncher
         {
             RdpAutoTypeService.Arm(profile.Host, profile.Username, profile.Password, timeoutSeconds: 45);
         }
+
+        // Tell the activity we are deliberately leaving the screen so the
+        // "lock the instant the app is backgrounded" rule does not slam the vault shut
+        // mid hand-off (and so the user is not re-prompted on the way back).
+        MainActivity.Instance?.BeginExternalActivity();
 
         var pm = context.PackageManager;
 
@@ -246,6 +243,7 @@ public static class RdpLauncher
     /// </summary>
     public static bool ResumeRemoteDesktop(Context context)
     {
+        MainActivity.Instance?.BeginExternalActivity();
         var pm = context.PackageManager;
         string[] knownPackages = new[]
         {

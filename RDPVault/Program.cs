@@ -114,7 +114,7 @@ internal static class Program
         {
             if (string.Equals(args[i], "--launch", StringComparison.OrdinalIgnoreCase))
             {
-                string value = args[i + 1].Trim();
+                string value = args[i + 1].Trim().Trim('"', '\'');
                 string? id = null;
                 if (File.Exists(value))
                 {
@@ -123,16 +123,18 @@ internal static class Program
                         string content = File.ReadAllText(value).Trim();
                         const string prefix = "TargetProfileId=";
                         if (content.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                            id = content.Substring(prefix.Length).Trim();
+                            id = content.Substring(prefix.Length).Trim().Trim('"', '\'');
+                        else
+                            id = content;
                     }
                     catch { }
                 }
-                else if (Guid.TryParse(value, out Guid g))
+                else
                 {
-                    id = g.ToString("N");
+                    id = value;
                 }
 
-                if (!string.IsNullOrEmpty(id))
+                if (!string.IsNullOrWhiteSpace(id))
                     return "LAUNCH:" + id;
             }
         }

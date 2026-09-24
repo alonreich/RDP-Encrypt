@@ -4,7 +4,7 @@
         Title="Edit Profile" Width="520" Height="820"
         Icon="avares://RDPVault/Assets/icon.ico"
         WindowStartupLocation="CenterOwner" CanResize="True"
-        Background="#121316" Foreground="#EDEDED" FontFamily="Inter, Arial">
+        Background="#22598D" Foreground="#EDEDED" FontFamily="Inter, Arial">
     <Window.Styles>
         <!-- High-contrast Input Fields with distinct boundaries -->
         <Style Selector="TextBox">

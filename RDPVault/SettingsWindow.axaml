@@ -4,7 +4,7 @@
         Title="Settings" Width="560" Height="760"
         Icon="avares://RDPVault/Assets/icon.ico"
         WindowStartupLocation="CenterOwner" CanResize="False"
-        Background="#0E0E10" Foreground="#EDEDED" FontFamily="Inter, Arial">
+        Background="#22598D" Foreground="#EDEDED" FontFamily="Inter, Arial">
     <Window.Styles>
         <Style Selector="TextBox">
             <Setter Property="Background" Value="#141417"/>
@@ -191,7 +191,7 @@
             </StackPanel>
         </ScrollViewer>
 
-        <Border Grid.Row="1" Background="#0B0B0D" BorderBrush="#1A1A1E" BorderThickness="0,1,0,0" Padding="24,14">
+        <Border Grid.Row="1" Background="#1B4770" BorderBrush="#143452" BorderThickness="0,1,0,0" Padding="24,14">
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10">
                 <Button Name="BtnCancel" Content="Cancel" Click="BtnCancel_Click"/>
                 <Button Name="BtnSave" Content="Save settings" Classes="Accent" Click="BtnSave_Click"/>

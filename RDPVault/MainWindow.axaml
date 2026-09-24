@@ -9,7 +9,7 @@
         Icon="avares://RDPVault/Assets/icon.ico"
         Width="860" Height="600" MinWidth="720" MinHeight="480"
         WindowStartupLocation="CenterScreen"
-        Background="#0E0E10"
+        Background="#22598D"
         Foreground="#EDEDED"
         FontFamily="Inter, Arial">
 
@@ -88,12 +88,12 @@
 
     <Grid>
         <!-- ================= LOCKED / FIRST RUN PANEL ================= -->
-        <Border Name="LockedPanel" Background="#0E0E10" IsVisible="True" ZIndex="100">
+        <Border Name="LockedPanel" Background="#22598D" IsVisible="True" ZIndex="100">
             <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="360" Spacing="14">
                 <TextBlock Text="RDP VAULT" FontSize="28" FontWeight="Bold" Foreground="#EDEDED"
                            HorizontalAlignment="Center" LetterSpacing="2"/>
                 <TextBlock Name="TxtLockSubtitle" Text="Enter your master password."
-                           FontSize="13" Foreground="#8A8A93" HorizontalAlignment="Center"
+                           FontSize="13" Foreground="#D0E2FF" HorizontalAlignment="Center"
                            TextWrapping="Wrap" TextAlignment="Center" Margin="0,0,0,6"/>
 
                 <!-- Existing vault -->
@@ -111,15 +111,15 @@
                 <!-- No vault yet (issue #3) -->
                 <StackPanel Name="PnlFirstRun" Spacing="12" IsVisible="False">
                     <TextBlock Text="No vault was found in this folder. Create one to get started."
-                               FontSize="12" Foreground="#8A8A93" TextWrapping="Wrap" TextAlignment="Center"/>
+                               FontSize="12" Foreground="#D0E2FF" TextWrapping="Wrap" TextAlignment="Center"/>
                     <Button Name="BtnCreateVault" Content="Create a new vault" Classes="Accent"
                             HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="BtnCreateVault_Click"/>
                 </StackPanel>
 
-                <TextBlock Name="TxtLockStatus" Foreground="#26A0DA" FontSize="13" HorizontalAlignment="Center"
+                <TextBlock Name="TxtLockStatus" Foreground="#A0D8FF" FontSize="13" HorizontalAlignment="Center"
                            IsVisible="False" TextWrapping="Wrap" TextAlignment="Center"/>
                 <ProgressBar Name="ProgUnlock" IsIndeterminate="True" Height="4" Margin="0,4,0,0" IsVisible="False" Foreground="#005FB8"/>
-                <TextBlock Name="TxtLockError" Foreground="#E83030" FontSize="13" HorizontalAlignment="Center"
+                <TextBlock Name="TxtLockError" Foreground="#FFA0A0" FontSize="13" HorizontalAlignment="Center"
                            IsVisible="False" TextWrapping="Wrap" TextAlignment="Center"/>
             </StackPanel>
         </Border>
@@ -128,14 +128,14 @@
         <Grid Name="MainPanel" IsVisible="False" RowDefinitions="Auto,Auto,Auto,*,Auto" Margin="20">
             <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,14">
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10">
-                    <TextBlock Text="RDP VAULT" FontSize="20" FontWeight="Bold" VerticalAlignment="Center" LetterSpacing="1"/>
-                    <Border Background="#1A1A1E" CornerRadius="4" Padding="6,2" VerticalAlignment="Center">
-                        <TextBlock Name="TxtCount" Text="0 profiles" FontSize="12" Foreground="#8A8A93"/>
+                    <TextBlock Text="RDP VAULT" FontSize="20" FontWeight="Bold" Foreground="#FFFFFF" VerticalAlignment="Center" LetterSpacing="1"/>
+                    <Border Background="#16181F" CornerRadius="4" Padding="6,2" VerticalAlignment="Center">
+                        <TextBlock Name="TxtCount" Text="0 profiles" FontSize="12" Foreground="#D0E2FF"/>
                     </Border>
                 </StackPanel>
 
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10">
-                    <TextBlock Name="TxtIdle" Text="" FontSize="12" Foreground="#6A6A73" VerticalAlignment="Center"/>
+                    <TextBlock Name="TxtIdle" Text="" FontSize="12" Foreground="#D0E2FF" VerticalAlignment="Center"/>
                     <Button Name="BtnSettings" Content="Settings" Click="BtnSettings_Click"/>
                     <Button Name="BtnLock" Content="Lock Vault" Click="BtnLock_Click"/>
                 </StackPanel>
@@ -152,7 +152,7 @@
 
             <ScrollViewer Grid.Row="3">
                 <StackPanel>
-                    <TextBlock Name="TxtEmpty" IsVisible="False" Foreground="#6A6A73" FontSize="13"
+                    <TextBlock Name="TxtEmpty" IsVisible="False" Foreground="#D0E2FF" FontSize="13"
                                Margin="4,20,0,0"
                                Text="No profiles yet. Use &quot;Add Profile&quot; to store your first connection."/>
                     <ListBox Name="LstProfiles">
@@ -182,13 +182,13 @@
 
             <Grid Grid.Row="4" Margin="0,16,0,0" ColumnDefinitions="Auto,*">
                 <Button Grid.Column="0" Name="BtnAddProfile" Content="+ Add Profile" Click="BtnAddProfile_Click"/>
-                <TextBlock Grid.Column="1" Name="TxtStatus" Text="" FontSize="12" Foreground="#6A6A73"
+                <TextBlock Grid.Column="1" Name="TxtStatus" Text="" FontSize="12" Foreground="#D0E2FF"
                            HorizontalAlignment="Right" VerticalAlignment="Center" TextWrapping="NoWrap"/>
             </Grid>
         </Grid>
 
         <!-- ================= TACTICAL LAUNCH & WOL PROGRESS OVERLAY ================= -->
-        <Border Name="OverlayLaunch" Background="#E00A0A0C" IsVisible="False" ZIndex="200">
+        <Border Name="OverlayLaunch" Background="#E0113152" IsVisible="False" ZIndex="200">
             <Border Background="#141417" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="8"
                     Width="460" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="24">
                 <StackPanel Spacing="16">

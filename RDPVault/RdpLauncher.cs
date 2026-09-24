@@ -539,6 +539,43 @@ public static class RdpLauncher
         return true;
     }
 
+    /// <summary>
+    /// Probes whether the RDP destination endpoint on its specified destination port (custom or standard)
+    /// is accepting connections and verifies that the mstsc process remains active.
+    /// </summary>
+    public static async Task<bool> ProbeRdpConnectionAsync(string host, int port, Process proc, System.Threading.CancellationToken ct)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(12);
+        while (DateTime.UtcNow < deadline && !ct.IsCancellationRequested)
+        {
+            if (proc.HasExited)
+                return false;
+
+            try
+            {
+                using var tcp = new TcpClient();
+                using var connectCts = new System.Threading.CancellationTokenSource(TimeSpan.FromMilliseconds(800));
+                using var linkedCts = System.Threading.CancellationTokenSource.CreateLinkedTokenSource(ct, connectCts.Token);
+                await tcp.ConnectAsync(host, port, linkedCts.Token).ConfigureAwait(false);
+                if (tcp.Connected)
+                {
+                    // Destination port is accepting connections.
+                    // Wait a short moment to ensure mstsc doesn't exit immediately on auth/cert failure
+                    await Task.Delay(1200, ct).ConfigureAwait(false);
+                    return !proc.HasExited;
+                }
+            }
+            catch
+            {
+                // Port probe attempt did not connect yet
+            }
+
+            try { await Task.Delay(350, ct).ConfigureAwait(false); } catch { break; }
+        }
+
+        return !proc.HasExited;
+    }
+
     /// <summary>Kill every mstsc.exe this app launched (USB pulled / user request).</summary>
     public static void KillAll()
     {

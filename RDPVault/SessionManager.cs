@@ -82,7 +82,7 @@ public sealed class SessionManager : IDisposable
         {
             if (!string.Equals(args[i], "--launch", StringComparison.OrdinalIgnoreCase)) continue;
 
-            string value = args[i + 1].Trim();
+            string value = args[i + 1].Trim().Trim('"', '\'');
             string? id = null;
 
             if (System.IO.File.Exists(value))
@@ -92,22 +92,57 @@ public sealed class SessionManager : IDisposable
                     string content = System.IO.File.ReadAllText(value).Trim();
                     const string prefix = "TargetProfileId=";
                     if (content.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                        id = content.Substring(prefix.Length).Trim();
+                        id = content.Substring(prefix.Length).Trim().Trim('"', '\'');
+                    else
+                        id = content;
                 }
                 catch { }
             }
-            else if (Guid.TryParse(value, out Guid g))
+            else
             {
-                id = g.ToString("N");
+                id = value;
             }
 
-            if (!string.IsNullOrEmpty(id))
+            if (!string.IsNullOrWhiteSpace(id))
             {
                 PendingLaunchId = id;
                 return "LAUNCH:" + id;
             }
         }
         return "SHOW";
+    }
+
+    /// <summary>
+    /// Locates an RDP profile by GUID ID, normalized ID without dashes, Name, or Host.
+    /// </summary>
+    public RdpProfile? FindProfile(string? target)
+    {
+        if (Payload?.Profiles == null || string.IsNullOrWhiteSpace(target)) return null;
+
+        target = target.Trim().Trim('"', '\'');
+        string normTarget = target.Replace("-", "").Trim();
+
+        // 1. Exact or case-insensitive ID match
+        var match = Payload.Profiles.FirstOrDefault(p => string.Equals(p.Id, target, StringComparison.OrdinalIgnoreCase));
+        if (match != null) return match;
+
+        // 2. Normalized ID match (ignoring dashes)
+        if (normTarget.Length >= 8)
+        {
+            match = Payload.Profiles.FirstOrDefault(p =>
+                string.Equals((p.Id ?? "").Replace("-", "").Trim(), normTarget, StringComparison.OrdinalIgnoreCase));
+            if (match != null) return match;
+        }
+
+        // 3. Name match
+        match = Payload.Profiles.FirstOrDefault(p =>
+            string.Equals(p.Name, target, StringComparison.OrdinalIgnoreCase));
+        if (match != null) return match;
+
+        // 4. Host match
+        match = Payload.Profiles.FirstOrDefault(p =>
+            string.Equals(p.Host, target, StringComparison.OrdinalIgnoreCase));
+        return match;
     }
 
     // ---------------------------------------------------------------- timers
@@ -329,11 +364,14 @@ public sealed class SessionManager : IDisposable
         {
             string target = PendingLaunchId;
             PendingLaunchId = null;
-            var p = Payload.Profiles.FirstOrDefault(x => x.Id == target);
+            var p = FindProfile(target);
             if (p != null)
             {
-                if (LaunchRequested != null) OnUi(() => LaunchRequested.Invoke(p, true));
-                else OnUi(() => RdpLauncher.Launch(p));
+                OnUi(async () =>
+                {
+                    await Task.Delay(250);
+                    LaunchRequested?.Invoke(p, true);
+                });
             }
             else OnUi(() => Notice?.Invoke("That shortcut points at a profile that no longer exists."));
         }
@@ -586,7 +624,7 @@ public sealed class SessionManager : IDisposable
 
                     if (IsUnlocked && Payload != null)
                     {
-                        var p = Payload.Profiles.FirstOrDefault(x => x.Id == target);
+                        var p = FindProfile(target);
                         if (p != null)
                         {
                             if (LaunchRequested != null) OnUi(() => LaunchRequested.Invoke(p, true));

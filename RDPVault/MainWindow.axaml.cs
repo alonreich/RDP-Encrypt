@@ -474,7 +474,16 @@ public partial class MainWindow : Window
 
     private async Task ValidateAndLaunchProfileAsync(RdpProfile p, bool fromShortcut = false)
     {
-        if (_busy) return;
+        if (_busy)
+        {
+            if (fromShortcut)
+            {
+                // Wait for any unlock or busy operation to settle
+                for (int i = 0; i < 50 && _busy; i++)
+                    await Task.Delay(100);
+            }
+            if (_busy) return;
+        }
         SessionManager.Current.Touch();
 
         var active = RdpLauncher.FindActiveSession(p);
@@ -544,9 +553,31 @@ public partial class MainWindow : Window
         }
 
         bool launched = false;
+        bool connectionVerified = false;
         try
         {
             launched = await RdpLauncher.LaunchAsync(p, OnProgress, _connectCts.Token);
+            if (launched)
+            {
+                var currentSession = RdpLauncher.FindActiveSession(p);
+                if (currentSession != null && currentSession.Process != null)
+                {
+                    var endpoint = ConnectionEndpoint.FromProfile(p);
+                    OnProgress(new LaunchProgressUpdate
+                    {
+                        Step = "Probing RDP Connection",
+                        Details = $"Verifying connection to {endpoint.Host}:{endpoint.Port}...",
+                        IsIndeterminate = true
+                    });
+
+                    connectionVerified = await RdpLauncher.ProbeRdpConnectionAsync(
+                        endpoint.Host, endpoint.Port, currentSession.Process, _connectCts.Token);
+                }
+                else
+                {
+                    connectionVerified = true;
+                }
+            }
         }
         catch (OperationCanceledException)
         {
@@ -563,8 +594,20 @@ public partial class MainWindow : Window
             OverlayLaunch.IsVisible = false;
         }
 
-        // Keep the vault window open, active, and focused in the foreground after launching
-        BringToForeground();
+        if (launched && connectionVerified)
+        {
+            // Close the main vault behind after successful RDP connection
+            Dispatcher.UIThread.Post(() =>
+            {
+                _closing = true;
+                Close();
+            });
+        }
+        else if (launched)
+        {
+            SetStatus($"Remote Desktop launched for {p.Name}.");
+            BringToForeground();
+        }
     }
 
     private void BtnCancelLaunch_Click(object? sender, RoutedEventArgs e)

@@ -4,7 +4,7 @@
         Title="RDP Vault Setup" Width="550" Height="400"
         Icon="avares://RDPVault/Assets/icon.ico"
         WindowStartupLocation="CenterScreen" CanResize="False"
-        Background="#22598D" Foreground="#EDEDED" FontFamily="Inter, Arial"
+        Background="#13283E" Foreground="#EDEDED" FontFamily="Inter, Arial"
         Topmost="True">
 
     <Window.Styles>

@@ -9,7 +9,7 @@
         Icon="avares://RDPVault/Assets/icon.ico"
         Width="860" Height="600" MinWidth="720" MinHeight="480"
         WindowStartupLocation="CenterScreen"
-        Background="#22598D"
+        Background="#13283E"
         Foreground="#EDEDED"
         FontFamily="Inter, Arial">
 
@@ -88,7 +88,7 @@
 
     <Grid>
         <!-- ================= LOCKED / FIRST RUN PANEL ================= -->
-        <Border Name="LockedPanel" Background="#22598D" IsVisible="True" ZIndex="100">
+        <Border Name="LockedPanel" Background="#13283E" IsVisible="True" ZIndex="100">
             <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="360" Spacing="14">
                 <TextBlock Text="RDP VAULT" FontSize="28" FontWeight="Bold" Foreground="#EDEDED"
                            HorizontalAlignment="Center" LetterSpacing="2"/>
@@ -188,7 +188,7 @@
         </Grid>
 
         <!-- ================= TACTICAL LAUNCH & WOL PROGRESS OVERLAY ================= -->
-        <Border Name="OverlayLaunch" Background="#E0113152" IsVisible="False" ZIndex="200">
+        <Border Name="OverlayLaunch" Background="#E00B1A2A" IsVisible="False" ZIndex="200">
             <Border Background="#141417" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="8"
                     Width="460" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="24">
                 <StackPanel Spacing="16">

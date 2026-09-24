@@ -281,6 +281,27 @@ public class RdpAutoTypeService : AccessibilityService
                 global::Android.Util.Log.Warn("RDPVault", "RdpAutoTypeService: No verified password input field found. Aborting auto-type to prevent accidental exposure.");
                 return;
             }
+            // Verify destination host in the dialog before injecting (Item 5: ensure credentials go to verified host only)
+            string targetHost = _armedHost ?? "";
+            if (targetHost.Contains(':')) targetHost = targetHost.Split(':')[0];
+            targetHost = targetHost.Trim('[', ']');
+
+            var allTexts = new List<string>();
+            CollectAllText(root, allTexts);
+
+            bool hostVerified = !string.IsNullOrEmpty(targetHost) &&
+                                allTexts.Any(t => t.IndexOf(targetHost, StringComparison.OrdinalIgnoreCase) >= 0);
+
+            bool isGatewayPrompt = allTexts.Any(t => t.IndexOf("gateway", StringComparison.OrdinalIgnoreCase) >= 0);
+
+            if (isGatewayPrompt || (!hostVerified && allTexts.Count > 0))
+            {
+                global::Android.Util.Log.Warn("RDPVault", $"RdpAutoTypeService: Destination host '{targetHost}' not verified on active screen. Aborting injection.");
+                Disarm();
+                ReportInjectionFailureIfStillArmed();
+                return;
+            }
+
             {
                 string targetPass;
                 string targetUser;
@@ -340,6 +361,20 @@ public class RdpAutoTypeService : AccessibilityService
         }
     }
 
+    private static void CollectAllText(AccessibilityNodeInfo node, List<string> texts)
+    {
+        string text = (node.Text?.ToString() ?? node.ContentDescription?.ToString() ?? "").Trim();
+        if (!string.IsNullOrEmpty(text))
+        {
+            texts.Add(text);
+        }
+        for (int i = 0; i < node.ChildCount; i++)
+        {
+            var child = node.GetChild(i);
+            if (child != null) CollectAllText(child, texts);
+        }
+    }
+
     private static void FindEditTextNodes(AccessibilityNodeInfo node, List<AccessibilityNodeInfo> result)
     {
         if (node.ClassName?.ToString()?.Contains("EditText", StringComparison.OrdinalIgnoreCase) == true)
@@ -361,19 +396,34 @@ public class RdpAutoTypeService : AccessibilityService
     {
         if (node.Password) return true;
 
-        var inputType = (InputTypes)node.InputType;
-        if ((inputType & InputTypes.TextVariationPassword) != 0 ||
-            (inputType & InputTypes.TextVariationWebPassword) != 0 ||
-            (inputType & InputTypes.NumberVariationPassword) != 0)
+        int raw = (int)node.InputType;
+        int inputClass = raw & 0x0000000f; // TYPE_MASK_CLASS
+        int variation = raw & 0x00000ff0;  // TYPE_MASK_VARIATION
+
+        if (inputClass == 0x00000001) // TYPE_CLASS_TEXT
         {
-            return true;
+            if (variation == 0x00000080 || // TYPE_TEXT_VARIATION_PASSWORD
+                variation == 0x00000090 || // TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+                variation == 0x000000e0)   // TYPE_TEXT_VARIATION_WEB_PASSWORD
+            {
+                return true;
+            }
+        }
+        else if (inputClass == 0x00000002) // TYPE_CLASS_NUMBER
+        {
+            if (variation == 0x00000010) // TYPE_NUMBER_VARIATION_PASSWORD
+            {
+                return true;
+            }
         }
 
         string id = node.ViewIdResourceName?.ToLowerInvariant() ?? "";
-        if (id.Contains("password") || id.Contains("pass")) return true;
+        if (id.EndsWith("password", StringComparison.OrdinalIgnoreCase) || id.EndsWith("password_edit", StringComparison.OrdinalIgnoreCase))
+            return true;
 
-        string hint = node.HintText?.ToString()?.ToLowerInvariant() ?? "";
-        if (hint.Contains("password")) return true;
+        string hint = node.HintText?.ToString()?.Trim().ToLowerInvariant() ?? "";
+        if (hint == "password" || hint == "enter password")
+            return true;
 
         return false;
     }

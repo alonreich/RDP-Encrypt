@@ -182,9 +182,11 @@ public class RdpSessionService : Service
         _probeCts = new CancellationTokenSource();
         var token = _probeCts.Token;
 
-        string host = _sessionHost;
-        int port = _sessionPort;
-        if (string.IsNullOrWhiteSpace(host)) return;
+        string? gateway = _activeProfile?.GatewayHost?.Trim();
+        bool useGateway = !string.IsNullOrEmpty(gateway);
+        string probeTarget = useGateway ? gateway! : _sessionHost;
+        int probePort = useGateway ? 443 : _sessionPort;
+        if (string.IsNullOrWhiteSpace(probeTarget)) return;
 
         _ = Task.Run(async () =>
         {
@@ -205,7 +207,7 @@ public class RdpSessionService : Service
 
                 if (token.IsCancellationRequested || !_isHandedOff) return;
 
-                bool reachable = await HostProbe.IsReachableAsync(host, port, ProbeTimeoutMs, token).ConfigureAwait(false);
+                bool reachable = await HostProbe.IsReachableAsync(probeTarget, probePort, ProbeTimeoutMs, token).ConfigureAwait(false);
 
                 if (reachable)
                 {

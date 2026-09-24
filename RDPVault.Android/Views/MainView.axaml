@@ -340,7 +340,7 @@
         </Grid>
 
         <!-- ==================== 6. PROFILE EDITOR ==================== -->
-        <Grid Name="PanelProfileEditor" RowDefinitions="Auto,*" Margin="16,52,16,16" IsVisible="False">
+        <Grid Name="PanelProfileEditor" RowDefinitions="Auto,*,Auto" Margin="16,52,16,16" IsVisible="False">
             <!-- The ONLY Save / Cancel pair in this screen (audit item 10 / suggestion 5) -->
             <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,12">
                 <Button Grid.Column="0" Name="BtnTopCancelProfile" Content="←" Background="#2E2E35" Foreground="#EDEDED"
@@ -468,17 +468,34 @@
                             </StackPanel>
                         </Border>
 
-                        <!-- Port Knocking (ICMP) Card (Issue 31) -->
+                        <!-- Port Knocking Card -->
                         <Border Name="CardKnock" Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16">
                             <StackPanel Spacing="10">
-                                <TextBlock Text="PORT KNOCKING (ICMP MAGIC PACKET)" FontSize="12" FontWeight="Bold" Foreground="#9A9AA3" LetterSpacing="1"/>
-                                <CheckBox Name="ChkProfileEnableKnock" Content="Enable Port Knocking" Foreground="#EDEDED"/>
+                                <TextBlock Text="PORT KNOCKING" FontSize="12" FontWeight="Bold" Foreground="#9A9AA3" LetterSpacing="1"/>
+                                <CheckBox Name="ChkProfileEnableKnock" Content="Enable Port Knocking (send packet before connecting)" Foreground="#EDEDED"/>
                                 <StackPanel Name="PnlKnockDetails" Spacing="10" IsVisible="False">
-                                    <TextBlock Text="Sends an out-of-the-ordinary ICMP knock payload to the destination IP, waits 2 seconds, then connects to the custom RDP port. Your firewall must be configured to trigger on this knock."
-                                               FontSize="12" Foreground="#8A8A93" TextWrapping="Wrap"/>
-                                    <TextBlock Text="HEXADECIMAL SIGNATURE" FontSize="12" FontWeight="Bold" Foreground="#9A9AA3" LetterSpacing="1"/>
-                                    <TextBox Name="TxtProfileKnockSignature" Watermark="Generate or enter hexadecimal bytes" Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" TextWrapping="Wrap"/>
-                                    <Button Name="BtnGenerateKnockSignature" Content="Generate Unique Signature" Height="44" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Background="#1F1F24" Foreground="#EDEDED" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="6"/>
+                                    <TextBlock Text="KNOCK PROTOCOL" FontSize="12" FontWeight="Bold" Foreground="#9A9AA3" LetterSpacing="1"/>
+                                    <ComboBox Name="CmbProfileKnockProtocol" HorizontalAlignment="Stretch" Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35">
+                                        <ComboBoxItem Content="ICMP (Magic Packet)"/>
+                                        <ComboBoxItem Content="TCP (Knock Port)"/>
+                                    </ComboBox>
+
+                                    <!-- ICMP details -->
+                                    <StackPanel Name="PnlProfileKnockIcmp" Spacing="6">
+                                        <TextBlock Text="HEXADECIMAL SIGNATURE" FontSize="12" FontWeight="Bold" Foreground="#9A9AA3" LetterSpacing="1"/>
+                                        <TextBox Name="TxtProfileKnockSignature" Watermark="Generate or enter hexadecimal bytes" Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" TextWrapping="Wrap"/>
+                                        <Button Name="BtnGenerateKnockSignature" Content="Generate Unique Signature" Height="44" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Background="#1F1F24" Foreground="#EDEDED" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="6"/>
+                                    </StackPanel>
+
+                                    <!-- TCP details -->
+                                    <StackPanel Name="PnlProfileKnockTcp" Spacing="6" IsVisible="False">
+                                        <TextBlock Text="TCP KNOCK PORT" FontSize="12" FontWeight="Bold" Foreground="#9A9AA3" LetterSpacing="1"/>
+                                        <TextBox Name="TxtProfileKnockTcpPort" Text="7777" Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35"/>
+                                    </StackPanel>
+
+                                    <!-- Delay -->
+                                    <TextBlock Text="DELAY BEFORE CONNECTING (SECONDS)" FontSize="12" FontWeight="Bold" Foreground="#9A9AA3" LetterSpacing="1"/>
+                                    <TextBox Name="TxtProfileKnockDelay" Text="2" Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35"/>
                                 </StackPanel>
                             </StackPanel>
                         </Border>
@@ -504,20 +521,22 @@
 
                     <TextBlock Name="TxtProfileError" Foreground="#FF6B6B" FontSize="13" HorizontalAlignment="Center" IsVisible="False" TextWrapping="Wrap" TextAlignment="Center"/>
 
-                    <!-- Bottom Action Controls: easily accessible when scrolled down (Issue 32) -->
-                    <Grid ColumnDefinitions="*,12,*" Margin="0,10,0,0">
-                        <Button Grid.Column="0" Name="BtnBottomCancelProfile" Content="Cancel / Back" Height="48"
-                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
-                                Background="#2E2E35" Foreground="#EDEDED" CornerRadius="6" FontWeight="SemiBold"/>
-                        <Button Grid.Column="2" Name="BtnBottomSaveProfile" Content="Save Connection" Height="48"
-                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
-                                Background="#005FB8" Foreground="White" CornerRadius="6" FontWeight="Bold"/>
-                    </Grid>
-
                     <Button Name="BtnDeleteProfile" Content="🗑 Delete Connection" Background="#B80000" Foreground="White"
                             HorizontalAlignment="Stretch" CornerRadius="6" IsVisible="False" Margin="0,10,0,0"/>
                 </StackPanel>
             </ScrollViewer>
+
+            <!-- Sticky Bottom Action Controls: always visible while scrolling (Issue 32) -->
+            <Border Grid.Row="2" Background="#0E0E10" BorderBrush="#2E2E35" BorderThickness="0,1,0,0" Padding="0,10,0,0">
+                <Grid ColumnDefinitions="*,12,*">
+                    <Button Grid.Column="0" Name="BtnBottomCancelProfile" Content="Cancel / Back" Height="48"
+                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                            Background="#2E2E35" Foreground="#EDEDED" CornerRadius="6" FontWeight="SemiBold"/>
+                    <Button Grid.Column="2" Name="BtnBottomSaveProfile" Content="Save Connection" Height="48"
+                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                            Background="#005FB8" Foreground="White" CornerRadius="6" FontWeight="Bold"/>
+                </Grid>
+            </Border>
         </Grid>
 
         <!-- ==================== 7. SETTINGS PANEL ==================== -->

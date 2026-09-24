@@ -392,15 +392,19 @@ public static class RdpLauncher
 
         if (p.EnableIcmpKnock)
         {
+            bool isTcp = string.Equals(p.KnockProtocol, "TCP", StringComparison.OrdinalIgnoreCase);
+            int delaySec = p.KnockDelaySeconds >= 0 ? p.KnockDelaySeconds : 2;
             progress?.Invoke(new LaunchProgressUpdate
             {
-                Step = "Sending ICMP knock",
-                Details = $"Sending the saved signature to {p.Host}; waiting 2 seconds before RDP on port {p.Port}.",
+                Step = "Port Knocking",
+                Details = isTcp
+                    ? $"Sending TCP knock to {p.Host}:{p.KnockTcpPort}; waiting {delaySec}s before RDP on port {p.Port}."
+                    : $"Sending ICMP magic packet to {p.Host}; waiting {delaySec}s before RDP on port {p.Port}.",
                 IsIndeterminate = true
             });
             try { await IcmpKnock.SendBeforeConnectAsync(p, IcmpKnock.SendWindowsAsync, ct); }
             catch (OperationCanceledException) { LaunchFailed?.Invoke("Connection cancelled."); return false; }
-            catch (Exception ex) { LaunchFailed?.Invoke("ICMP knock could not be sent: " + ex.Message); return false; }
+            catch (Exception ex) { LaunchFailed?.Invoke("Port knock could not be sent: " + ex.Message); return false; }
         }
 
         progress?.Invoke(new LaunchProgressUpdate
@@ -716,7 +720,9 @@ public static class RdpLauncher
             {
                 var mgr = SessionManager.Current;
                 if (!mgr.IsUnlocked) return;                       // locked since; nothing to write into
-                if (mgr.Payload?.Profiles.Contains(p) != true) return;  // deleted or edited away
+                var target = mgr.Payload?.Profiles.FirstOrDefault(x => x.Id == p.Id);
+                if (target == null) return;  // deleted or edited away
+                target.CertThumbprint = thumb;
                 p.CertThumbprint = thumb;
                 mgr.TrySave(out _);   // bookkeeping: never surface as an error to the user
             }
@@ -757,22 +763,35 @@ public static class RdpLauncher
 
     private static class SessionCredentialCoordinator
     {
-        private static readonly Dictionary<string, int> TargetRefCounts = new(StringComparer.OrdinalIgnoreCase);
+        private record struct ActiveCred(int RefCount, string Username, string Password);
+        private static readonly Dictionary<string, ActiveCred> ActiveCredentials = new(StringComparer.OrdinalIgnoreCase);
         private static readonly object CredLock = new();
 
         public static bool Acquire(string target, string user, string password)
         {
             lock (CredLock)
             {
-                if (TargetRefCounts.TryGetValue(target, out int count))
+                if (ActiveCredentials.TryGetValue(target, out var active))
                 {
-                    TargetRefCounts[target] = count + 1;
-                    return true;
+                    if (string.Equals(active.Username, user, StringComparison.Ordinal) &&
+                        string.Equals(active.Password, password, StringComparison.Ordinal))
+                    {
+                        ActiveCredentials[target] = active with { RefCount = active.RefCount + 1 };
+                        return true;
+                    }
+
+                    // Different account requested for the same target: update Windows Credential Manager
+                    if (WriteSessionCredential(target, user, password))
+                    {
+                        ActiveCredentials[target] = new ActiveCred(active.RefCount + 1, user, password);
+                        return true;
+                    }
+                    return false;
                 }
 
                 if (WriteSessionCredential(target, user, password))
                 {
-                    TargetRefCounts[target] = 1;
+                    ActiveCredentials[target] = new ActiveCred(1, user, password);
                     return true;
                 }
                 return false;
@@ -783,16 +802,16 @@ public static class RdpLauncher
         {
             lock (CredLock)
             {
-                if (TargetRefCounts.TryGetValue(target, out int count))
+                if (ActiveCredentials.TryGetValue(target, out var active))
                 {
-                    if (count <= 1)
+                    if (active.RefCount <= 1)
                     {
-                        TargetRefCounts.Remove(target);
+                        ActiveCredentials.Remove(target);
                         DeleteCredential(target);
                     }
                     else
                     {
-                        TargetRefCounts[target] = count - 1;
+                        ActiveCredentials[target] = active with { RefCount = active.RefCount - 1 };
                     }
                 }
                 else
@@ -806,11 +825,11 @@ public static class RdpLauncher
         {
             lock (CredLock)
             {
-                foreach (string target in TargetRefCounts.Keys)
+                foreach (string target in ActiveCredentials.Keys)
                 {
                     DeleteCredential(target);
                 }
-                TargetRefCounts.Clear();
+                ActiveCredentials.Clear();
             }
         }
     }

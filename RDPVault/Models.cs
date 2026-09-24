@@ -121,6 +121,9 @@ public class RdpProfile
     public int WolWaitSeconds { get; set; } = 5;
 
     public bool EnableIcmpKnock { get; set; } = false;
+    public string KnockProtocol { get; set; } = "ICMP";
+    public int KnockTcpPort { get; set; } = 7777;
+    public int KnockDelaySeconds { get; set; } = 2;
     public string IcmpKnockSignature { get; set; } = "";
 
     public string Notes { get; set; } = "";

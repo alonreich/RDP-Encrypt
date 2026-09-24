@@ -64,6 +64,14 @@ echo ###########################################################
 call :BUILD_SINGLEFILE
 if errorlevel 1 exit /b 1
 
+if exist "%LOCALAPPDATA%\RdpVaultBuildTools\android-sdk" (
+  echo.
+  echo ###########################################################
+  echo BUILDING RDP Vault: Android APK
+  echo ###########################################################
+  call :BUILD_ANDROID
+)
+
 call :VALIDATE_COMPILED_OUTPUT
 if errorlevel 1 exit /b 1
 
@@ -175,6 +183,20 @@ if errorlevel 1 exit /b 1
 call :PURGE_COMPILED_EXTRAS
 if errorlevel 1 exit /b 1
 if exist "%FINAL_DIR%" rd /s /q "%FINAL_DIR%"
+exit /b 0
+
+:BUILD_ANDROID
+set "ANDROID_SDK=%LOCALAPPDATA%\RdpVaultBuildTools\android-sdk"
+set "JAVA_SDK=%LOCALAPPDATA%\RdpVaultBuildTools\jdk"
+dotnet build RDPVault.Android\RDPVault.Android.csproj -c Release /p:AndroidSdkDirectory="%ANDROID_SDK%" /p:JavaSdkDirectory="%JAVA_SDK%" %DOTNET_LOG_ARGS%
+if errorlevel 1 (
+  echo [WARN] Android build returned an error.
+  exit /b 0
+)
+if exist "RDPVault.Android\bin\Release\net9.0-android\com.rdpvault.app-Signed.apk" (
+  copy /y "RDPVault.Android\bin\Release\net9.0-android\com.rdpvault.app-Signed.apk" "%OUTPUT_DIR%\RDPVault.apk" >nul
+  echo [ANDROID] Freshly signed APK copied to %OUTPUT_DIR%\RDPVault.apk.
+)
 exit /b 0
 
 :PURGE_COMPILED_EXTRAS

@@ -10,34 +10,71 @@ public readonly record struct ConnectionEndpoint(string Host, int Port)
 
     public static ConnectionEndpoint FromProfile(RdpProfile profile) => Parse(profile.Host, profile.Port);
 
-    public static ConnectionEndpoint Parse(string input, int port)
+    public static ConnectionEndpoint Parse(string input, int port = 3389)
     {
-        if (port is < 1 or > 65535) throw new ArgumentException("Port must be between 1 and 65535.");
+        if (!TryParse(input, out var endpoint, out string error, port))
+            throw new ArgumentException(error);
+        return endpoint;
+    }
+
+    public static bool TryParse(string? input, out ConnectionEndpoint endpoint, out string error, int port = 3389)
+    {
+        endpoint = default;
+        error = "";
+
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            error = "Enter the host name or IP address to connect to.";
+            return false;
+        }
+
         string host = input.Trim();
+        int embedded = 0;
+
         if (host.StartsWith('['))
         {
             int end = host.IndexOf(']');
             if (end < 0 || !IPAddress.TryParse(host[1..end], out var ip) || ip.AddressFamily != AddressFamily.InterNetworkV6)
-                throw new ArgumentException("Enter a valid IPv6 address.");
+            {
+                error = "Enter a valid IPv6 address.";
+                return false;
+            }
             string suffix = host[(end + 1)..];
             if (suffix.Length > 0)
             {
-                if (!suffix.StartsWith(':') || !int.TryParse(suffix[1..], out int embedded) || embedded is < 1 or > 65535)
-                    throw new ArgumentException("Enter the computer address and use the Port field for its port.");
-                if (embedded > 0) port = embedded;
+                if (!suffix.StartsWith(':') || !int.TryParse(suffix[1..], out embedded) || embedded is < 1 or > 65535)
+                {
+                    error = "Enter the computer address and use the Port field for its port.";
+                    return false;
+                }
             }
             host = host[1..end];
         }
         else if (host.Count(c => c == ':') == 1)
         {
             int colon = host.LastIndexOf(':');
-            if (!int.TryParse(host[(colon + 1)..], out int embedded) || embedded is < 1 or > 65535)
-                throw new ArgumentException("Enter the computer address and use the Port field for its port.");
+            if (!int.TryParse(host[(colon + 1)..], out embedded) || embedded is < 1 or > 65535)
+            {
+                error = "Enter the computer address and use the Port field for its port.";
+                return false;
+            }
             host = host[..colon];
-            if (embedded > 0) port = embedded;
         }
+
+        int finalPort = port;
+        if (finalPort is < 1 or > 65535)
+        {
+            finalPort = embedded > 0 ? embedded : 3389;
+        }
+        // If the separate port is valid (1..65535), it takes precedence over embedded port.
+
         if (string.IsNullOrWhiteSpace(host) || host.Any(char.IsWhiteSpace) || host.IndexOfAny(['/', '\\', '&', '?', '#', '"']) >= 0 || Uri.CheckHostName(host) == UriHostNameType.Unknown)
-            throw new ArgumentException("Enter a valid computer name or IP address, without a URL or spaces.");
-        return new ConnectionEndpoint(host, port);
+        {
+            error = "Enter a valid computer name or IP address, without a URL or spaces.";
+            return false;
+        }
+
+        endpoint = new ConnectionEndpoint(host, finalPort);
+        return true;
     }
 }

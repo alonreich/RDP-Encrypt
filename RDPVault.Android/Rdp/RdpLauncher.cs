@@ -142,24 +142,6 @@ public static class RdpLauncher
 
         var pm = context.PackageManager;
 
-        // Try direct intent resolution
-        try
-        {
-            var activities = pm?.QueryIntentActivities(intent, (PackageInfoFlags)0);
-            if (activities != null && activities.Count > 0)
-            {
-                LastUsedPackage = activities[0].ActivityInfo?.PackageName;
-                context.StartActivity(intent);
-                message = "Remote Desktop client launched.";
-                return RdpLaunchStatus.Success;
-            }
-        }
-        catch (Exception ex)
-        {
-            global::Android.Util.Log.Warn("RDPVault", "QueryIntentActivities failed: " + ex.Message);
-        }
-
-        // Fallback: check for known RDP apps by package ID
         string[] knownPackages = new[]
         {
             "com.microsoft.rdc.androidx",
@@ -167,6 +149,38 @@ public static class RdpLauncher
             "com.iiordanov.freeaRDP",
             "com.iiordanov.aRDP"
         };
+
+        // Try direct intent resolution targeting an explicit package
+        try
+        {
+            var activities = pm?.QueryIntentActivities(intent, (PackageInfoFlags)0);
+            if (activities != null && activities.Count > 0)
+            {
+                string? targetPkg = null;
+                foreach (var known in knownPackages)
+                {
+                    if (activities.Any(a => string.Equals(a.ActivityInfo?.PackageName, known, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        targetPkg = known;
+                        break;
+                    }
+                }
+                targetPkg ??= activities[0].ActivityInfo?.PackageName;
+
+                if (!string.IsNullOrEmpty(targetPkg))
+                {
+                    intent.SetPackage(targetPkg);
+                    LastUsedPackage = targetPkg;
+                    context.StartActivity(intent);
+                    message = "Remote Desktop client launched.";
+                    return RdpLaunchStatus.Success;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            global::Android.Util.Log.Warn("RDPVault", "QueryIntentActivities failed: " + ex.Message);
+        }
 
         foreach (var pkg in knownPackages)
         {

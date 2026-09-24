@@ -7,10 +7,6 @@ namespace RDPVault;
 
 public partial class ProfileEditorWindow : Window
 {
-    /// <summary>
-    /// The working copy. Editing never touches the stored profile until the caller
-    /// applies it, so Cancel genuinely cancels.
-    /// </summary>
     public RdpProfile Profile { get; }
 
     public ProfileEditorWindow() : this(null) { }
@@ -23,7 +19,6 @@ public partial class ProfileEditorWindow : Window
         LoadProfileToUI();
     }
 
-    /// <summary>Copies the edited values onto the real stored profile (keeping its Id).</summary>
     public void ApplyTo(RdpProfile target)
     {
         target.Name = Profile.Name;
@@ -46,13 +41,16 @@ public partial class ProfileEditorWindow : Window
         target.WolPort = Profile.WolPort;
         target.WolWaitSeconds = Profile.WolWaitSeconds;
         target.EnableIcmpKnock = Profile.EnableIcmpKnock;
+        target.KnockProtocol = Profile.KnockProtocol;
+        target.KnockTcpPort = Profile.KnockTcpPort;
+        target.KnockDelaySeconds = Profile.KnockDelaySeconds;
         target.IcmpKnockSignature = Profile.IcmpKnockSignature;
         target.AllowClipboard = Profile.AllowClipboard;
         target.AllowDrives = Profile.AllowDrives;
         target.AllowPrinters = Profile.AllowPrinters;
         target.AllowSmartCards = Profile.AllowSmartCards;
         target.AllowUnverifiedServer = Profile.AllowUnverifiedServer;
-        target.CertThumbprint = Profile.CertThumbprint;   // issue #2: keep the accepted certificate pin
+        target.CertThumbprint = Profile.CertThumbprint;
         target.Notes = Profile.Notes;
     }
 
@@ -62,34 +60,67 @@ public partial class ProfileEditorWindow : Window
 
         TxtName.Text = Profile.Name;
         TxtHost.Text = Profile.Host;
-        TxtPort.Text = Profile.Port.ToString();
+        TxtPort.Text = Profile.Port > 0 ? Profile.Port.ToString() : "3389";
         TxtUsername.Text = Profile.Username;
         TxtPassword.Text = Profile.Password;
         TxtGateway.Text = Profile.GatewayHost;
-        ChkIcmpKnock.IsChecked = Profile.EnableIcmpKnock;
-        PnlIcmpKnockDetails.IsVisible = Profile.EnableIcmpKnock;
-        ChkIcmpKnock.IsCheckedChanged += (_, _) => PnlIcmpKnockDetails.IsVisible = ChkIcmpKnock.IsChecked == true;
-        TxtIcmpSignature.Text = Profile.IcmpKnockSignature;
-        BtnGenerateIcmpSignature.Click += (_, _) => TxtIcmpSignature.Text = IcmpKnock.GenerateSignature();
 
-        if (Profile.UseMultiMon) CmbResolution.SelectedIndex = 1;
-        else if (Profile.FullScreen) CmbResolution.SelectedIndex = 0;
-        else CmbResolution.SelectedIndex = (Profile.Width, Profile.Height) switch
+        // Port Knocking
+        ChkEnableKnock.IsChecked = Profile.EnableIcmpKnock;
+        PnlKnockDetails.IsVisible = Profile.EnableIcmpKnock;
+        ChkEnableKnock.IsCheckedChanged += (_, _) => PnlKnockDetails.IsVisible = ChkEnableKnock.IsChecked == true;
+
+        bool isTcp = string.Equals(Profile.KnockProtocol, "TCP", StringComparison.OrdinalIgnoreCase);
+        CmbKnockProtocol.SelectedIndex = isTcp ? 1 : 0;
+        PnlKnockTcp.IsVisible = isTcp;
+        PnlKnockIcmp.IsVisible = !isTcp;
+
+        CmbKnockProtocol.SelectionChanged += (_, _) =>
         {
-            (1920, 1080) => 2,
-            (1600, 900) => 3,
-            (1366, 768) => 4,
-            (1280, 1024) => 5,
-            (1280, 800) => 6,
-            (1024, 768) => 7,
-            (800, 600) => 8,
-            _ => 0
+            bool tcpSelected = CmbKnockProtocol.SelectedIndex == 1;
+            PnlKnockTcp.IsVisible = tcpSelected;
+            PnlKnockIcmp.IsVisible = !tcpSelected;
         };
 
-        CmbFullScreen.SelectedIndex = (int)Profile.FullScreenOverride;
-        CmbMultiMon.SelectedIndex = (int)Profile.MultiMonOverride;
+        TxtIcmpSignature.Text = Profile.IcmpKnockSignature;
+        BtnGenerateIcmpSignature.Click += (_, _) => TxtIcmpSignature.Text = IcmpKnock.GenerateSignature();
+        TxtKnockTcpPort.Text = Profile.KnockTcpPort > 0 ? Profile.KnockTcpPort.ToString() : "7777";
+        TxtKnockDelay.Text = Profile.KnockDelaySeconds >= 0 ? Profile.KnockDelaySeconds.ToString() : "2";
+
+        // Unified Display & Monitor Mode
+        if (Profile.MultiMonOverride == TriStateOverride.InheritGlobal && Profile.FullScreenOverride == TriStateOverride.InheritGlobal)
+        {
+            CmbDisplayMode.SelectedIndex = 0;
+        }
+        else if (Profile.MultiMonOverride == TriStateOverride.Enabled || Profile.UseMultiMon)
+        {
+            CmbDisplayMode.SelectedIndex = 1;
+        }
+        else if (Profile.FullScreenOverride == TriStateOverride.Enabled || Profile.FullScreen)
+        {
+            CmbDisplayMode.SelectedIndex = 2;
+        }
+        else
+        {
+            CmbDisplayMode.SelectedIndex = (Profile.Width, Profile.Height) switch
+            {
+                (1920, 1080) => 3,
+                (1600, 900) => 4,
+                (1366, 768) => 5,
+                (1280, 1024) => 6,
+                (1280, 800) => 7,
+                (1024, 768) => 8,
+                (800, 600) => 9,
+                _ => 3
+            };
+        }
+
+        UpdateDisplayModeDesc();
+        CmbDisplayMode.SelectionChanged += (_, _) => UpdateDisplayModeDesc();
+
         CmbCertWarnings.SelectedIndex = (int)Profile.SuppressCertWarningsOverride;
 
+        // Wake-on-LAN
         ChkEnableWol.IsChecked = Profile.EnableWol;
         TxtWolMac.Text = Profile.WolMacAddress;
         TxtWolBroadcast.Text = (string.IsNullOrWhiteSpace(Profile.WolBroadcastIp) || Profile.WolBroadcastIp == "255.255.255.255") ? "" : Profile.WolBroadcastIp;
@@ -106,77 +137,40 @@ public partial class ProfileEditorWindow : Window
             }
         };
 
+        // Local resources
         ChkClipboard.IsChecked = Profile.ResolveAllowClipboard(settings);
         ChkDrives.IsChecked = Profile.AllowDrives;
         ChkPrinters.IsChecked = Profile.AllowPrinters;
         ChkSmartCards.IsChecked = Profile.AllowSmartCards;
         ChkAllowUnverified.IsChecked = Profile.AllowUnverifiedServer;
+    }
 
-        bool updatingResolutionUi = false;
-        CmbResolution.SelectionChanged += (_, _) =>
+    private void UpdateDisplayModeDesc()
+    {
+        var settings = SessionManager.Current.Payload?.Settings;
+        int idx = CmbDisplayMode.SelectedIndex;
+        TxtDisplayModeDesc.Text = idx switch
         {
-            if (updatingResolutionUi) return;
-            updatingResolutionUi = true;
-            try
-            {
-                int idx = CmbResolution.SelectedIndex;
-                if (idx >= 2)
-                {
-                    // Fixed resolution preset selected: user explicitly chooses windowed mode
-                    CmbFullScreen.SelectedIndex = (int)TriStateOverride.Disabled;
-                    CmbMultiMon.SelectedIndex = (int)TriStateOverride.Disabled;
-                }
-                else if (idx == 0) // Full Screen
-                {
-                    if (CmbFullScreen.SelectedIndex == (int)TriStateOverride.Disabled)
-                        CmbFullScreen.SelectedIndex = (int)TriStateOverride.Enabled;
-                    CmbMultiMon.SelectedIndex = (int)TriStateOverride.Disabled;
-                }
-                else if (idx == 1) // Multi-monitor
-                {
-                    CmbFullScreen.SelectedIndex = (int)TriStateOverride.Enabled;
-                    CmbMultiMon.SelectedIndex = (int)TriStateOverride.Enabled;
-                }
-            }
-            finally
-            {
-                updatingResolutionUi = false;
-            }
-        };
-
-        CmbFullScreen.SelectionChanged += (_, _) =>
-        {
-            if (updatingResolutionUi) return;
-            updatingResolutionUi = true;
-            try
-            {
-                if (CmbFullScreen.SelectedIndex == (int)TriStateOverride.Enabled)
-                {
-                    if (CmbResolution.SelectedIndex >= 2) CmbResolution.SelectedIndex = 0;
-                }
-                else if (CmbFullScreen.SelectedIndex == (int)TriStateOverride.Disabled)
-                {
-                    if (CmbResolution.SelectedIndex is 0 or 1) CmbResolution.SelectedIndex = 2; // 1920x1080 default
-                }
-            }
-            finally
-            {
-                updatingResolutionUi = false;
-            }
+            0 => $"Inherits global vault settings (currently: {(settings?.DefaultUseMultiMon == true ? "All Monitors" : (settings?.DefaultFullScreen == true ? "Single Monitor Full Screen" : "Windowed"))}).",
+            1 => "Spans Remote Desktop across all physical monitors in full screen.",
+            2 => "Opens Remote Desktop on a single monitor in full screen.",
+            3 => "Opens Remote Desktop in a 1920 x 1080 window.",
+            4 => "Opens Remote Desktop in a 1600 x 900 window.",
+            5 => "Opens Remote Desktop in a 1366 x 768 window.",
+            6 => "Opens Remote Desktop in a 1280 x 1024 window.",
+            7 => "Opens Remote Desktop in a 1280 x 800 window.",
+            8 => "Opens Remote Desktop in a 1024 x 768 window.",
+            9 => "Opens Remote Desktop in an 800 x 600 window.",
+            _ => ""
         };
     }
 
-    /// <summary>Issue #14: the password was displayed in clear text in a plain TextBox.</summary>
     private void ChkShowPassword_Click(object? sender, RoutedEventArgs e)
         => TxtPassword.PasswordChar = ChkShowPassword.IsChecked == true ? '\0' : '•';
 
-    /// <summary>
-    /// Issue #15: there was no validation at all. An empty host silently became
-    /// "localhost", an empty name saved blank, and any integer was accepted as a
-    /// port - including 0 and 99999, which produce a .rdp file mstsc refuses.
-    /// </summary>
-    private bool Validate(out string error)
+    private bool Validate(out string error, out ConnectionEndpoint endpoint)
     {
+        endpoint = default;
         string name = (TxtName.Text ?? "").Trim();
         string host = (TxtHost.Text ?? "").Trim();
         string portText = (TxtPort.Text ?? "").Trim();
@@ -191,12 +185,40 @@ public partial class ProfileEditorWindow : Window
             return false;
         }
 
-        try
+        if (!ConnectionEndpoint.TryParse(host, out endpoint, out string epErr, port))
         {
-            _ = ConnectionEndpoint.Parse(host, port);
-            if (ChkIcmpKnock.IsChecked == true) _ = IcmpKnock.ParseSignature(TxtIcmpSignature.Text ?? "");
+            error = epErr;
+            return false;
         }
-        catch (ArgumentException ex) { error = ex.Message; return false; }
+
+        if (ChkEnableKnock.IsChecked == true)
+        {
+            bool isTcp = CmbKnockProtocol.SelectedIndex == 1;
+            if (isTcp)
+            {
+                string tcpText = (TxtKnockTcpPort.Text ?? "").Trim();
+                if (!int.TryParse(tcpText, out int knockPort) || knockPort < 1 || knockPort > 65535)
+                {
+                    error = "Knock TCP port must be a whole number between 1 and 65535.";
+                    return false;
+                }
+            }
+            else
+            {
+                try
+                {
+                    _ = IcmpKnock.ParseSignature(TxtIcmpSignature.Text ?? "");
+                }
+                catch (ArgumentException ex) { error = ex.Message; return false; }
+            }
+
+            string delayText = (TxtKnockDelay.Text ?? "").Trim();
+            if (!int.TryParse(delayText, out int delaySec) || delaySec < 0 || delaySec > 300)
+            {
+                error = "Knock delay must be a number of seconds between 0 and 300.";
+                return false;
+            }
+        }
 
         if (ChkEnableWol.IsChecked == true)
         {
@@ -228,7 +250,7 @@ public partial class ProfileEditorWindow : Window
 
     private void BtnSave_Click(object? sender, RoutedEventArgs e)
     {
-        if (!Validate(out string error))
+        if (!Validate(out string error, out var endpoint))
         {
             TxtError.Text = error;
             TxtError.IsVisible = true;
@@ -236,15 +258,9 @@ public partial class ProfileEditorWindow : Window
         }
         TxtError.IsVisible = false;
 
-        string newHost = (TxtHost.Text ?? "").Trim();
-        int newPort = int.TryParse((TxtPort.Text ?? "").Trim(), out int port) ? port : 3389;
-        newHost = ConnectionEndpoint.Parse(newHost, newPort).Host;
+        string newHost = endpoint.Host;
+        int newPort = endpoint.Port; // Authoritative separate port
 
-        // Issue #2: a certificate pin is taken against a specific address. If the user
-        // repoints this profile at a different host or port, the old approval is
-        // meaningless and must not be replayed - drop it so they are asked again.
-        // NOTE: this has to happen while Profile.Host / Profile.Port still hold the
-        // OLD values, i.e. before the assignments below.
         if (!string.Equals(Profile.Host, newHost, StringComparison.OrdinalIgnoreCase) ||
             Profile.Port != newPort)
         {
@@ -258,30 +274,59 @@ public partial class ProfileEditorWindow : Window
         Profile.Password = TxtPassword.Text ?? "";
         Profile.GatewayHost = (TxtGateway.Text ?? "").Trim();
 
-        int idx = CmbResolution.SelectedIndex;
-        Profile.UseMultiMon = idx == 1;
-        Profile.FullScreen = idx is 0 or 1;
-        (Profile.Width, Profile.Height) = idx switch
+        // Map simplified Display & Monitor mode
+        int dispIdx = CmbDisplayMode.SelectedIndex;
+        if (dispIdx == 0) // Default (Inherit Global)
         {
-            2 => (1920, 1080),
-            3 => (1600, 900),
-            4 => (1366, 768),
-            5 => (1280, 1024),
-            6 => (1280, 800),
-            7 => (1024, 768),
-            8 => (800, 600),
-            _ => (Profile.Width, Profile.Height)
-        };
+            Profile.FullScreenOverride = TriStateOverride.InheritGlobal;
+            Profile.MultiMonOverride = TriStateOverride.InheritGlobal;
+            Profile.UseMultiMon = false;
+            Profile.FullScreen = true;
+        }
+        else if (dispIdx == 1) // All Monitors
+        {
+            Profile.FullScreenOverride = TriStateOverride.Enabled;
+            Profile.MultiMonOverride = TriStateOverride.Enabled;
+            Profile.UseMultiMon = true;
+            Profile.FullScreen = true;
+        }
+        else if (dispIdx == 2) // Single Monitor Full Screen
+        {
+            Profile.FullScreenOverride = TriStateOverride.Enabled;
+            Profile.MultiMonOverride = TriStateOverride.Disabled;
+            Profile.UseMultiMon = false;
+            Profile.FullScreen = true;
+        }
+        else // Windowed presets
+        {
+            Profile.FullScreenOverride = TriStateOverride.Disabled;
+            Profile.MultiMonOverride = TriStateOverride.Disabled;
+            Profile.UseMultiMon = false;
+            Profile.FullScreen = false;
+            (Profile.Width, Profile.Height) = dispIdx switch
+            {
+                3 => (1920, 1080),
+                4 => (1600, 900),
+                5 => (1366, 768),
+                6 => (1280, 1024),
+                7 => (1280, 800),
+                8 => (1024, 768),
+                9 => (800, 600),
+                _ => (1920, 1080)
+            };
+        }
 
-        Profile.FullScreenOverride = idx >= 2
-            ? TriStateOverride.Disabled
-            : (TriStateOverride)Math.Clamp(CmbFullScreen.SelectedIndex, 0, 2);
-        Profile.MultiMonOverride = (TriStateOverride)Math.Clamp(CmbMultiMon.SelectedIndex, 0, 2);
         Profile.SuppressCertWarningsOverride = (TriStateOverride)Math.Clamp(CmbCertWarnings.SelectedIndex, 0, 2);
 
+        // Port Knocking
+        Profile.EnableIcmpKnock = ChkEnableKnock.IsChecked == true;
+        Profile.KnockProtocol = CmbKnockProtocol.SelectedIndex == 1 ? "TCP" : "ICMP";
+        Profile.IcmpKnockSignature = (TxtIcmpSignature.Text ?? "").Trim();
+        Profile.KnockTcpPort = int.TryParse((TxtKnockTcpPort.Text ?? "").Trim(), out int kp) ? kp : 7777;
+        Profile.KnockDelaySeconds = int.TryParse((TxtKnockDelay.Text ?? "").Trim(), out int kd) ? kd : 2;
+
+        // WOL
         Profile.EnableWol = ChkEnableWol.IsChecked == true;
-        Profile.EnableIcmpKnock = ChkIcmpKnock.IsChecked == true;
-        Profile.IcmpKnockSignature = TxtIcmpSignature.Text?.Trim() ?? "";
         if (Profile.EnableWol && MacAddressHelper.TryNormalizeMac(TxtWolMac.Text, out string normMac, out _))
         {
             Profile.WolMacAddress = normMac;
@@ -295,6 +340,7 @@ public partial class ProfileEditorWindow : Window
         Profile.WolPort = int.TryParse((TxtWolPort.Text ?? "").Trim(), out int wp) ? wp : 9;
         Profile.WolWaitSeconds = int.TryParse((TxtWolWait.Text ?? "").Trim(), out int ww) ? ww : 5;
 
+        // Resources
         var globalSettings = SessionManager.Current.Payload?.Settings;
         bool globalClipboard = globalSettings?.DefaultAllowClipboard ?? true;
         bool profileClipboard = ChkClipboard.IsChecked ?? true;

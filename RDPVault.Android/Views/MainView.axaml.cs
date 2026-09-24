@@ -89,6 +89,9 @@ public partial class MainView : UserControl
         public string WolPort;
         public string WolWait;
         public bool EnableKnock;
+        public int KnockProtocolIndex;
+        public string KnockTcpPort;
+        public string KnockDelay;
         public string KnockSignature;
         public bool SuppressCert;
         public string Notes;
@@ -174,7 +177,7 @@ public partial class MainView : UserControl
     {
         if (_idleTimerSuspended) return;
         if (_masterKey == null) return;                       // already locked
-        if (OverlayLaunch.IsVisible) return;                  // never lock mid-connect
+        if (OverlayLaunch.IsVisible && !CardLaunchUnreachable.IsVisible) return;                  // never lock mid-connect unless waiting on unreachable prompt
 
         int minutes = _payload?.Settings?.LockMinutes ?? 0;
         if (minutes <= 0) return;                             // "Never"
@@ -340,6 +343,12 @@ public partial class MainView : UserControl
         ChkProfileEnableKnock.IsCheckedChanged += (_, _) =>
         {
             PnlKnockDetails.IsVisible = ChkProfileEnableKnock.IsChecked == true;
+        };
+        CmbProfileKnockProtocol.SelectionChanged += (_, _) =>
+        {
+            bool isTcp = CmbProfileKnockProtocol.SelectedIndex == 1;
+            PnlProfileKnockTcp.IsVisible = isTcp;
+            PnlProfileKnockIcmp.IsVisible = !isTcp;
         };
         BtnGenerateKnockSignature.Click += (_, _) =>
         {
@@ -1331,7 +1340,8 @@ public partial class MainView : UserControl
             string freshCode = "";
             VaultCrypto.Save(_vaultFile, masterKey, payload, VaultPath,
                 newPassword: newPass, newSeals: survivingSeals,
-                regenerateRecovery: true, recoveryCodeOut: c => freshCode = c);
+                regenerateRecovery: true, recoveryCodeOut: c => freshCode = c,
+                retainRecoveryUntilAcknowledged: true);
             _vaultFile.Seals = survivingSeals;
 
             _isFormattingRecovery = true;
@@ -1418,6 +1428,7 @@ public partial class MainView : UserControl
         }
         _vaultFile = null;
         _editingProfile = null;
+        _editorInitialState = default;
         _activeLaunchProfile = null;
         _activeRecoveryCode = "";
         _stagedRestoreBytes = null;
@@ -1704,6 +1715,9 @@ public partial class MainView : UserControl
             WolPort = TxtProfileWolPort.Text ?? "9",
             WolWait = TxtProfileWolWait.Text ?? "25",
             EnableKnock = ChkProfileEnableKnock.IsChecked == true,
+            KnockProtocolIndex = CmbProfileKnockProtocol.SelectedIndex,
+            KnockTcpPort = TxtProfileKnockTcpPort.Text ?? "7777",
+            KnockDelay = TxtProfileKnockDelay.Text ?? "2",
             KnockSignature = TxtProfileKnockSignature.Text ?? "",
             SuppressCert = ChkProfileSuppressCert.IsChecked == true,
             Notes = TxtProfileNotes.Text ?? ""
@@ -1729,6 +1743,9 @@ public partial class MainView : UserControl
             || (TxtProfileWolPort.Text ?? "") != _editorInitialState.WolPort
             || (TxtProfileWolWait.Text ?? "") != _editorInitialState.WolWait
             || (ChkProfileEnableKnock.IsChecked == true) != _editorInitialState.EnableKnock
+            || CmbProfileKnockProtocol.SelectedIndex != _editorInitialState.KnockProtocolIndex
+            || (TxtProfileKnockTcpPort.Text ?? "") != _editorInitialState.KnockTcpPort
+            || (TxtProfileKnockDelay.Text ?? "") != _editorInitialState.KnockDelay
             || (TxtProfileKnockSignature.Text ?? "") != _editorInitialState.KnockSignature
             || (ChkProfileSuppressCert.IsChecked == true) != _editorInitialState.SuppressCert
             || (TxtProfileNotes.Text ?? "") != _editorInitialState.Notes;
@@ -1778,8 +1795,13 @@ public partial class MainView : UserControl
             TxtProfileWolPort.Text = "9";
             TxtProfileWolWait.Text = "25";
             ChkProfileEnableKnock.IsChecked = false;
+            CmbProfileKnockProtocol.SelectedIndex = 0;
             PnlKnockDetails.IsVisible = false;
+            PnlProfileKnockTcp.IsVisible = false;
+            PnlProfileKnockIcmp.IsVisible = true;
             TxtProfileKnockSignature.Text = "";
+            TxtProfileKnockTcpPort.Text = "7777";
+            TxtProfileKnockDelay.Text = "2";
             TxtProfileNotes.Text = "";
             ChkProfileSuppressCert.IsChecked = _payload?.Settings?.SuppressCertWarnings ?? true;
             BtnDeleteProfile.IsVisible = false;
@@ -1832,7 +1854,13 @@ public partial class MainView : UserControl
             TxtProfileWolWait.Text = profile.WolWaitSeconds.ToString();
             ChkProfileEnableKnock.IsChecked = profile.EnableIcmpKnock;
             PnlKnockDetails.IsVisible = profile.EnableIcmpKnock;
+            bool isKnockTcp = string.Equals(profile.KnockProtocol, "TCP", StringComparison.OrdinalIgnoreCase);
+            CmbProfileKnockProtocol.SelectedIndex = isKnockTcp ? 1 : 0;
+            PnlProfileKnockTcp.IsVisible = isKnockTcp;
+            PnlProfileKnockIcmp.IsVisible = !isKnockTcp;
             TxtProfileKnockSignature.Text = profile.IcmpKnockSignature;
+            TxtProfileKnockTcpPort.Text = profile.KnockTcpPort > 0 ? profile.KnockTcpPort.ToString() : "7777";
+            TxtProfileKnockDelay.Text = profile.KnockDelaySeconds >= 0 ? profile.KnockDelaySeconds.ToString() : "2";
             TxtProfileNotes.Text = profile.Notes;
             ChkProfileSuppressCert.IsChecked = profile.SuppressCertWarningsOverride switch
             {
@@ -1891,16 +1919,40 @@ public partial class MainView : UserControl
         port = parsedEp.Port;
 
         bool enableKnock = ChkProfileEnableKnock.IsChecked == true;
+        string knockProtocol = CmbProfileKnockProtocol.SelectedIndex == 1 ? "TCP" : "ICMP";
         string knockSig = (TxtProfileKnockSignature.Text ?? "").Trim();
-        if (enableKnock && !string.IsNullOrEmpty(knockSig))
+        int knockTcpPort = 7777;
+        int knockDelay = 2;
+
+        if (enableKnock)
         {
-            try
+            if (knockProtocol == "TCP")
             {
-                IcmpKnock.ParseSignature(knockSig);
+                if (!int.TryParse(TxtProfileKnockTcpPort.Text, out knockTcpPort) || knockTcpPort < 1 || knockTcpPort > 65535)
+                {
+                    ShowProfileError("Knock TCP port must be a number between 1 and 65535.", true);
+                    return;
+                }
             }
-            catch (Exception ex)
+            else
             {
-                ShowProfileError(ex.Message, true);
+                if (!string.IsNullOrEmpty(knockSig))
+                {
+                    try
+                    {
+                        IcmpKnock.ParseSignature(knockSig);
+                    }
+                    catch (Exception ex)
+                    {
+                        ShowProfileError(ex.Message, true);
+                        return;
+                    }
+                }
+            }
+
+            if (!int.TryParse(TxtProfileKnockDelay.Text, out knockDelay) || knockDelay < 0 || knockDelay > 300)
+            {
+                ShowProfileError("Knock delay must be between 0 and 300 seconds.", true);
                 return;
             }
         }
@@ -1957,9 +2009,29 @@ public partial class MainView : UserControl
             _ => TriStateOverride.InheritGlobal
         };
 
-        TriStateOverride smartSizingOverride = ChkProfilePreserveNative.IsChecked == true
-            ? TriStateOverride.Disabled
-            : TriStateOverride.Enabled;
+        TriStateOverride smartSizingOverride;
+        if (_editingProfile != null && _editingProfile.SmartSizingOverride == TriStateOverride.InheritGlobal &&
+            ChkProfilePreserveNative.IsChecked == true)
+        {
+            smartSizingOverride = TriStateOverride.InheritGlobal;
+        }
+        else
+        {
+            smartSizingOverride = ChkProfilePreserveNative.IsChecked == true
+                ? TriStateOverride.Disabled
+                : TriStateOverride.Enabled;
+        }
+
+        TriStateOverride certOverride;
+        if (_editingProfile != null && _editingProfile.SuppressCertWarningsOverride == TriStateOverride.InheritGlobal &&
+            ChkProfileSuppressCert.IsChecked == (_payload?.Settings?.SuppressCertWarnings ?? true))
+        {
+            certOverride = TriStateOverride.InheritGlobal;
+        }
+        else
+        {
+            certOverride = ChkProfileSuppressCert.IsChecked == true ? TriStateOverride.Enabled : TriStateOverride.Disabled;
+        }
 
         if (_payload == null || _vaultFile == null || _masterKey == null) return;
 
@@ -1985,9 +2057,12 @@ public partial class MainView : UserControl
                 WolPort = wolPort > 0 ? wolPort : 9,
                 WolWaitSeconds = wolWait >= 0 ? wolWait : 25,
                 EnableIcmpKnock = enableKnock,
+                KnockProtocol = knockProtocol,
+                KnockTcpPort = knockTcpPort,
+                KnockDelaySeconds = knockDelay,
                 IcmpKnockSignature = knockSig,
                 Notes = TxtProfileNotes.Text?.Trim() ?? "",
-                SuppressCertWarningsOverride = ChkProfileSuppressCert.IsChecked == true ? TriStateOverride.Enabled : TriStateOverride.Disabled
+                SuppressCertWarningsOverride = certOverride
             };
             _payload.Profiles.Add(p);
         }
@@ -2009,9 +2084,12 @@ public partial class MainView : UserControl
             _editingProfile.WolPort = wolPort > 0 ? wolPort : 9;
             _editingProfile.WolWaitSeconds = wolWait >= 0 ? wolWait : 25;
             _editingProfile.EnableIcmpKnock = enableKnock;
+            _editingProfile.KnockProtocol = knockProtocol;
+            _editingProfile.KnockTcpPort = knockTcpPort;
+            _editingProfile.KnockDelaySeconds = knockDelay;
             _editingProfile.IcmpKnockSignature = knockSig;
             _editingProfile.Notes = TxtProfileNotes.Text?.Trim() ?? "";
-            _editingProfile.SuppressCertWarningsOverride = ChkProfileSuppressCert.IsChecked == true ? TriStateOverride.Enabled : TriStateOverride.Disabled;
+            _editingProfile.SuppressCertWarningsOverride = certOverride;
         }
 
         SaveVault();
@@ -2276,7 +2354,9 @@ public partial class MainView : UserControl
             await Task.Run(() => VaultCrypto.Open(_vaultFile, pass));
 
             string freshCode = "";
-            VaultCrypto.Save(_vaultFile, _masterKey, _payload, VaultPath, regenerateRecovery: true, recoveryCodeOut: c => freshCode = c);
+            VaultCrypto.Save(_vaultFile, _masterKey, _payload, VaultPath,
+                regenerateRecovery: true, recoveryCodeOut: c => freshCode = c,
+                retainRecoveryUntilAcknowledged: true);
 
             TxtVerifyPassForRecovery.Text = "";
             OverlayPromptPasswordForRecovery.IsVisible = false;
@@ -2540,11 +2620,15 @@ public partial class MainView : UserControl
             // 2. Port Knocking (Issue 31)
             if (profile.EnableIcmpKnock)
             {
+                bool isTcp = string.Equals(profile.KnockProtocol, "TCP", StringComparison.OrdinalIgnoreCase);
+                int delaySec = profile.KnockDelaySeconds >= 0 ? profile.KnockDelaySeconds : 2;
                 TxtLaunchSubStatus.Text = "Port Knocking";
-                TxtLaunchStep.Text = $"Sending ICMP knock to {host}...";
+                TxtLaunchStep.Text = isTcp
+                    ? $"Sending TCP knock to {host}:{profile.KnockTcpPort}..."
+                    : $"Sending ICMP knock to {host}...";
                 try
                 {
-                    await IcmpKnock.SendBeforeConnectAsync(host, profile.IcmpKnockSignature, ct);
+                    await IcmpKnock.SendBeforeConnectAsync(profile, ct);
                 }
                 catch (OperationCanceledException) { return; }
                 catch (Exception ex)

@@ -45,6 +45,8 @@ public partial class ProfileEditorWindow : Window
         target.WolBroadcastIp = Profile.WolBroadcastIp;
         target.WolPort = Profile.WolPort;
         target.WolWaitSeconds = Profile.WolWaitSeconds;
+        target.EnableIcmpKnock = Profile.EnableIcmpKnock;
+        target.IcmpKnockSignature = Profile.IcmpKnockSignature;
         target.AllowClipboard = Profile.AllowClipboard;
         target.AllowDrives = Profile.AllowDrives;
         target.AllowPrinters = Profile.AllowPrinters;
@@ -64,6 +66,11 @@ public partial class ProfileEditorWindow : Window
         TxtUsername.Text = Profile.Username;
         TxtPassword.Text = Profile.Password;
         TxtGateway.Text = Profile.GatewayHost;
+        ChkIcmpKnock.IsChecked = Profile.EnableIcmpKnock;
+        PnlIcmpKnockDetails.IsVisible = Profile.EnableIcmpKnock;
+        ChkIcmpKnock.IsCheckedChanged += (_, _) => PnlIcmpKnockDetails.IsVisible = ChkIcmpKnock.IsChecked == true;
+        TxtIcmpSignature.Text = Profile.IcmpKnockSignature;
+        BtnGenerateIcmpSignature.Click += (_, _) => TxtIcmpSignature.Text = IcmpKnock.GenerateSignature();
 
         if (Profile.UseMultiMon) CmbResolution.SelectedIndex = 1;
         else if (Profile.FullScreen) CmbResolution.SelectedIndex = 0;
@@ -176,7 +183,6 @@ public partial class ProfileEditorWindow : Window
 
         if (name.Length == 0) { error = "Give this profile a name so you can recognise it in the list."; return false; }
         if (host.Length == 0) { error = "Enter the host name or IP address to connect to."; return false; }
-        if (host.Contains(' ')) { error = "A host name cannot contain spaces."; return false; }
 
         if (portText.Length == 0) portText = "3389";
         if (!int.TryParse(portText, out int port) || port < 1 || port > 65535)
@@ -184,6 +190,13 @@ public partial class ProfileEditorWindow : Window
             error = "The port must be a whole number between 1 and 65535.";
             return false;
         }
+
+        try
+        {
+            _ = ConnectionEndpoint.Parse(host, port);
+            if (ChkIcmpKnock.IsChecked == true) _ = IcmpKnock.ParseSignature(TxtIcmpSignature.Text ?? "");
+        }
+        catch (ArgumentException ex) { error = ex.Message; return false; }
 
         if (ChkEnableWol.IsChecked == true)
         {
@@ -225,6 +238,7 @@ public partial class ProfileEditorWindow : Window
 
         string newHost = (TxtHost.Text ?? "").Trim();
         int newPort = int.TryParse((TxtPort.Text ?? "").Trim(), out int port) ? port : 3389;
+        newHost = ConnectionEndpoint.Parse(newHost, newPort).Host;
 
         // Issue #2: a certificate pin is taken against a specific address. If the user
         // repoints this profile at a different host or port, the old approval is
@@ -266,6 +280,8 @@ public partial class ProfileEditorWindow : Window
         Profile.SuppressCertWarningsOverride = (TriStateOverride)Math.Clamp(CmbCertWarnings.SelectedIndex, 0, 2);
 
         Profile.EnableWol = ChkEnableWol.IsChecked == true;
+        Profile.EnableIcmpKnock = ChkIcmpKnock.IsChecked == true;
+        Profile.IcmpKnockSignature = TxtIcmpSignature.Text?.Trim() ?? "";
         if (Profile.EnableWol && MacAddressHelper.TryNormalizeMac(TxtWolMac.Text, out string normMac, out _))
         {
             Profile.WolMacAddress = normMac;

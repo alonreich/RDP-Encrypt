@@ -55,8 +55,8 @@ echo ###########################################################
 echo PURGING PREVIOUS BUILD ARTIFACTS...
 echo ###########################################################
 call :TERMINATE_PROCESSES
-if exist "%OUTPUT_DIR%" rd /s /q "%OUTPUT_DIR%"
-mkdir "%OUTPUT_DIR%"
+if not exist "%OUTPUT_DIR%" mkdir "%OUTPUT_DIR%"
+if exist "%OUTPUT_DIR%\%OUTPUT_EXE%" del /f /q "%OUTPUT_DIR%\%OUTPUT_EXE%" 2>nul
 call :CLEAN_ALL
 
 echo.
@@ -182,7 +182,7 @@ exit /b 0
 :PURGE_COMPILED_EXTRAS
 for /d %%D in ("%OUTPUT_DIR%\*") do rd /s /q "%%~fD" 2>nul
 for %%F in ("%OUTPUT_DIR%\*") do (
-  if /I not "%%~nxF"=="%OUTPUT_EXE%" (
+  if /I not "%%~nxF"=="%OUTPUT_EXE%" if /I not "%%~nxF"=="RDPVault.apk" (
     del /f /q "%%~fF" 2>nul
   )
 )
@@ -193,10 +193,10 @@ if not exist "%OUTPUT_DIR%\%OUTPUT_EXE%" exit /b 1
 set "EXTRA=0"
 for /d %%D in ("%OUTPUT_DIR%\*") do set /a EXTRA+=1
 for %%F in ("%OUTPUT_DIR%\*") do (
-  if /I not "%%~nxF"=="%OUTPUT_EXE%" set /a EXTRA+=1
+  if /I not "%%~nxF"=="%OUTPUT_EXE%" if /I not "%%~nxF"=="RDPVault.apk" set /a EXTRA+=1
 )
 if not "!EXTRA!"=="0" (
-  echo ERROR: %OUTPUT_DIR% must contain only %OUTPUT_EXE%; found !EXTRA! extra item^(s^).
+  echo ERROR: %OUTPUT_DIR% must contain only %OUTPUT_EXE% and RDPVault.apk; found !EXTRA! extra item^(s^).
   exit /b 1
 )
 exit /b 0

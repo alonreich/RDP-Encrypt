@@ -17,5 +17,9 @@
     <Compile Include="..\RDPVault\Crypto.cs" Link="Crypto.cs" />
     <Compile Include="..\RDPVault\Models.cs" Link="Models.cs" />
     <Compile Include="..\RDPVault\RecoveryKeyGenerator.cs" Link="RecoveryKeyGenerator.cs" />
+    <Compile Include="..\RDPVault\ConnectionEndpoint.cs" Link="ConnectionEndpoint.cs" />
+    <Compile Include="..\RDPVault\IcmpKnock.cs" Link="IcmpKnock.cs" />
+    <Compile Include="..\RDPVault\VaultValidation.cs" Link="VaultValidation.cs" />
+    <Compile Include="..\RDPVault\UnlockThrottle.cs" Link="UnlockThrottle.cs" />
   </ItemGroup>
 </Project>

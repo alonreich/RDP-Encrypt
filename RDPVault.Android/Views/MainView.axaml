@@ -199,9 +199,13 @@
                     </StackPanel>
                 </Border>
 
-                <!-- Recovery Code link -->
-                <Button Name="BtnShowRecovery" Content="Forgot Master Password? Use Recovery Code"
-                        Background="Transparent" Foreground="#9A9AA3" FontSize="13" HorizontalAlignment="Center"/>
+                <!-- Recovery Code & Restore Backup links -->
+                <StackPanel Spacing="6" HorizontalAlignment="Center">
+                    <Button Name="BtnShowRecovery" Content="Forgot Master Password? Use Recovery Code"
+                            Background="Transparent" Foreground="#9A9AA3" FontSize="13" HorizontalAlignment="Center"/>
+                    <Button Name="BtnLockRestoreBackup" Content="Restore Vault from Backup File (.rdpv)"
+                            Background="Transparent" Foreground="#8AB4F8" FontSize="13" HorizontalAlignment="Center"/>
+                </StackPanel>
             </StackPanel>
         </ScrollViewer>
 
@@ -285,8 +289,8 @@
 
             <!-- Remote Desktop hand-off banner. No dismiss control by design: while a
                  hand-off is being tracked the user must always keep a one-tap route back. -->
-            <Border Grid.Row="1" Name="BannerActiveSession" Background="#162719" BorderBrush="#2FBF71" BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,0,0,12" IsVisible="False">
-                <StackPanel Spacing="8">
+            <Border Grid.Row="1" Name="BannerActiveSession" Background="#162719" BorderBrush="#2FBF71" BorderThickness="1" CornerRadius="8" Padding="10,8" Margin="0,0,0,8" IsVisible="False">
+                <StackPanel Spacing="6">
                     <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                         <TextBlock Name="TxtActiveSessionDot" Text="●" FontSize="12" Foreground="#2FBF71" VerticalAlignment="Center"/>
                         <TextBlock Name="TxtActiveSessionHeading" Text="HANDED OFF TO REMOTE DESKTOP" FontSize="12" FontWeight="Bold" Foreground="#2FBF71" LetterSpacing="1" TextWrapping="Wrap"/>
@@ -297,7 +301,7 @@
                     <Grid ColumnDefinitions="*,8,*">
                         <Button Grid.Column="0" Name="BtnReturnToRdp" Content="Return to Remote Desktop" Background="#005FB8" Foreground="White" CornerRadius="4"
                                 HorizontalAlignment="Stretch"/>
-                        <Button Grid.Column="2" Name="BtnEndActiveSession" Content="End Session" Background="#B80000" Foreground="White" CornerRadius="4"
+                        <Button Grid.Column="2" Name="BtnEndActiveSession" Content="Stop tracking / Help" Background="#2E2E35" Foreground="#EDEDED" CornerRadius="4"
                                 HorizontalAlignment="Stretch"/>
                     </Grid>
                 </StackPanel>
@@ -305,8 +309,8 @@
 
             <!-- Backup reminder: the vault lives in the app sandbox, so uninstalling the app
                  destroys it permanently. Shown only when there are unbacked-up changes. -->
-            <Border Grid.Row="2" Name="BannerBackupReminder" Background="#241C0C" BorderBrush="#5A431A" BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,0,0,12" IsVisible="False">
-                <StackPanel Spacing="8">
+            <Border Grid.Row="2" Name="BannerBackupReminder" Background="#241C0C" BorderBrush="#5A431A" BorderThickness="1" CornerRadius="8" Padding="10,8" Margin="0,0,0,8" IsVisible="False">
+                <StackPanel Spacing="6">
                     <TextBlock Text="⚠ THIS VAULT EXISTS ONLY ON THIS PHONE" FontSize="12" FontWeight="Bold" Foreground="#E8A030" LetterSpacing="1" TextWrapping="Wrap"/>
                     <TextBlock Text="Uninstalling RDP Vault, or resetting the phone, deletes your connections permanently. Export an encrypted backup now."
                                FontSize="12" Foreground="#D8CDB8" TextWrapping="Wrap"/>
@@ -464,11 +468,26 @@
                             </StackPanel>
                         </Border>
 
+                        <!-- Port Knocking (ICMP) Card (Issue 31) -->
+                        <Border Name="CardKnock" Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16">
+                            <StackPanel Spacing="10">
+                                <TextBlock Text="PORT KNOCKING (ICMP MAGIC PACKET)" FontSize="12" FontWeight="Bold" Foreground="#9A9AA3" LetterSpacing="1"/>
+                                <CheckBox Name="ChkProfileEnableKnock" Content="Enable Port Knocking" Foreground="#EDEDED"/>
+                                <StackPanel Name="PnlKnockDetails" Spacing="10" IsVisible="False">
+                                    <TextBlock Text="Sends an out-of-the-ordinary ICMP knock payload to the destination IP, waits 2 seconds, then connects to the custom RDP port. Your firewall must be configured to trigger on this knock."
+                                               FontSize="12" Foreground="#8A8A93" TextWrapping="Wrap"/>
+                                    <TextBlock Text="HEXADECIMAL SIGNATURE" FontSize="12" FontWeight="Bold" Foreground="#9A9AA3" LetterSpacing="1"/>
+                                    <TextBox Name="TxtProfileKnockSignature" Watermark="Generate or enter hexadecimal bytes" Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35" TextWrapping="Wrap"/>
+                                    <Button Name="BtnGenerateKnockSignature" Content="Generate Unique Signature" Height="44" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Background="#1F1F24" Foreground="#EDEDED" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="6"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
                         <!-- Security & Certificates Card -->
                         <Border Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16">
                             <StackPanel Spacing="8">
                                 <TextBlock Text="SECURITY &amp; CERTIFICATES" FontSize="12" FontWeight="Bold" Foreground="#9A9AA3" LetterSpacing="1"/>
-                                <CheckBox Name="ChkProfileSuppressCert" Content="Ignore certificate warnings (recommended for home/work networks)" Foreground="#EDEDED" IsChecked="True"/>
+                                <CheckBox Name="ChkProfileSuppressCert" Content="Ignore certificate warnings (author default: connect directly without warning popups)" Foreground="#EDEDED" IsChecked="True"/>
                             </StackPanel>
                         </Border>
 
@@ -484,6 +503,16 @@
                     </StackPanel>
 
                     <TextBlock Name="TxtProfileError" Foreground="#FF6B6B" FontSize="13" HorizontalAlignment="Center" IsVisible="False" TextWrapping="Wrap" TextAlignment="Center"/>
+
+                    <!-- Bottom Action Controls: easily accessible when scrolled down (Issue 32) -->
+                    <Grid ColumnDefinitions="*,12,*" Margin="0,10,0,0">
+                        <Button Grid.Column="0" Name="BtnBottomCancelProfile" Content="Cancel / Back" Height="48"
+                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                                Background="#2E2E35" Foreground="#EDEDED" CornerRadius="6" FontWeight="SemiBold"/>
+                        <Button Grid.Column="2" Name="BtnBottomSaveProfile" Content="Save Connection" Height="48"
+                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                                Background="#005FB8" Foreground="White" CornerRadius="6" FontWeight="Bold"/>
+                    </Grid>
 
                     <Button Name="BtnDeleteProfile" Content="🗑 Delete Connection" Background="#B80000" Foreground="White"
                             HorizontalAlignment="Stretch" CornerRadius="6" IsVisible="False" Margin="0,10,0,0"/>
@@ -686,232 +715,275 @@
 
         <!-- Tactical Launch & WOL Progress Overlay -->
         <Border Name="OverlayLaunch" Background="#E00A0A0C" IsVisible="False" ZIndex="200">
-            <Border Background="#141417" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="8"
-                    Margin="20" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460" Padding="20">
-                <StackPanel Spacing="14">
-                    <StackPanel Spacing="4">
-                        <TextBlock Name="TxtLaunchTitle" Text="CONNECTING TO REMOTE COMPUTER" FontSize="15" FontWeight="Bold"
-                                   Foreground="#EDEDED" LetterSpacing="1" TextWrapping="Wrap"/>
-                        <TextBlock Name="TxtLaunchTarget" Text="Target Host" FontSize="13" Foreground="#9A9AA3" TextWrapping="Wrap"/>
-                    </StackPanel>
+            <ScrollViewer MaxHeight="540" HorizontalScrollBarVisibility="Disabled" VerticalAlignment="Center" HorizontalAlignment="Center">
+                <Border Background="#141417" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="8"
+                        Margin="20" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460" Padding="20">
+                    <StackPanel Spacing="14">
+                        <StackPanel Spacing="4">
+                            <TextBlock Name="TxtLaunchTitle" Text="CONNECTING TO REMOTE COMPUTER" FontSize="15" FontWeight="Bold"
+                                       Foreground="#EDEDED" LetterSpacing="1" TextWrapping="Wrap"/>
+                            <TextBlock Name="TxtLaunchTarget" Text="Target Host" FontSize="13" Foreground="#9A9AA3" TextWrapping="Wrap"/>
+                        </StackPanel>
 
-                    <StackPanel Spacing="6">
-                        <ProgressBar Name="ProgLaunch" Height="6" CornerRadius="3" Foreground="#005FB8" Background="#24242A"
-                                     IsIndeterminate="True" Minimum="0" Maximum="100"/>
-                        <TextBlock Name="TxtLaunchCountdown" Text="" FontSize="12" Foreground="#8AB4F8"
-                                   HorizontalAlignment="Right" IsVisible="False"/>
-                    </StackPanel>
+                        <StackPanel Spacing="6">
+                            <ProgressBar Name="ProgLaunch" Height="6" CornerRadius="3" Foreground="#005FB8" Background="#24242A"
+                                         IsIndeterminate="True" Minimum="0" Maximum="100"/>
+                            <TextBlock Name="TxtLaunchCountdown" Text="" FontSize="12" Foreground="#8AB4F8"
+                                       HorizontalAlignment="Right" IsVisible="False"/>
+                        </StackPanel>
 
-                    <Border Background="#0E0E10" BorderBrush="#24242A" BorderThickness="1" CornerRadius="4" Padding="12,10">
-                        <Grid ColumnDefinitions="Auto,*">
-                            <TextBlock Text="▶ " FontSize="13" Foreground="#007AE8" VerticalAlignment="Top"/>
-                            <TextBlock Grid.Column="1" Name="TxtLaunchStep" Text="Connecting..."
-                                       FontSize="13" Foreground="#EDEDED" TextWrapping="Wrap"/>
-                        </Grid>
-                    </Border>
+                        <Border Background="#0E0E10" BorderBrush="#24242A" BorderThickness="1" CornerRadius="4" Padding="12,10">
+                            <Grid ColumnDefinitions="Auto,*">
+                                <TextBlock Text="▶ " FontSize="13" Foreground="#007AE8" VerticalAlignment="Top"/>
+                                <TextBlock Grid.Column="1" Name="TxtLaunchStep" Text="Connecting..."
+                                           FontSize="13" Foreground="#EDEDED" TextWrapping="Wrap"/>
+                            </Grid>
+                        </Border>
 
-                    <!-- Host unreachable pre-flight result (suggestion 10) -->
-                    <Border Name="CardLaunchUnreachable" Background="#2A1212" BorderBrush="#7A2A2A" BorderThickness="1" CornerRadius="4" Padding="12,10" IsVisible="False">
+                        <!-- Host unreachable pre-flight result (suggestion 10) -->
+                        <Border Name="CardLaunchUnreachable" Background="#2A1212" BorderBrush="#7A2A2A" BorderThickness="1" CornerRadius="4" Padding="12,10" IsVisible="False">
+                            <StackPanel Spacing="8">
+                                <TextBlock Name="TxtLaunchUnreachableTitle" Text="HOST NOT RESPONDING" FontSize="12" FontWeight="Bold" Foreground="#FF8A8A" LetterSpacing="1" TextWrapping="Wrap"/>
+                                <TextBlock Name="TxtLaunchUnreachableBody" Text="" FontSize="13" Foreground="#F0C9C9" TextWrapping="Wrap"/>
+                                <Button Name="BtnLaunchSendWol" Content="⚡ Send Wake-on-LAN signal" Background="#5A2A2A" Foreground="#FFE0E0"
+                                        CornerRadius="4" HorizontalAlignment="Stretch" FontSize="13" IsVisible="False"/>
+                                <Grid ColumnDefinitions="*,8,*">
+                                    <Button Grid.Column="0" Name="BtnLaunchRetryProbe" Content="Check again" Background="#2E2E35" Foreground="#EDEDED"
+                                            CornerRadius="4" HorizontalAlignment="Stretch" FontSize="13"/>
+                                    <Button Grid.Column="2" Name="BtnLaunchConnectAnyway" Content="Connect anyway" Background="#005FB8" Foreground="White"
+                                            CornerRadius="4" HorizontalAlignment="Stretch" FontSize="13"/>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Auto-Type / Credential notice -->
+                        <Border Name="CardLaunchPasswordTip" Background="#18181D" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="4" Padding="10,8" IsVisible="False">
+                            <StackPanel Spacing="2">
+                                <TextBlock Name="TxtLaunchPasswordTipTitle" Text="ZERO-CLIPBOARD AUTO-TYPE" FontSize="12" FontWeight="Bold" Foreground="#8AB4F8" TextWrapping="Wrap"/>
+                                <TextBlock Name="TxtLaunchPasswordTipBody" Text="" FontSize="12" Foreground="#2FBF71" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Screen Scroll & Pan Guidance -->
+                        <Border Name="CardLaunchPanTip" Background="#141417" BorderBrush="#24242A" BorderThickness="1" CornerRadius="4" Padding="10,8">
+                            <Grid ColumnDefinitions="Auto,*">
+                                <TextBlock Text="💡 " FontSize="13" VerticalAlignment="Top"/>
+                                <TextBlock Grid.Column="1" Name="TxtLaunchPanTip" Text=""
+                                           FontSize="12" Foreground="#8AB4F8" TextWrapping="Wrap"/>
+                            </Grid>
+                        </Border>
+
                         <StackPanel Spacing="8">
-                            <TextBlock Name="TxtLaunchUnreachableTitle" Text="HOST NOT RESPONDING" FontSize="12" FontWeight="Bold" Foreground="#FF8A8A" LetterSpacing="1" TextWrapping="Wrap"/>
-                            <TextBlock Name="TxtLaunchUnreachableBody" Text="" FontSize="13" Foreground="#F0C9C9" TextWrapping="Wrap"/>
-                            <Button Name="BtnLaunchSendWol" Content="⚡ Send Wake-on-LAN signal" Background="#5A2A2A" Foreground="#FFE0E0"
-                                    CornerRadius="4" HorizontalAlignment="Stretch" FontSize="13" IsVisible="False"/>
+                            <TextBlock Name="TxtLaunchSubStatus" Text="" FontSize="12" Foreground="#2FBF71" TextWrapping="Wrap"/>
                             <Grid ColumnDefinitions="*,8,*">
-                                <Button Grid.Column="0" Name="BtnLaunchRetryProbe" Content="Check again" Background="#2E2E35" Foreground="#EDEDED"
-                                        CornerRadius="4" HorizontalAlignment="Stretch" FontSize="13"/>
-                                <Button Grid.Column="2" Name="BtnLaunchConnectAnyway" Content="Connect anyway" Background="#005FB8" Foreground="White"
+                                <Button Grid.Column="0" Name="BtnSkipWolWait" Content="Skip countdown &amp; connect now" Background="#005FB8" Foreground="White"
+                                        CornerRadius="4" HorizontalAlignment="Stretch" FontSize="13" IsVisible="False"/>
+                                <Button Grid.Column="2" Name="BtnCancelLaunch" Content="Cancel" Background="#2E2E35" Foreground="#EDEDED"
                                         CornerRadius="4" HorizontalAlignment="Stretch" FontSize="13"/>
                             </Grid>
                         </StackPanel>
-                    </Border>
-
-                    <!-- Auto-Type / Credential notice -->
-                    <Border Name="CardLaunchPasswordTip" Background="#18181D" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="4" Padding="10,8" IsVisible="False">
-                        <StackPanel Spacing="2">
-                            <TextBlock Name="TxtLaunchPasswordTipTitle" Text="ZERO-CLIPBOARD AUTO-TYPE" FontSize="12" FontWeight="Bold" Foreground="#8AB4F8" TextWrapping="Wrap"/>
-                            <TextBlock Name="TxtLaunchPasswordTipBody" Text="" FontSize="12" Foreground="#2FBF71" TextWrapping="Wrap"/>
-                        </StackPanel>
-                    </Border>
-
-                    <!-- Screen Scroll & Pan Guidance -->
-                    <Border Name="CardLaunchPanTip" Background="#141417" BorderBrush="#24242A" BorderThickness="1" CornerRadius="4" Padding="10,8">
-                        <Grid ColumnDefinitions="Auto,*">
-                            <TextBlock Text="💡 " FontSize="13" VerticalAlignment="Top"/>
-                            <TextBlock Grid.Column="1" Name="TxtLaunchPanTip" Text=""
-                                       FontSize="12" Foreground="#8AB4F8" TextWrapping="Wrap"/>
-                        </Grid>
-                    </Border>
-
-                    <StackPanel Spacing="8">
-                        <TextBlock Name="TxtLaunchSubStatus" Text="" FontSize="12" Foreground="#2FBF71" TextWrapping="Wrap"/>
-                        <Grid ColumnDefinitions="*,8,*">
-                            <Button Grid.Column="0" Name="BtnSkipWolWait" Content="Skip countdown &amp; connect now" Background="#005FB8" Foreground="White"
-                                    CornerRadius="4" HorizontalAlignment="Stretch" FontSize="13" IsVisible="False"/>
-                            <Button Grid.Column="2" Name="BtnCancelLaunch" Content="Cancel" Background="#2E2E35" Foreground="#EDEDED"
-                                    CornerRadius="4" HorizontalAlignment="Stretch" FontSize="13"/>
-                        </Grid>
                     </StackPanel>
-                </StackPanel>
-            </Border>
+                </Border>
+            </ScrollViewer>
         </Border>
 
         <!-- Delete Confirmation Modal Overlay -->
         <Border Name="OverlayConfirmDelete" Background="#E00A0A0C" IsVisible="False" ZIndex="250">
-            <Border Background="#141417" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="8"
-                    Margin="20" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="440" Padding="20">
-                <StackPanel Spacing="14">
-                    <TextBlock Text="Delete Connection?" FontSize="18" FontWeight="Bold" Foreground="#FFFFFF" TextWrapping="Wrap"/>
-                    <TextBlock Name="TxtConfirmDeleteMessage" Text="Are you sure you want to delete this connection? This cannot be undone."
-                               FontSize="13" Foreground="#EDEDED" TextWrapping="Wrap"/>
-                    <Grid ColumnDefinitions="*,10,*">
-                        <Button Grid.Column="0" Name="BtnCancelDelete" Content="Cancel" Background="#2E2E35" Foreground="#EDEDED"
-                                CornerRadius="6" HorizontalAlignment="Stretch"/>
-                        <Button Grid.Column="2" Name="BtnConfirmDelete" Content="Delete" Background="#B80000" Foreground="White"
-                                CornerRadius="6" HorizontalAlignment="Stretch" FontWeight="SemiBold"/>
-                    </Grid>
-                </StackPanel>
-            </Border>
+            <ScrollViewer MaxHeight="540" HorizontalScrollBarVisibility="Disabled" VerticalAlignment="Center" HorizontalAlignment="Center">
+                <Border Background="#141417" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="8"
+                        Margin="20" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="440" Padding="20">
+                    <StackPanel Spacing="14">
+                        <TextBlock Text="Delete Connection?" FontSize="18" FontWeight="Bold" Foreground="#FFFFFF" TextWrapping="Wrap"/>
+                        <TextBlock Name="TxtConfirmDeleteMessage" Text="Are you sure you want to delete this connection? This cannot be undone."
+                                   FontSize="13" Foreground="#EDEDED" TextWrapping="Wrap"/>
+                        <Grid ColumnDefinitions="*,10,*">
+                            <Button Grid.Column="0" Name="BtnCancelDelete" Content="Cancel" Background="#2E2E35" Foreground="#EDEDED"
+                                    CornerRadius="6" HorizontalAlignment="Stretch"/>
+                            <Button Grid.Column="2" Name="BtnConfirmDelete" Content="Delete" Background="#B80000" Foreground="White"
+                                    CornerRadius="6" HorizontalAlignment="Stretch" FontWeight="SemiBold"/>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </ScrollViewer>
         </Border>
 
         <!-- Discard Changes Confirmation Modal Overlay -->
         <Border Name="OverlayConfirmDiscardProfile" Background="#E00A0A0C" IsVisible="False" ZIndex="250">
-            <Border Background="#141417" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="8"
-                    Margin="20" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="440" Padding="20">
-                <StackPanel Spacing="14">
-                    <TextBlock Text="Discard Unsaved Changes?" FontSize="18" FontWeight="Bold" Foreground="#FFFFFF" TextWrapping="Wrap"/>
-                    <TextBlock Text="You have unsaved changes to this connection. If you leave now, all your edits will be discarded."
-                               FontSize="13" Foreground="#EDEDED" TextWrapping="Wrap"/>
-                    <Grid ColumnDefinitions="*,10,*">
-                        <Button Grid.Column="0" Name="BtnKeepEditingProfile" Content="Keep Editing" Background="#005FB8" Foreground="White"
-                                CornerRadius="6" HorizontalAlignment="Stretch" FontWeight="SemiBold"/>
-                        <Button Grid.Column="2" Name="BtnConfirmDiscardProfile" Content="Discard" Background="#B80000" Foreground="White"
-                                CornerRadius="6" HorizontalAlignment="Stretch"/>
-                    </Grid>
-                </StackPanel>
-            </Border>
+            <ScrollViewer MaxHeight="540" HorizontalScrollBarVisibility="Disabled" VerticalAlignment="Center" HorizontalAlignment="Center">
+                <Border Background="#141417" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="8"
+                        Margin="20" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="440" Padding="20">
+                    <StackPanel Spacing="14">
+                        <TextBlock Text="Discard Unsaved Changes?" FontSize="18" FontWeight="Bold" Foreground="#FFFFFF" TextWrapping="Wrap"/>
+                        <TextBlock Text="You have unsaved changes to this connection. If you leave now, all your edits will be discarded."
+                                   FontSize="13" Foreground="#EDEDED" TextWrapping="Wrap"/>
+                        <Grid ColumnDefinitions="*,10,*">
+                            <Button Grid.Column="0" Name="BtnKeepEditingProfile" Content="Keep Editing" Background="#005FB8" Foreground="White"
+                                    CornerRadius="6" HorizontalAlignment="Stretch" FontWeight="SemiBold"/>
+                            <Button Grid.Column="2" Name="BtnConfirmDiscardProfile" Content="Discard" Background="#B80000" Foreground="White"
+                                    CornerRadius="6" HorizontalAlignment="Stretch"/>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </ScrollViewer>
+        </Border>
+
+        <!-- Password Verification Modal for Testing Backup Before Restore (Issue 3) -->
+        <Border Name="OverlayVerifyBackupPassword" Background="#E00A0A0C" IsVisible="False" ZIndex="250">
+            <ScrollViewer MaxHeight="540" HorizontalScrollBarVisibility="Disabled" VerticalAlignment="Center" HorizontalAlignment="Center">
+                <Border Background="#141417" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="8"
+                        Margin="20" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="440" Padding="20">
+                    <StackPanel Spacing="14">
+                        <TextBlock Text="Verify Backup Password" FontSize="18" FontWeight="Bold" Foreground="#FFFFFF" TextWrapping="Wrap"/>
+                        <TextBlock Text="Enter the master password for this backup file to test-open and verify its contents before restoring."
+                                   FontSize="13" Foreground="#EDEDED" TextWrapping="Wrap"/>
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBox Grid.Column="0" Name="TxtVerifyBackupPass" PasswordChar="●" Watermark="Backup master password..."
+                                     Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35"/>
+                            <Button Grid.Column="1" Name="BtnToggleVerifyBackupPass" Content="👁" Background="#1C1C21" Foreground="#9A9AA3"
+                                    BorderBrush="#2E2E35" MinWidth="48" Margin="6,0,0,0"/>
+                        </Grid>
+                        <TextBlock Name="TxtVerifyBackupPassError" Foreground="#FF6B6B" FontSize="13" IsVisible="False" TextWrapping="Wrap"/>
+                        <Grid ColumnDefinitions="*,10,*">
+                            <Button Grid.Column="0" Name="BtnCancelVerifyBackupPass" Content="Cancel" Background="#2E2E35" Foreground="#EDEDED"
+                                    CornerRadius="6" HorizontalAlignment="Stretch"/>
+                            <Button Grid.Column="2" Name="BtnSubmitVerifyBackupPass" Content="Verify &amp; Proceed" Background="#005FB8" Foreground="White"
+                                    CornerRadius="6" HorizontalAlignment="Stretch" FontWeight="SemiBold"/>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </ScrollViewer>
         </Border>
 
         <!-- Restore Vault Backup Confirmation Modal Overlay -->
         <Border Name="OverlayConfirmRestoreVault" Background="#E00A0A0C" IsVisible="False" ZIndex="250">
-            <Border Background="#141417" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="8"
-                    Margin="20" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="440" Padding="20">
-                <StackPanel Spacing="14">
-                    <TextBlock Text="Restore Vault Backup?" FontSize="18" FontWeight="Bold" Foreground="#FFFFFF" TextWrapping="Wrap"/>
-                    <TextBlock Name="TxtConfirmRestoreMessage" Text="Restoring from a backup file will replace all current connections and settings on this device. A backup (.bak) of your current vault will be saved. Continue?"
-                               FontSize="13" Foreground="#EDEDED" TextWrapping="Wrap"/>
-                    <Grid ColumnDefinitions="*,10,*">
-                        <Button Grid.Column="0" Name="BtnCancelRestoreVault" Content="Cancel" Background="#2E2E35" Foreground="#EDEDED"
-                                CornerRadius="6" HorizontalAlignment="Stretch"/>
-                        <Button Grid.Column="2" Name="BtnConfirmRestoreVault" Content="Restore &amp; Replace" Background="#005FB8" Foreground="White"
-                                CornerRadius="6" HorizontalAlignment="Stretch" FontWeight="SemiBold"/>
-                    </Grid>
-                </StackPanel>
-            </Border>
+            <ScrollViewer MaxHeight="540" HorizontalScrollBarVisibility="Disabled" VerticalAlignment="Center" HorizontalAlignment="Center">
+                <Border Background="#141417" BorderBrush="#B80000" BorderThickness="1" CornerRadius="8"
+                        Margin="20" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="440" Padding="20">
+                    <StackPanel Spacing="14">
+                        <TextBlock Text="Restore &amp; Replace Vault?" FontSize="18" FontWeight="Bold" Foreground="#FFFFFF" TextWrapping="Wrap"/>
+                        <TextBlock Name="TxtConfirmRestoreMessage" Text="Restoring from a backup file will permanently replace all current connections and settings on this device. A backup (.bak) of your current vault will be saved. Continue?"
+                                   FontSize="13" Foreground="#EDEDED" TextWrapping="Wrap"/>
+                        <Grid ColumnDefinitions="*,10,*">
+                            <Button Grid.Column="0" Name="BtnCancelRestoreVault" Content="Cancel" Background="#2E2E35" Foreground="#EDEDED"
+                                    CornerRadius="6" HorizontalAlignment="Stretch"/>
+                            <Button Grid.Column="2" Name="BtnConfirmRestoreVault" Content="Restore &amp; Replace" Background="#B80000" Foreground="White"
+                                    CornerRadius="6" HorizontalAlignment="Stretch" FontWeight="SemiBold"/>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </ScrollViewer>
         </Border>
 
         <!-- Password Verification Modal for Generating Fresh Recovery Code -->
         <Border Name="OverlayPromptPasswordForRecovery" Background="#E00A0A0C" IsVisible="False" ZIndex="250">
-            <Border Background="#141417" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="8"
-                    Margin="20" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="440" Padding="20">
-                <StackPanel Spacing="14">
-                    <TextBlock Text="Generate a new recovery code?" FontSize="18" FontWeight="Bold" Foreground="#FFFFFF" TextWrapping="Wrap"/>
-                    <Border Background="#2A1F0A" BorderBrush="#5A431A" BorderThickness="1" CornerRadius="6" Padding="12">
-                        <TextBlock Text="Your current recovery code will stop working the moment the new one is created. If you have it written down somewhere, that copy becomes useless."
-                                   FontSize="13" Foreground="#E8A030" TextWrapping="Wrap"/>
-                    </Border>
-                    <TextBlock Text="Enter your master password to continue:"
-                               FontSize="13" Foreground="#9A9AA3" TextWrapping="Wrap"/>
-                    <Grid ColumnDefinitions="*,Auto">
-                        <TextBox Grid.Column="0" Name="TxtVerifyPassForRecovery" PasswordChar="●" Watermark="Master password..."
-                                 Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35"/>
-                        <Button Grid.Column="1" Name="BtnToggleVerifyRecoveryPass" Content="👁" Background="#1C1C21" Foreground="#9A9AA3"
-                                BorderBrush="#2E2E35" MinWidth="48" Margin="6,0,0,0"/>
-                    </Grid>
-                    <TextBlock Name="TxtVerifyPassForRecoveryError" Foreground="#FF6B6B" FontSize="13" IsVisible="False" TextWrapping="Wrap"/>
-                    <Grid ColumnDefinitions="*,10,*">
-                        <Button Grid.Column="0" Name="BtnCancelVerifyPassForRecovery" Content="Cancel" Background="#2E2E35" Foreground="#EDEDED"
-                                CornerRadius="6" HorizontalAlignment="Stretch"/>
-                        <Button Grid.Column="2" Name="BtnSubmitVerifyPassForRecovery" Content="Generate Code" Background="#005FB8" Foreground="White"
-                                CornerRadius="6" HorizontalAlignment="Stretch" FontWeight="SemiBold"/>
-                    </Grid>
-                </StackPanel>
-            </Border>
+            <ScrollViewer MaxHeight="540" HorizontalScrollBarVisibility="Disabled" VerticalAlignment="Center" HorizontalAlignment="Center">
+                <Border Background="#141417" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="8"
+                        Margin="20" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="440" Padding="20">
+                    <StackPanel Spacing="14">
+                        <TextBlock Text="Generate a new recovery code?" FontSize="18" FontWeight="Bold" Foreground="#FFFFFF" TextWrapping="Wrap"/>
+                        <Border Background="#2A1F0A" BorderBrush="#5A431A" BorderThickness="1" CornerRadius="6" Padding="12">
+                            <TextBlock Text="Your current recovery code will stop working the moment the new one is created. If you have it written down somewhere, that copy becomes useless."
+                                       FontSize="13" Foreground="#E8A030" TextWrapping="Wrap"/>
+                        </Border>
+                        <TextBlock Text="Enter your master password to continue:"
+                                   FontSize="13" Foreground="#9A9AA3" TextWrapping="Wrap"/>
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBox Grid.Column="0" Name="TxtVerifyPassForRecovery" PasswordChar="●" Watermark="Master password..."
+                                     Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35"/>
+                            <Button Grid.Column="1" Name="BtnToggleVerifyRecoveryPass" Content="👁" Background="#1C1C21" Foreground="#9A9AA3"
+                                    BorderBrush="#2E2E35" MinWidth="48" Margin="6,0,0,0"/>
+                        </Grid>
+                        <TextBlock Name="TxtVerifyPassForRecoveryError" Foreground="#FF6B6B" FontSize="13" IsVisible="False" TextWrapping="Wrap"/>
+                        <Grid ColumnDefinitions="*,10,*">
+                            <Button Grid.Column="0" Name="BtnCancelVerifyPassForRecovery" Content="Cancel" Background="#2E2E35" Foreground="#EDEDED"
+                                    CornerRadius="6" HorizontalAlignment="Stretch"/>
+                            <Button Grid.Column="2" Name="BtnSubmitVerifyPassForRecovery" Content="Generate Code" Background="#005FB8" Foreground="White"
+                                    CornerRadius="6" HorizontalAlignment="Stretch" FontWeight="SemiBold"/>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </ScrollViewer>
         </Border>
 
         <!-- Enable Accessibility Auto-Type Modal Overlay -->
         <Border Name="OverlayEnableAccessibility" Background="#E00A0A0C" IsVisible="False" ZIndex="260">
-            <Border Background="#141417" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="8"
-                    Margin="20" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460" Padding="20">
-                <StackPanel Spacing="14">
-                    <StackPanel Spacing="4">
-                        <TextBlock Text="🔒 TYPE MY PASSWORD FOR ME" FontSize="12" FontWeight="Bold" Foreground="#8AB4F8" LetterSpacing="1" TextWrapping="Wrap"/>
-                        <TextBlock Text="Turn on Auto-Type?" FontSize="17" FontWeight="Bold" Foreground="#FFFFFF" TextWrapping="Wrap"/>
-                    </StackPanel>
-
-                    <TextBlock Text="RDP Vault can type your saved password straight into Microsoft Remote Desktop. Nothing goes on the clipboard and nothing is stored inside Remote Desktop. Turning it on is a one-time trip to Android Settings."
-                               FontSize="13" Foreground="#EDEDED" TextWrapping="Wrap"/>
-
-                    <Border Background="#1A1813" BorderBrush="#664D03" BorderThickness="1" CornerRadius="6" Padding="12">
+            <ScrollViewer MaxHeight="540" HorizontalScrollBarVisibility="Disabled" VerticalAlignment="Center" HorizontalAlignment="Center">
+                <Border Background="#141417" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="8"
+                        Margin="20" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460" Padding="20">
+                    <StackPanel Spacing="14">
                         <StackPanel Spacing="4">
-                            <TextBlock Text="IF THE SWITCH IS GREYED OUT" FontSize="12" FontWeight="Bold" Foreground="#FFC107" LetterSpacing="1"/>
-                            <TextBlock Text="Tap 'Unlock App Settings' below, then the ⋮ menu, then 'Allow restricted settings'. Then come back to Accessibility and turn it on."
-                                       FontSize="13" Foreground="#EDEDED" TextWrapping="Wrap"/>
+                            <TextBlock Text="🔒 TYPE MY PASSWORD FOR ME" FontSize="12" FontWeight="Bold" Foreground="#8AB4F8" LetterSpacing="1" TextWrapping="Wrap"/>
+                            <TextBlock Text="Turn on Auto-Type?" FontSize="17" FontWeight="Bold" Foreground="#FFFFFF" TextWrapping="Wrap"/>
                         </StackPanel>
-                    </Border>
 
-                    <StackPanel Spacing="8">
-                        <Button Name="BtnOpenAccessibilitySettings" Content="⚙ Open Accessibility Settings" Background="#005FB8" Foreground="White"
-                                CornerRadius="6" HorizontalAlignment="Stretch" FontWeight="SemiBold"/>
-                        <Button Name="BtnOpenAppInfo" Content="🔓 Unlock App Settings (if greyed out)" Background="#2E2E35" Foreground="#FFC107"
-                                CornerRadius="6" HorizontalAlignment="Stretch" FontSize="13"/>
-                        <Button Name="BtnContinueWithoutAccessibility" Content="No thanks - I'll type it myself" Background="#1C1C21" Foreground="#EDEDED"
-                                BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="6" HorizontalAlignment="Stretch" FontSize="13"/>
-                        <CheckBox Name="ChkDontAskAccessibilityAgain" Content="Don't ask me again" Foreground="#9A9AA3"/>
-                        <Button Name="BtnCancelAccessibilityPrompt" Content="Cancel connection" Background="Transparent" Foreground="#9A9AA3"
-                                CornerRadius="6" HorizontalAlignment="Stretch" FontSize="13"/>
+                        <TextBlock Text="RDP Vault can type your saved password straight into Microsoft Remote Desktop. Nothing goes on the clipboard and nothing is stored inside Remote Desktop. Turning it on is a one-time trip to Android Settings."
+                                   FontSize="13" Foreground="#EDEDED" TextWrapping="Wrap"/>
+
+                        <Border Background="#1A1813" BorderBrush="#664D03" BorderThickness="1" CornerRadius="6" Padding="12">
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="IF THE SWITCH IS GREYED OUT" FontSize="12" FontWeight="Bold" Foreground="#FFC107" LetterSpacing="1"/>
+                                <TextBlock Text="Tap 'Unlock App Settings' below, then the ⋮ menu, then 'Allow restricted settings'. Then come back to Accessibility and turn it on."
+                                           FontSize="13" Foreground="#EDEDED" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+
+                        <StackPanel Spacing="8">
+                            <Button Name="BtnOpenAccessibilitySettings" Content="⚙ Open Accessibility Settings" Background="#005FB8" Foreground="White"
+                                    CornerRadius="6" HorizontalAlignment="Stretch" FontWeight="SemiBold"/>
+                            <Button Name="BtnOpenAppInfo" Content="🔓 Unlock App Settings (if greyed out)" Background="#2E2E35" Foreground="#FFC107"
+                                    CornerRadius="6" HorizontalAlignment="Stretch" FontSize="13"/>
+                            <Button Name="BtnContinueWithoutAccessibility" Content="No thanks - I'll type it myself" Background="#1C1C21" Foreground="#EDEDED"
+                                    BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="6" HorizontalAlignment="Stretch" FontSize="13"/>
+                            <CheckBox Name="ChkDontAskAccessibilityAgain" Content="Don't ask me again" Foreground="#9A9AA3"/>
+                            <Button Name="BtnCancelAccessibilityPrompt" Content="Cancel connection" Background="Transparent" Foreground="#9A9AA3"
+                                    CornerRadius="6" HorizontalAlignment="Stretch" FontSize="13"/>
+                        </StackPanel>
                     </StackPanel>
-                </StackPanel>
-            </Border>
+                </Border>
+            </ScrollViewer>
         </Border>
 
         <!-- End Session explainer (audit item 2 / Finding 2) -->
         <Border Name="OverlayEndSession" Background="#E00A0A0C" IsVisible="False" ZIndex="260">
-            <Border Background="#141417" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="8"
-                    Margin="20" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460" Padding="20">
-                <StackPanel Spacing="14">
-                    <TextBlock Text="End this remote session?" FontSize="18" FontWeight="Bold" Foreground="#FFFFFF" TextWrapping="Wrap"/>
-                    <TextBlock Text="Your session is running inside Microsoft Remote Desktop, not inside RDP Vault. Android does not let one app disconnect another app's session, so the only way to truly sign out is to do it in Remote Desktop itself."
-                               FontSize="13" Foreground="#EDEDED" TextWrapping="Wrap"/>
-                    <StackPanel Spacing="8">
-                        <Button Name="BtnEndSessionOpenRdp" Content="Open Remote Desktop and disconnect there" Background="#005FB8" Foreground="White"
-                                CornerRadius="6" HorizontalAlignment="Stretch" FontWeight="SemiBold" FontSize="13"/>
-                        <Button Name="BtnEndSessionStopTracking" Content="Just stop tracking it here" Background="#2E2E35" Foreground="#EDEDED"
-                                CornerRadius="6" HorizontalAlignment="Stretch" FontSize="13"/>
-                        <Button Name="BtnEndSessionCancel" Content="Cancel" Background="Transparent" Foreground="#9A9AA3"
-                                CornerRadius="6" HorizontalAlignment="Stretch" FontSize="13"/>
+            <ScrollViewer MaxHeight="540" HorizontalScrollBarVisibility="Disabled" VerticalAlignment="Center" HorizontalAlignment="Center">
+                <Border Background="#141417" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="8"
+                        Margin="20" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460" Padding="20">
+                    <StackPanel Spacing="14">
+                        <TextBlock Text="Stop tracking this remote session?" FontSize="18" FontWeight="Bold" Foreground="#FFFFFF" TextWrapping="Wrap"/>
+                        <TextBlock Text="Your session is running inside Microsoft Remote Desktop, not inside RDP Vault. Android does not let one app disconnect another app's session, so the only way to truly sign out is to do it in Remote Desktop itself."
+                                   FontSize="13" Foreground="#EDEDED" TextWrapping="Wrap"/>
+                        <StackPanel Spacing="8">
+                            <Button Name="BtnEndSessionOpenRdp" Content="Open Remote Desktop and disconnect there" Background="#005FB8" Foreground="White"
+                                    CornerRadius="6" HorizontalAlignment="Stretch" FontWeight="SemiBold" FontSize="13"/>
+                            <Button Name="BtnEndSessionStopTracking" Content="Stop tracking in RDP Vault" Background="#2E2E35" Foreground="#EDEDED"
+                                    CornerRadius="6" HorizontalAlignment="Stretch" FontSize="13"/>
+                            <Button Name="BtnEndSessionCancel" Content="Cancel" Background="Transparent" Foreground="#9A9AA3"
+                                    CornerRadius="6" HorizontalAlignment="Stretch" FontSize="13"/>
+                        </StackPanel>
                     </StackPanel>
-                </StackPanel>
-            </Border>
+                </Border>
+            </ScrollViewer>
         </Border>
 
         <!-- Biometric seal repair (Finding 3): explicit consent, never silent -->
         <Border Name="OverlayRepairBiometrics" Background="#E00A0A0C" IsVisible="False" ZIndex="260">
-            <Border Background="#141417" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="8"
-                    Margin="20" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460" Padding="20">
-                <StackPanel Spacing="14">
-                    <TextBlock Text="Fingerprint unlock stopped working" FontSize="18" FontWeight="Bold" Foreground="#FFFFFF" TextWrapping="Wrap"/>
-                    <TextBlock Name="TxtRepairBiometricsBody"
-                               Text="This normally means a new fingerprint or face was added to the phone, or Android was updated. For your safety the old seal was destroyed rather than quietly extended to the new fingerprint. Re-create it now?"
-                               FontSize="13" Foreground="#EDEDED" TextWrapping="Wrap"/>
-                    <Grid ColumnDefinitions="*,10,*">
-                        <Button Grid.Column="0" Name="BtnSkipRepairBiometrics" Content="Not now" Background="#2E2E35" Foreground="#EDEDED"
-                                CornerRadius="6" HorizontalAlignment="Stretch"/>
-                        <Button Grid.Column="2" Name="BtnDoRepairBiometrics" Content="Re-create seal" Background="#005FB8" Foreground="White"
-                                CornerRadius="6" HorizontalAlignment="Stretch" FontWeight="SemiBold"/>
-                    </Grid>
-                </StackPanel>
-            </Border>
+            <ScrollViewer MaxHeight="540" HorizontalScrollBarVisibility="Disabled" VerticalAlignment="Center" HorizontalAlignment="Center">
+                <Border Background="#141417" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="8"
+                        Margin="20" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460" Padding="20">
+                    <StackPanel Spacing="14">
+                        <TextBlock Text="Fingerprint unlock stopped working" FontSize="18" FontWeight="Bold" Foreground="#FFFFFF" TextWrapping="Wrap"/>
+                        <TextBlock Name="TxtRepairBiometricsBody"
+                                   Text="This normally means a new fingerprint or face was added to the phone, or Android was updated. For your safety the old seal was destroyed rather than quietly extended to the new fingerprint. Re-create it now?"
+                                   FontSize="13" Foreground="#EDEDED" TextWrapping="Wrap"/>
+                        <Grid ColumnDefinitions="*,10,*">
+                            <Button Grid.Column="0" Name="BtnSkipRepairBiometrics" Content="Not now" Background="#2E2E35" Foreground="#EDEDED"
+                                    CornerRadius="6" HorizontalAlignment="Stretch"/>
+                            <Button Grid.Column="2" Name="BtnDoRepairBiometrics" Content="Re-create seal" Background="#005FB8" Foreground="White"
+                                    CornerRadius="6" HorizontalAlignment="Stretch" FontWeight="SemiBold"/>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </ScrollViewer>
         </Border>
 
     </Grid>

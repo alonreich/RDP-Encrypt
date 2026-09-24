@@ -130,7 +130,7 @@ public static class VaultCrypto
     /// The caller MUST show <paramref name="recoveryCodeDisplay"/> to the user.
     /// </summary>
     public static VaultFile CreateVault(string password, VaultPayload payload, string vaultPath,
-                                        out string recoveryCodeDisplay)
+                                        out string recoveryCodeDisplay, bool retainRecoveryUntilAcknowledged = false)
     {
         var file = new VaultFile();
         file.Kdf.Salt = Convert.ToBase64String(RandomNumberGenerator.GetBytes(SaltBytes));
@@ -149,6 +149,11 @@ public static class VaultCrypto
             file.Recovery = SealToBlob(recoveryKey, master);
 
             file.Data = SealToBlob(master, Serialize(payload));
+            if (retainRecoveryUntilAcknowledged)
+            {
+                payload.PendingRecoveryCode = RecoveryCode.Normalize(recoveryCodeDisplay);
+                file.Data = SealToBlob(master, Serialize(payload));
+            }
             WriteAtomic(file, vaultPath);
             return file;
         }
@@ -245,12 +250,14 @@ public static class VaultCrypto
 
     public static void Save(VaultFile file, byte[] master, VaultPayload payload, string vaultPath,
                             string? newPassword = null, List<SealEntry>? newSeals = null,
-                            bool regenerateRecovery = false, Action<string>? recoveryCodeOut = null)
+                            bool regenerateRecovery = false, Action<string>? recoveryCodeOut = null,
+                            bool retainRecoveryUntilAcknowledged = false)
     {
         if (newSeals != null) file.Seals = newSeals;
 
         if (newPassword != null)
         {
+            file.Seals = new List<SealEntry>();
             // Re-salt on every password change, and drop all quick-unlock seals:
             // a password change is treated as a possible compromise.
             file.Kdf.Salt = Convert.ToBase64String(RandomNumberGenerator.GetBytes(SaltBytes));
@@ -267,6 +274,7 @@ public static class VaultCrypto
             try { file.Recovery = SealToBlob(recoveryKey, master); }
             finally { CryptographicOperations.ZeroMemory(recoveryKey); }
             recoveryCodeOut?.Invoke(code);
+            payload.PendingRecoveryCode = retainRecoveryUntilAcknowledged ? RecoveryCode.Normalize(code) : "";
         }
 
         file.V = 2;

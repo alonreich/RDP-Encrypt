@@ -275,18 +275,12 @@ public class RdpAutoTypeService : AccessibilityService
                 }
             }
 
-            // Fallback resolution for dialogs with 2 fields (User + Pass) or 1 field (Pass)
-            if (passwordField == null && editTexts.Count >= 2)
+            // Only inject into a verified password field (Fix for Item 1: never guess into plain text boxes)
+            if (passwordField == null)
             {
-                usernameField = editTexts[0];
-                passwordField = editTexts[1];
+                global::Android.Util.Log.Warn("RDPVault", "RdpAutoTypeService: No verified password input field found. Aborting auto-type to prevent accidental exposure.");
+                return;
             }
-            else if (passwordField == null && editTexts.Count == 1)
-            {
-                passwordField = editTexts[0];
-            }
-
-            if (passwordField != null)
             {
                 string targetPass;
                 string targetUser;

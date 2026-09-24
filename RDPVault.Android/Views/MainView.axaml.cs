@@ -45,6 +45,9 @@ public partial class MainView : UserControl
     private volatile bool _skipWolWait;
     private bool _isFormattingRecovery;
     private byte[]? _stagedRestoreBytes;
+    private VaultFile? _stagedRestoreVaultFile;
+    private readonly UnlockThrottle _unlockThrottle = new();
+    private bool _isLaunching;
     private DateTime _lastSensitiveCopyUtc = DateTime.MinValue;
     private string? _lastSensitiveCopiedText;
 
@@ -85,6 +88,8 @@ public partial class MainView : UserControl
         public string WolMac;
         public string WolPort;
         public string WolWait;
+        public bool EnableKnock;
+        public string KnockSignature;
         public bool SuppressCert;
         public string Notes;
     }
@@ -169,7 +174,6 @@ public partial class MainView : UserControl
     {
         if (_idleTimerSuspended) return;
         if (_masterKey == null) return;                       // already locked
-        if (MainActivity.Instance?.IsSessionActive == true) return; // never lock mid-session
         if (OverlayLaunch.IsVisible) return;                  // never lock mid-connect
 
         int minutes = _payload?.Settings?.LockMinutes ?? 0;
@@ -203,6 +207,7 @@ public partial class MainView : UserControl
         SetupPasswordToggle(TxtVerifyPassForRecovery, BtnToggleVerifyRecoveryPass);
         SetupPasswordToggle(TxtRecoveryConfirmPass, BtnToggleRecoveryConfirmPass);
         SetupPasswordToggle(TxtProfilePass, BtnToggleProfilePass);
+        SetupPasswordToggle(TxtVerifyBackupPass, BtnToggleVerifyBackupPass);
 
         // 2. Numeric input filtering
         RestrictToDigits(TxtProfilePort);
@@ -226,6 +231,11 @@ public partial class MainView : UserControl
         BtnFinishSetupAndEnter.Click += (_, _) =>
         {
             _activeRecoveryCode = "";
+            if (_payload != null)
+            {
+                _payload.PendingRecoveryCode = "";
+                SaveVault();
+            }
             PanelRecoveryDisplay.IsVisible = false;
             SwitchToUnlocked();
         };
@@ -242,6 +252,7 @@ public partial class MainView : UserControl
             if (e.Key == Key.Enter) await UnlockWithPasswordAsync();
         };
         BtnShowRecovery.Click += (_, _) => ShowRecoveryUnlock();
+        BtnLockRestoreBackup.Click += async (_, _) => await RestoreVaultFromFileAsync();
 
         // 6. Recovery Unlock
         BtnPasteRecoveryCode.Click += async (_, _) => await PasteRecoveryCodeAsync();
@@ -311,9 +322,11 @@ public partial class MainView : UserControl
             BannerBackupReminder.IsVisible = false;
         };
 
-        // 8. Profile Editor - ONE Save, ONE Cancel, both in the sticky header.
+        // 8. Profile Editor - Save and Cancel in header and bottom, plus knock
         BtnTopSaveProfile.Click += (_, _) => SaveProfile();
         BtnTopCancelProfile.Click += (_, _) => OnCancelProfileEditor();
+        BtnBottomSaveProfile.Click += (_, _) => SaveProfile();
+        BtnBottomCancelProfile.Click += (_, _) => OnCancelProfileEditor();
         BtnKeepEditingProfile.Click += (_, _) => OverlayConfirmDiscardProfile.IsVisible = false;
         BtnConfirmDiscardProfile.Click += (_, _) =>
         {
@@ -323,6 +336,15 @@ public partial class MainView : UserControl
         };
 
         BtnToggleAdvanced.Click += (_, _) => SetAdvancedVisible(!PnlProfileAdvanced.IsVisible);
+
+        ChkProfileEnableKnock.IsCheckedChanged += (_, _) =>
+        {
+            PnlKnockDetails.IsVisible = ChkProfileEnableKnock.IsChecked == true;
+        };
+        BtnGenerateKnockSignature.Click += (_, _) =>
+        {
+            TxtProfileKnockSignature.Text = IcmpKnock.GenerateSignature();
+        };
 
         ChkProfileEnableWol.IsCheckedChanged += (_, _) =>
         {
@@ -380,13 +402,25 @@ public partial class MainView : UserControl
         BtnToggleBiometrics.Click += async (_, _) => await ToggleBiometricsAsync();
         BtnExportVault.Click += async (_, _) => await ExportVaultFileAsync();
         BtnShareVault.Click += async (_, _) => await ShareVaultBackupAsync();
-        BtnImportVault.Click += async (_, _) => await ImportVaultFromSettingsAsync();
+        BtnImportVault.Click += async (_, _) => await RestoreVaultFromFileAsync();
         BtnCancelRestoreVault.Click += (_, _) =>
         {
             _stagedRestoreBytes = null;
+            _stagedRestoreVaultFile = null;
             OverlayConfirmRestoreVault.IsVisible = false;
         };
         BtnConfirmRestoreVault.Click += async (_, _) => await ExecuteVaultRestoreAsync();
+        BtnCancelVerifyBackupPass.Click += (_, _) =>
+        {
+            OverlayVerifyBackupPassword.IsVisible = false;
+            _stagedRestoreBytes = null;
+            _stagedRestoreVaultFile = null;
+        };
+        BtnSubmitVerifyBackupPass.Click += async (_, _) => await SubmitVerifyBackupPasswordAsync();
+        TxtVerifyBackupPass.KeyDown += async (_, e) =>
+        {
+            if (e.Key == Key.Enter) await SubmitVerifyBackupPasswordAsync();
+        };
         BtnRegenerateRecoveryCode.Click += (_, _) =>
         {
             TxtVerifyPassForRecovery.Text = "";
@@ -848,7 +882,7 @@ public partial class MainView : UserControl
 
         try
         {
-            var file = await Task.Run(() => VaultCrypto.CreateVault(pass, payload, VaultPath, out recoveryCode));
+            var file = await Task.Run(() => VaultCrypto.CreateVault(pass, payload, VaultPath, out recoveryCode, retainRecoveryUntilAcknowledged: true));
             var (masterKey, _) = await Task.Run(() => VaultCrypto.Open(file, pass));
 
             _vaultFile = file;
@@ -1016,8 +1050,8 @@ public partial class MainView : UserControl
         {
             if (File.Exists(VaultPath))
             {
-                string json = File.ReadAllText(VaultPath);
-                _vaultFile = System.Text.Json.JsonSerializer.Deserialize(json, VaultJsonContext.Default.VaultFile);
+                byte[] raw = File.ReadAllBytes(VaultPath);
+                _vaultFile = VaultValidation.Read(raw);
             }
         }
         catch
@@ -1117,6 +1151,7 @@ public partial class MainView : UserControl
         TxtLockNotice.IsVisible = false;
         TxtLockError.IsVisible = false;
 
+        VaultFile? file = null;
         try
         {
             if (!File.Exists(VaultPath))
@@ -1125,11 +1160,20 @@ public partial class MainView : UserControl
                 return;
             }
 
-            string json = await File.ReadAllTextAsync(VaultPath);
-            var file = System.Text.Json.JsonSerializer.Deserialize(json, VaultJsonContext.Default.VaultFile)
-                ?? throw new InvalidDataException("Vault file is corrupted.");
+            byte[] raw = await File.ReadAllBytesAsync(VaultPath);
+            file = VaultValidation.Read(raw);
+
+            var remaining = _unlockThrottle.Remaining(file);
+            if (remaining.TotalSeconds > 0.5)
+            {
+                int sec = (int)Math.Ceiling(remaining.TotalSeconds);
+                TxtLockError.Text = $"Too many failed attempts. Please wait {sec} second{(sec == 1 ? "" : "s")}.";
+                TxtLockError.IsVisible = true;
+                return;
+            }
 
             var (master, payload) = await Task.Run(() => VaultCrypto.Open(file, password));
+            _unlockThrottle.Clear(file, VaultPath);
             _vaultFile = file;
             _masterKey = master;
             _payload = payload;
@@ -1156,6 +1200,10 @@ public partial class MainView : UserControl
         }
         catch (Exception ex)
         {
+            if (file != null && ex is CryptographicException or InvalidDataException)
+            {
+                try { _unlockThrottle.Record(file, VaultPath); } catch { }
+            }
             TxtLockError.Text = "Unlock failed: " + (ex is InvalidDataException ? "Incorrect master password." : ex.Message);
             TxtLockError.IsVisible = true;
         }
@@ -1314,6 +1362,12 @@ public partial class MainView : UserControl
 
     private void SwitchToUnlocked()
     {
+        if (!string.IsNullOrEmpty(_payload?.PendingRecoveryCode))
+        {
+            ShowRecoveryDisplay(_payload.PendingRecoveryCode);
+            return;
+        }
+
         ShowPanel(PanelUnlocked);
         ApplyLockSettingsToActivity();
         NotifyUserActivity();
@@ -1330,6 +1384,32 @@ public partial class MainView : UserControl
 
     private void LockVault()
     {
+        CancelLaunch();
+
+        OverlayLaunch.IsVisible = false;
+        OverlayConfirmDelete.IsVisible = false;
+        OverlayConfirmDiscardProfile.IsVisible = false;
+        OverlayVerifyBackupPassword.IsVisible = false;
+        OverlayConfirmRestoreVault.IsVisible = false;
+        OverlayPromptPasswordForRecovery.IsVisible = false;
+        OverlayEnableAccessibility.IsVisible = false;
+        OverlayEndSession.IsVisible = false;
+        OverlayRepairBiometrics.IsVisible = false;
+
+        TxtPassword.Text = "";
+        TxtFirstRunPass.Text = "";
+        TxtFirstRunConfirm.Text = "";
+        TxtRecoveryNewPass.Text = "";
+        TxtRecoveryConfirmPass.Text = "";
+        TxtRecoveryInput.Text = "";
+        TxtSettingsCurrentPass.Text = "";
+        TxtSettingsNewPass.Text = "";
+        TxtSettingsConfirmPass.Text = "";
+        TxtVerifyPassForRecovery.Text = "";
+        TxtVerifyBackupPass.Text = "";
+        TxtProfilePass.Text = "";
+        TxtRecoveryDisplayCode.Text = "";
+
         _payload = null;
         if (_masterKey != null)
         {
@@ -1341,6 +1421,7 @@ public partial class MainView : UserControl
         _activeLaunchProfile = null;
         _activeRecoveryCode = "";
         _stagedRestoreBytes = null;
+        _stagedRestoreVaultFile = null;
         _biometricPromptSuppressed = false;
 
         // Any armed auto-type credential dies with the lock.
@@ -1512,13 +1593,19 @@ public partial class MainView : UserControl
         // exist in Avalonia 11.1, which is the version this project pins.
         var chips = new WrapPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, -6, -6) };
 
-        string resText = string.IsNullOrWhiteSpace(profile.ResolutionPreset) || profile.ResolutionPreset.Equals("InheritGlobal", StringComparison.OrdinalIgnoreCase)
+        bool isInherit = string.IsNullOrWhiteSpace(profile.ResolutionPreset) || profile.ResolutionPreset.Equals("InheritGlobal", StringComparison.OrdinalIgnoreCase);
+        string resText = isInherit
             ? (_payload?.Settings?.DefaultResolution ?? "1920x1080")
             : profile.ResolutionPreset;
         if (resText.Equals("Custom", StringComparison.OrdinalIgnoreCase)) resText = $"{profile.Width}x{profile.Height}";
         if (resText.Equals("Device", StringComparison.OrdinalIgnoreCase)) resText = "Phone screen";
 
-        bool preserveNative = profile.SmartSizingOverride != TriStateOverride.Enabled;
+        bool preserveNative = profile.SmartSizingOverride switch
+        {
+            TriStateOverride.Enabled => false,
+            TriStateOverride.Disabled => true,
+            _ => !(_payload?.Settings?.DefaultSmartSizing ?? false)
+        };
         chips.Children.Add(MakeChip(
             preserveNative ? $"🖥 {resText} · scroll" : $"🖥 {resText} · fit to phone",
             "#C7D6EA", "#16202C", "#2A3B4F"));
@@ -1526,6 +1613,11 @@ public partial class MainView : UserControl
         if (profile.EnableWol)
         {
             chips.Children.Add(MakeChip("⚡ Wake-on-LAN", "#FFE0A3", "#2A1F0A", "#5A431A"));
+        }
+
+        if (profile.EnableIcmpKnock)
+        {
+            chips.Children.Add(MakeChip("🚪 Port Knock", "#C7EAE5", "#162C2A", "#2A4F4A"));
         }
 
         if (!string.IsNullOrWhiteSpace(profile.GatewayHost))
@@ -1611,6 +1703,8 @@ public partial class MainView : UserControl
             WolMac = TxtProfileWolMac.Text ?? "",
             WolPort = TxtProfileWolPort.Text ?? "9",
             WolWait = TxtProfileWolWait.Text ?? "25",
+            EnableKnock = ChkProfileEnableKnock.IsChecked == true,
+            KnockSignature = TxtProfileKnockSignature.Text ?? "",
             SuppressCert = ChkProfileSuppressCert.IsChecked == true,
             Notes = TxtProfileNotes.Text ?? ""
         };
@@ -1634,6 +1728,8 @@ public partial class MainView : UserControl
             || (TxtProfileWolMac.Text ?? "") != _editorInitialState.WolMac
             || (TxtProfileWolPort.Text ?? "") != _editorInitialState.WolPort
             || (TxtProfileWolWait.Text ?? "") != _editorInitialState.WolWait
+            || (ChkProfileEnableKnock.IsChecked == true) != _editorInitialState.EnableKnock
+            || (TxtProfileKnockSignature.Text ?? "") != _editorInitialState.KnockSignature
             || (ChkProfileSuppressCert.IsChecked == true) != _editorInitialState.SuppressCert
             || (TxtProfileNotes.Text ?? "") != _editorInitialState.Notes;
     }
@@ -1681,6 +1777,9 @@ public partial class MainView : UserControl
             TxtProfileWolMac.Text = "";
             TxtProfileWolPort.Text = "9";
             TxtProfileWolWait.Text = "25";
+            ChkProfileEnableKnock.IsChecked = false;
+            PnlKnockDetails.IsVisible = false;
+            TxtProfileKnockSignature.Text = "";
             TxtProfileNotes.Text = "";
             ChkProfileSuppressCert.IsChecked = _payload?.Settings?.SuppressCertWarnings ?? true;
             BtnDeleteProfile.IsVisible = false;
@@ -1731,6 +1830,9 @@ public partial class MainView : UserControl
             TxtProfileWolMac.Text = profile.WolMacAddress;
             TxtProfileWolPort.Text = profile.WolPort.ToString();
             TxtProfileWolWait.Text = profile.WolWaitSeconds.ToString();
+            ChkProfileEnableKnock.IsChecked = profile.EnableIcmpKnock;
+            PnlKnockDetails.IsVisible = profile.EnableIcmpKnock;
+            TxtProfileKnockSignature.Text = profile.IcmpKnockSignature;
             TxtProfileNotes.Text = profile.Notes;
             ChkProfileSuppressCert.IsChecked = profile.SuppressCertWarningsOverride switch
             {
@@ -1741,8 +1843,9 @@ public partial class MainView : UserControl
             BtnDeleteProfile.IsVisible = true;
 
             // Open "Advanced" automatically if this profile actually uses any of it, so a
-            // configured gateway or WOL setup is never hidden behind a collapsed section.
+            // configured gateway, knock or WOL setup is never hidden behind a collapsed section.
             bool usesAdvanced = profile.EnableWol
+                || profile.EnableIcmpKnock
                 || !string.IsNullOrWhiteSpace(profile.GatewayHost)
                 || !string.IsNullOrWhiteSpace(profile.Notes)
                 || CmbProfileResolution.SelectedIndex != 0
@@ -1777,6 +1880,29 @@ public partial class MainView : UserControl
         {
             ShowProfileError("Port must be a number between 1 and 65535.", false);
             return;
+        }
+
+        if (!ConnectionEndpoint.TryParse(host, out var parsedEp, out string epErr, port))
+        {
+            ShowProfileError(epErr, false);
+            return;
+        }
+        host = parsedEp.Host;
+        port = parsedEp.Port;
+
+        bool enableKnock = ChkProfileEnableKnock.IsChecked == true;
+        string knockSig = (TxtProfileKnockSignature.Text ?? "").Trim();
+        if (enableKnock && !string.IsNullOrEmpty(knockSig))
+        {
+            try
+            {
+                IcmpKnock.ParseSignature(knockSig);
+            }
+            catch (Exception ex)
+            {
+                ShowProfileError(ex.Message, true);
+                return;
+            }
         }
 
         int wolPort = 9;
@@ -1858,6 +1984,8 @@ public partial class MainView : UserControl
                 WolMacAddress = wolMac,
                 WolPort = wolPort > 0 ? wolPort : 9,
                 WolWaitSeconds = wolWait >= 0 ? wolWait : 25,
+                EnableIcmpKnock = enableKnock,
+                IcmpKnockSignature = knockSig,
                 Notes = TxtProfileNotes.Text?.Trim() ?? "",
                 SuppressCertWarningsOverride = ChkProfileSuppressCert.IsChecked == true ? TriStateOverride.Enabled : TriStateOverride.Disabled
             };
@@ -1880,6 +2008,8 @@ public partial class MainView : UserControl
             _editingProfile.WolMacAddress = wolMac;
             _editingProfile.WolPort = wolPort > 0 ? wolPort : 9;
             _editingProfile.WolWaitSeconds = wolWait >= 0 ? wolWait : 25;
+            _editingProfile.EnableIcmpKnock = enableKnock;
+            _editingProfile.IcmpKnockSignature = knockSig;
             _editingProfile.Notes = TxtProfileNotes.Text?.Trim() ?? "";
             _editingProfile.SuppressCertWarningsOverride = ChkProfileSuppressCert.IsChecked == true ? TriStateOverride.Enabled : TriStateOverride.Disabled;
         }
@@ -2197,9 +2327,22 @@ public partial class MainView : UserControl
 
             await Task.Run(() => VaultCrypto.Open(_vaultFile, current));
 
+            if (_vaultFile.Seals != null)
+            {
+                foreach (var s in _vaultFile.Seals)
+                {
+                    if (!string.IsNullOrEmpty(s.KeyId))
+                    {
+                        AndroidHardwareKeyStore.DeleteHardwareKey(s.KeyId);
+                    }
+                }
+                _vaultFile.Seals = new List<SealEntry>();
+            }
+
             string freshCode = "";
             VaultCrypto.Save(_vaultFile, _masterKey, _payload, VaultPath,
-                newPassword: newPass, regenerateRecovery: true, recoveryCodeOut: c => freshCode = c);
+                newPassword: newPass, newSeals: new List<SealEntry>(), regenerateRecovery: true,
+                recoveryCodeOut: c => freshCode = c, retainRecoveryUntilAcknowledged: true);
 
             TxtSettingsCurrentPass.Text = "";
             TxtSettingsNewPass.Text = "";
@@ -2334,16 +2477,20 @@ public partial class MainView : UserControl
 
     private async Task ProceedLaunchAsync(RdpProfile profile)
     {
+        if (_isLaunching) return;
+        _isLaunching = true;
+
         _connectCts?.Dispose();
         _connectCts = new CancellationTokenSource();
         var ct = _connectCts.Token;
         _skipWolWait = false;
 
-        string host = ExtractHost(profile);
-        int port = profile.Port > 0 ? profile.Port : 3389;
+        var ep = ConnectionEndpoint.FromProfile(profile);
+        string host = ep.Host;
+        int port = ep.Port;
 
         TxtLaunchTitle.Text = profile.EnableWol ? "WAKING COMPUTER & CONNECTING" : "CONNECTING TO REMOTE COMPUTER";
-        TxtLaunchTarget.Text = $"{profile.Name}  •  {host}:{port}";
+        TxtLaunchTarget.Text = $"{profile.Name}  •  {ep.Address}";
         ProgLaunch.IsIndeterminate = true;
         ProgLaunch.Value = 0;
         TxtLaunchCountdown.IsVisible = false;
@@ -2390,7 +2537,27 @@ public partial class MainView : UserControl
 
             if (ct.IsCancellationRequested) return;
 
-            // 2. Reachability pre-flight (suggestion 10)
+            // 2. Port Knocking (Issue 31)
+            if (profile.EnableIcmpKnock)
+            {
+                TxtLaunchSubStatus.Text = "Port Knocking";
+                TxtLaunchStep.Text = $"Sending ICMP knock to {host}...";
+                try
+                {
+                    await IcmpKnock.SendBeforeConnectAsync(host, profile.IcmpKnockSignature, ct);
+                }
+                catch (OperationCanceledException) { return; }
+                catch (Exception ex)
+                {
+                    TxtLaunchSubStatus.Text = "Knock warning";
+                    TxtLaunchStep.Text = $"Knock packet warning: {ex.Message}";
+                    await Task.Delay(1000, ct);
+                }
+            }
+
+            if (ct.IsCancellationRequested) return;
+
+            // 3. Reachability pre-flight (suggestion 10)
             if (AppPrefs.GetBool(AppPrefs.KeyPreflightEnabled, true))
             {
                 bool proceed = await RunPreflightAsync(profile, host, port, ct);
@@ -2399,12 +2566,12 @@ public partial class MainView : UserControl
 
             if (ct.IsCancellationRequested) return;
 
-            // 3. Hand off
+            // 4. Hand off
             ProgLaunch.IsIndeterminate = true;
             TxtLaunchCountdown.IsVisible = false;
             CardLaunchUnreachable.IsVisible = false;
             TxtLaunchSubStatus.Text = "Opening Remote Desktop";
-            TxtLaunchStep.Text = $"Opening Remote Desktop for {host}:{port}...";
+            TxtLaunchStep.Text = $"Opening Remote Desktop for {ep.Address}...";
 
             var result = RdpLauncher.LaunchRdp(AndroidContext, profile, _payload?.Settings, out string message);
 
@@ -2443,6 +2610,7 @@ public partial class MainView : UserControl
         }
         finally
         {
+            _isLaunching = false;
             OverlayLaunch.IsVisible = false;
             BtnSkipWolWait.IsVisible = false;
             CardLaunchPasswordTip.IsVisible = false;
@@ -2515,35 +2683,69 @@ public partial class MainView : UserControl
             ProgLaunch.IsIndeterminate = true;
             CardLaunchUnreachable.IsVisible = false;
             TxtLaunchSubStatus.Text = "Checking the computer";
-            TxtLaunchStep.Text = $"Checking that {host}:{port} is awake...";
 
-            bool reachable = await HostProbe.IsReachableAsync(host, port, 1500, ct);
-            if (reachable)
+            if (!string.IsNullOrWhiteSpace(profile.GatewayHost))
             {
-                TxtLaunchStep.Text = $"{host}:{port} answered. Opening Remote Desktop...";
-                return true;
+                string gwHost = profile.GatewayHost.Trim();
+                int gwPort = 443;
+                if (gwHost.Contains(':'))
+                {
+                    var parts = gwHost.Split(':');
+                    gwHost = parts[0];
+                    if (parts.Length > 1 && int.TryParse(parts[1], out int p)) gwPort = p;
+                }
+
+                TxtLaunchStep.Text = $"Checking RD Gateway ({gwHost}:{gwPort})...";
+                bool gwReachable = await HostProbe.IsReachableAsync(gwHost, gwPort, 1500, ct);
+                if (gwReachable)
+                {
+                    TxtLaunchStep.Text = "RD Gateway answered. Connecting...";
+                    return true;
+                }
+
+                if (ct.IsCancellationRequested) return false;
+
+                TxtLaunchUnreachableTitle.Text = "COULD NOT VERIFY GATEWAY";
+                TxtLaunchUnreachableBody.Text = $"Could not verify connection to RD Gateway '{profile.GatewayHost}'. The remote computer '{host}:{port}' is routed through this gateway and cannot be probed directly. You can continue connecting anyway.";
+                BtnLaunchSendWol.IsVisible = false;
+                CardLaunchUnreachable.IsVisible = true;
+                ProgLaunch.IsIndeterminate = false;
+                ProgLaunch.Value = 0;
+                TxtLaunchSubStatus.Text = "";
+                TxtLaunchStep.Text = "Waiting for you to choose what to do.";
             }
-
-            if (ct.IsCancellationRequested) return false;
-
-            var kind = HostProbe.GetActiveNetworkKind(AndroidContext);
-            string reason = kind switch
+            else
             {
-                NetworkKind.None => "This phone has no network connection right now.",
-                NetworkKind.Cellular => "You are on mobile data. If this is a home or office PC, it is probably only reachable from its own Wi-Fi network or through a VPN.",
-                _ => "The computer did not answer. It is most likely asleep, switched off, or not on this network."
-            };
+                TxtLaunchStep.Text = $"Checking that {host}:{port} is awake...";
 
-            bool canWol = !string.IsNullOrWhiteSpace(profile.WolMacAddress) && HostProbe.IsWolCapableNetwork(AndroidContext);
+                bool reachable = await HostProbe.IsReachableAsync(host, port, 1500, ct);
+                if (reachable)
+                {
+                    TxtLaunchStep.Text = $"{host}:{port} answered. Opening Remote Desktop...";
+                    return true;
+                }
 
-            TxtLaunchUnreachableTitle.Text = $"{host} DID NOT ANSWER";
-            TxtLaunchUnreachableBody.Text = reason + " Opening Remote Desktop now would just spin for about 30 seconds and then show error 0x204.";
-            BtnLaunchSendWol.IsVisible = canWol;
-            CardLaunchUnreachable.IsVisible = true;
-            ProgLaunch.IsIndeterminate = false;
-            ProgLaunch.Value = 0;
-            TxtLaunchSubStatus.Text = "";
-            TxtLaunchStep.Text = "Waiting for you to choose what to do.";
+                if (ct.IsCancellationRequested) return false;
+
+                var kind = HostProbe.GetActiveNetworkKind(AndroidContext);
+                string reason = kind switch
+                {
+                    NetworkKind.None => "This phone has no network connection right now.",
+                    NetworkKind.Cellular => "You are on mobile data. If this is a home or office PC, it is probably only reachable from its own Wi-Fi network or through a VPN.",
+                    _ => "The computer did not answer. It is most likely asleep, switched off, or not on this network."
+                };
+
+                bool canWol = !string.IsNullOrWhiteSpace(profile.WolMacAddress) && HostProbe.IsWolCapableNetwork(AndroidContext);
+
+                TxtLaunchUnreachableTitle.Text = $"{host} DID NOT ANSWER";
+                TxtLaunchUnreachableBody.Text = reason + " Opening Remote Desktop now would just spin for about 30 seconds and then show error 0x204.";
+                BtnLaunchSendWol.IsVisible = canWol;
+                CardLaunchUnreachable.IsVisible = true;
+                ProgLaunch.IsIndeterminate = false;
+                ProgLaunch.Value = 0;
+                TxtLaunchSubStatus.Text = "";
+                TxtLaunchStep.Text = "Waiting for you to choose what to do.";
+            }
 
             _unreachableChoiceTcs = new TaskCompletionSource<UnreachableChoice>(TaskCreationOptions.RunContinuationsAsynchronously);
             UnreachableChoice choice;
@@ -2827,37 +3029,14 @@ public partial class MainView : UserControl
     {
         error = "";
         profileCountHint = -1;
-
-        if (data == null || data.Length < 64)
-        {
-            error = "That file is too small to be a vault.";
-            return false;
-        }
-
         try
         {
-            string json = Encoding.UTF8.GetString(data);
-            var file = System.Text.Json.JsonSerializer.Deserialize(json, VaultJsonContext.Default.VaultFile);
-            if (file == null)
-            {
-                error = "That file is not an RDP Vault file.";
-                return false;
-            }
-            if (file.Kdf == null || string.IsNullOrEmpty(file.Kdf.Salt))
-            {
-                error = "That file is missing its encryption header - it is not a valid vault.";
-                return false;
-            }
-            if (file.Wrap == null || file.Data == null)
-            {
-                error = "That vault file is incomplete or corrupted.";
-                return false;
-            }
+            VaultValidation.Read(data);
             return true;
         }
         catch (Exception ex)
         {
-            error = "That file could not be read as a vault (" + ex.GetType().Name + ").";
+            error = ex.Message;
             return false;
         }
     }
@@ -2996,10 +3175,7 @@ public partial class MainView : UserControl
             MainActivity.Instance?.BeginExternalActivity();
             ctx.StartActivity(chooser);
 
-            AppPrefs.MarkVaultExported();
-            RefreshBackupReminder();
-            BannerBackupReminder.IsVisible = false;
-            ShowBackupStatus("Sent to the share sheet. The file is encrypted - it is useless without your master password.", true);
+            ShowBackupStatus("Sent to share sheet. Complete sending or saving to finish your backup. (Use 'Save to File' to mark backed up).", true);
 
             await Task.CompletedTask;
         }
@@ -3009,7 +3185,7 @@ public partial class MainView : UserControl
         }
     }
 
-    private async Task ImportVaultFromSettingsAsync()
+    private async Task RestoreVaultFromFileAsync()
     {
         try
         {
@@ -3030,22 +3206,86 @@ public partial class MainView : UserControl
             await stream.CopyToAsync(ms);
             byte[] importedData = ms.ToArray();
 
-            if (!TryValidateVaultBytes(importedData, out string error, out _))
+            VaultFile staged;
+            try
             {
-                ShowBackupStatus(error, false);
+                staged = VaultValidation.Read(importedData);
+            }
+            catch (Exception ex)
+            {
+                ShowRestoreError(ex.Message);
                 return;
             }
 
             _stagedRestoreBytes = importedData;
+            _stagedRestoreVaultFile = staged;
+
+            TxtVerifyBackupPass.Text = "";
+            TxtVerifyBackupPassError.IsVisible = false;
+            OverlayVerifyBackupPassword.IsVisible = true;
+        }
+        catch (Exception ex)
+        {
+            ShowRestoreError($"Restore failed: {ex.Message}");
+        }
+    }
+
+    private void ShowRestoreError(string message)
+    {
+        if (PanelLocked.IsVisible)
+        {
+            TxtLockError.Text = message;
+            TxtLockError.IsVisible = true;
+        }
+        else
+        {
+            ShowBackupStatus(message, false);
+        }
+    }
+
+    private async Task SubmitVerifyBackupPasswordAsync()
+    {
+        string pass = TxtVerifyBackupPass.Text ?? "";
+        if (string.IsNullOrEmpty(pass))
+        {
+            TxtVerifyBackupPassError.Text = "Please enter the backup's master password.";
+            TxtVerifyBackupPassError.IsVisible = true;
+            return;
+        }
+
+        if (_stagedRestoreVaultFile == null || _stagedRestoreBytes == null)
+        {
+            OverlayVerifyBackupPassword.IsVisible = false;
+            return;
+        }
+
+        TxtVerifyBackupPassError.IsVisible = false;
+
+        try
+        {
+            var (testMaster, testPayload) = await Task.Run(() => VaultCrypto.Open(_stagedRestoreVaultFile, pass));
+            try
+            {
+                VaultValidation.ValidatePayload(testPayload);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(testMaster);
+            }
+
+            OverlayVerifyBackupPassword.IsVisible = false;
+            int count = testPayload.Profiles?.Count ?? 0;
             int current = _payload?.Profiles?.Count ?? 0;
             TxtConfirmRestoreMessage.Text =
-                $"This replaces the {current} connection{(current == 1 ? "" : "s")} and all settings currently on this phone with whatever is inside the backup file. " +
-                "A copy of your current vault is saved alongside it as a .bak first. You will need the backup's own master password to open it.";
+                $"Backup verified successfully ({count} connection{(count == 1 ? "" : "s")} found).\n\n" +
+                $"Restoring will replace the {current} connection{(current == 1 ? "" : "s")} and all settings currently on this phone with whatever is inside the backup. " +
+                "A copy of your current vault is saved alongside it as a .bak first.";
             OverlayConfirmRestoreVault.IsVisible = true;
         }
         catch (Exception ex)
         {
-            ShowBackupStatus($"Restore failed: {ex.Message}", false);
+            TxtVerifyBackupPassError.Text = "Cannot open backup: " + (ex is InvalidDataException ? ex.Message : "Incorrect master password.");
+            TxtVerifyBackupPassError.IsVisible = true;
         }
     }
 
@@ -3058,11 +3298,13 @@ public partial class MainView : UserControl
         {
             if (File.Exists(VaultPath))
             {
+                File.Copy(VaultPath, VaultPath + AppPaths.BeforeRestoreSuffix, overwrite: true);
                 File.Copy(VaultPath, VaultPath + AppPaths.BackupSuffix, overwrite: true);
             }
 
             await File.WriteAllBytesAsync(VaultPath, _stagedRestoreBytes);
             _stagedRestoreBytes = null;
+            _stagedRestoreVaultFile = null;
             AppPrefs.MarkVaultExported();
 
             LockVault();
@@ -3072,7 +3314,7 @@ public partial class MainView : UserControl
         }
         catch (Exception ex)
         {
-            ShowBackupStatus($"Restore failed: {ex.Message}", false);
+            ShowRestoreError($"Restore failed: {ex.Message}");
         }
     }
 }

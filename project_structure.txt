@@ -930,12 +930,14 @@ Resolutions for the 10 system-level audit findings and the tactical UX overlay:
     files inspected, items cleaned, and any locked files encountered, returning a tactical
     readout displayed directly on MainWindow's status strip.
 
- 9. SECURE SERVER IDENTITY DEFAULT & VAULT CERT PINNING (Issue 9):
-    Changed default `SuppressCertWarnings` from `true` to `false` (authentication level: 2).
-    Connecting to untrusted or spoofed hosts now actively warns against MITM attacks by default.
-    Accepted server certificate thumbprints are pinned into `vault.rdpv` and automatically
-    pre-seeded into the Windows Terminal Server Client registry before launch, ensuring legitimate
-    connections bypass warning fatigue while rogue servers are flagged.
+ 9. SERVER IDENTITY WARNING SUPPRESSION BY DESIGN & VAULT CERT PINNING:
+    By deliberate design and explicit desire of the author, `SuppressCertWarnings` defaults
+    to `true` (authentication level: 0) across both Windows and Android to guarantee zero
+    warning fatigue and seamless one-click connectivity across private LANs, self-signed certificates,
+    and direct IP connections. For users requiring strict verification, `SuppressCertWarnings` can
+    be toggled in General Settings or overridden per-profile via TriStateOverride. When enabled, accepted
+    server certificate thumbprints are pinned into `vault.rdpv` and pre-seeded into the Windows
+    Terminal Server Client registry before launch.
 
  10. REAL-TIME SEARCH & FILTERING (Issue 10):
      Added real-time search filtering in MainWindow (`TxtSearch`). Profile cards are filtered
@@ -1654,6 +1656,105 @@ PASSWORD-VISIBILITY CODE.
   6. Re-arming the Auto-Type prompt on every connect with no way to opt out.
   7. Removing FLAG_SECURE without an explicit user opt-out.
   8. Overwriting vault.rdpv with bytes that have not been parsed as a VaultFile.
+
+================================================================================
+SECTION 20 — 2026 AUDIT: CROSS-PLATFORM PORT KNOCKING, PORT ENFORCEMENT,
+             ACCESSIBLE PROFILE ACTIONS, CERTIFICATE SUPPRESSION BY DESIGN,
+             AND COMPLETE 15-POINT UI/UX & LOGIC RESOLUTION
+================================================================================
+
+20.A — CERTIFICATE AND IDENTITY WARNING SUPPRESSION BY DESIGN
+  Architectural Mandate: By deliberate design and explicit desire of the author,
+  all SSL/TLS certificate, untrusted server, and identity warnings are suppressed
+  by default across both the Windows desktop and Android mobile implementations:
+  - Default Setting: `SuppressCertWarnings = true`.
+  - Windows: Emits `authentication level:i:0` into the temporary `.rdp` file.
+  - Android: Encodes `authentication%20level=i:0` into the launch `rdp://` URI.
+  - Rationale: Eliminates warning fatigue on private subnets, home labs, dynamic
+    IPs, and self-signed certificates. Full per-profile overrides remain available
+    via `TriStateOverride` for enterprise environments requiring strict validation.
+
+20.B — ISSUE 30: DESTINATION PORT PRESERVATION & ENFORCEMENT
+  Defect: In certain Windows connection pathways, mstsc or Credential Manager fell
+  back to default port 3389, ignoring the custom port in the profile card.
+  Resolution:
+  - Windows: `RdpLauncher.BuildRdpFile` outputs both `full address:s:{host}:{port}`
+    and `server port:i:{port}`. `RdpLauncher.CredentialTargets` registers credentials
+    under `TERMSRV/{host}`, `TERMSRV/{host}:{port}`, and `TERMSRV/{fullAddress}`.
+  - Android: `ConnectionEndpoint.FromProfile` extracts and validates the port,
+    adding `server%20port=i:{port}` to the URI query and formatting endpoint targets.
+  - Suggestion: Default suggested port is 3389, but any custom port is strictly
+    respected upon connection across all launch and credential coordination routines.
+
+20.C — ISSUE 31: CROSS-PLATFORM PORT KNOCKING (ICMP KNOCK PROTOCOL)
+  Feature: Pre-connection port knocking to open firewalls before initiating RDP.
+  - Architecture: `IcmpKnock.cs` (in Core and linked to both desktop and Android).
+  - UI: Collapsible card in profile editors (`Enable Port Knocking` checkbox toggles
+    `PnlKnockDetails` / `PnlIcmpKnockDetails`). Includes signature generator button.
+  - Magic Packet: Transmits out-of-the-ordinary ICMP payload sizes (configurable
+    97 to 224 bytes, strictly rejecting default 32/64-byte echo requests) with
+    embedded hex signature tokens.
+  - Delay: Enforces an asynchronous 2000 ms delay following the knock transmission
+    before initiating RDP launch or socket pre-flight probes, providing remote
+    firewall daemons (e.g. knockd, iptables) adequate time to open the RDP port.
+
+20.D — ISSUE 32: ANDROID ACCESSIBLE BOTTOM SAVE / BACK CONTROLS
+  Defect: When scrolling down long profile forms on mobile screens, the header Save
+  and Cancel buttons were out of view, confusing users as to how to save changes.
+  Resolution: Added `BtnBottomSaveProfile` and `BtnBottomCancelProfile` at the foot
+  of `PanelProfileEditor` in `MainView.axaml` and wired them identically in
+  `MainView.axaml.cs`.
+
+20.E — 10 UI/UX IMPROVEMENTS & 5 LOGIC AUDIT FINDINGS (FULL RESOLUTION)
+  1. Auto-Type Verified Input Only (RdpAutoTypeService.cs):
+     Eliminated guesswork into plain edit texts. Service strictly aborts injection
+     if a verified password field cannot be located.
+  2. Inactivity Auto-Lock Continuity:
+     Removed `!sessionRunning` checks from `MainActivity.OnPause/OnResume` and
+     `EvaluateIdleTimeout()`. Inactivity timer locks the vault according to user
+     configuration regardless of background remote sessions.
+  3. Pre-Validated Vault Restores:
+     Decoupled restore into password verification (`OverlayVerifyBackupPassword`),
+     test-opening with `VaultCrypto.Open`, and payload schema validation
+     (`VaultValidation.ValidatePayload`) BEFORE replacing disk files. Styled
+     restore button with `#B80000` destructive warning. Added lock screen restore.
+  4. Preserved Pending Recovery Code:
+     Stored pending code in `VaultPayload.PendingRecoveryCode`. If the phone locks
+     or user backgrounds the app during onboarding/password change, unlocking
+     immediately returns to the recovery code acknowledgment screen.
+  5. Decoupled Android Share Sheet from Backup Confirmation:
+     Opening the system share sheet no longer removes the backup nag banner or
+     marks the vault exported. Only explicit file saves (`ExportVaultFileAsync`)
+     confirm backup completion.
+  6. Honest Display & Scaling Capabilities:
+     Clarified Android Remote Desktop display limits in editor hints and labels.
+  7. Synchronized Default Settings:
+     `CreateProfileCard` chips now check `DefaultSmartSizing` on `InheritGlobal`,
+     ensuring cards, editor options, and launch URIs agree perfectly.
+  8. Gateway-Aware Pre-Flight Checks:
+     If `GatewayHost` is configured, `RunPreflightAsync` probes the gateway rather
+     than falsely predicting target host unreachability.
+  9. Reliable Remote Desktop Resumption:
+     `RdpSessionService` utilizes direct Activity `PendingIntent` instead of
+     service trampolines (blocking on Android 12+), and remembers last-used package.
+  10. Responsive Overlays & Compact Banners:
+      Wrapped all modal cards in `ScrollViewer` (`MaxHeight="540"`), wrapped long
+      buttons, and compacted banners for landscape/small screens.
+  11. Complete Biometric Key Deletion on Password Change:
+      `ChangeMasterPasswordAsync` iterates all existing seals and purges their
+      hardware keys from Android Keystore via `AndroidHardwareKeyStore.DeleteHardwareKey`.
+  12. Brute-Force Unlock Throttling:
+      Android password unlock integrates `UnlockThrottle`, enforcing exponential
+      delay backoff across repeated failed attempts without clearing data.
+  13. Clean State Purge & Mid-Connect Launch Cancellation:
+      `LockVault()` invokes `CancelLaunch()`, closes all overlays, and wipes
+      password and recovery text boxes.
+  14. Honest Disconnect Banner Label:
+      Renamed session banner button to "Stop tracking / Help", explaining client
+      control accurately.
+  15. Accessibility & Launch Guards:
+      Enforced minimum 44px touch targets on profile connect buttons and added
+      an `_isLaunching` guard preventing double-tap launch collisions.
 
 --------------------------------------------------------------------------------
 END OF FILE — keep synchronized with the code.

@@ -261,13 +261,27 @@ public class RdpSessionService : Service
             launchIntent,
             PendingIntentFlags.UpdateCurrent | PendingIntentFlags.Immutable);
 
-        var resumeIntent = new Intent(this, typeof(RdpSessionService));
-        resumeIntent.SetAction(ActionResumeRemoteDesktop);
-        var resumePendingIntent = PendingIntent.GetService(
-            this,
-            1,
-            resumeIntent,
-            PendingIntentFlags.UpdateCurrent | PendingIntentFlags.Immutable);
+        PendingIntent? resumePendingIntent = null;
+        var directResumeIntent = Rdp.RdpLauncher.CreateResumeIntent(this);
+        if (directResumeIntent != null)
+        {
+            directResumeIntent.AddFlags(ActivityFlags.NewTask | ActivityFlags.ReorderToFront);
+            resumePendingIntent = PendingIntent.GetActivity(
+                this,
+                1,
+                directResumeIntent,
+                PendingIntentFlags.UpdateCurrent | PendingIntentFlags.Immutable);
+        }
+        else
+        {
+            var fallbackIntent = new Intent(this, typeof(MainActivity));
+            fallbackIntent.AddFlags(ActivityFlags.SingleTop);
+            resumePendingIntent = PendingIntent.GetActivity(
+                this,
+                1,
+                fallbackIntent,
+                PendingIntentFlags.UpdateCurrent | PendingIntentFlags.Immutable);
+        }
 
         var endIntent = new Intent(this, typeof(RdpSessionService));
         endIntent.SetAction(ActionEndSession);

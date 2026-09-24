@@ -120,11 +120,14 @@ public class RdpProfile
     public int WolPort { get; set; } = 9;
     public int WolWaitSeconds { get; set; } = 5;
 
+    public bool EnableIcmpKnock { get; set; } = false;
+    public string IcmpKnockSignature { get; set; } = "";
+
     public string Notes { get; set; } = "";
 
     [JsonIgnore] public bool HasPassword => !string.IsNullOrEmpty(Password);
 
-    [JsonIgnore] public string DisplayHost => Port == 3389 ? Host : $"{Host}:{Port}";
+    [JsonIgnore] public string DisplayHost => ConnectionEndpoint.FromProfile(this).Address;
 
     /// <summary>Per-profile resolution preset ("InheritGlobal", "1920x1080", "1280x720", "1600x900", "1366x768", "2560x1440", "3840x2160", "Device", "Custom").</summary>
     public string ResolutionPreset { get; set; } = "InheritGlobal";
@@ -139,7 +142,7 @@ public class RdpProfile
     {
         if (SuppressCertWarningsOverride == TriStateOverride.Enabled) return true;
         if (SuppressCertWarningsOverride == TriStateOverride.Disabled) return false;
-        return settings?.SuppressCertWarnings ?? false;
+        return settings?.SuppressCertWarnings ?? true;
     }
 
     public bool ResolveFullScreen(VaultSettings? settings)
@@ -154,7 +157,6 @@ public class RdpProfile
     {
         if (MultiMonOverride == TriStateOverride.Enabled) return true;
         if (MultiMonOverride == TriStateOverride.Disabled) return false;
-        if (!UseMultiMon) return false;
         return settings?.DefaultUseMultiMon ?? UseMultiMon;
     }
 
@@ -220,8 +222,8 @@ public class VaultSettings
     public bool KillSessionsOnUsbRemoval { get; set; } = true;
     public bool ForceMultiMon { get; set; } = false;
 
-    /// <summary>Global default: ignore errors and warnings for certificates or identities (default false: verify server identity).</summary>
-    public bool SuppressCertWarnings { get; set; } = false;
+    /// <summary>Author's explicit default: suppress certificate/identity warnings. Existing explicit choices are preserved.</summary>
+    public bool SuppressCertWarnings { get; set; } = true;
 
     /// <summary>Global default: launch connections in full screen by default.</summary>
     public bool DefaultFullScreen { get; set; } = true;
@@ -258,6 +260,9 @@ public class VaultPayload
 {
     public List<RdpProfile> Profiles { get; set; } = new();
     public VaultSettings Settings { get; set; } = new();
+    // Encrypted with the payload; survives Android process death until acknowledgement.
+    // Cleared once the user confirms that the code is safely recorded.
+    public string PendingRecoveryCode { get; set; } = "";
 }
 
 public class SealEntry

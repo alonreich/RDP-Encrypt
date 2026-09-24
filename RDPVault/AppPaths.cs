@@ -13,6 +13,7 @@ public static class AppPaths
     public const string VaultFileName = "vault.rdpv";
     public const string BackupSuffix = ".bak";
     public const string TempSuffix = ".tmp";
+    public const string BeforeRestoreSuffix = ".before-restore";
 
     /// <summary>Directory the running executable lives in.</summary>
     public static string ExeDir => AppContext.BaseDirectory;

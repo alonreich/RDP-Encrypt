@@ -191,8 +191,7 @@ public class MainActivity : AvaloniaMainActivity<App>
             // the background case so the timer cannot fire twice.
             ResolveMainView()?.SuspendIdleTimer();
 
-            bool sessionRunning = _sessionService?.IsConnected == true;
-            if (LockImmediatelyOnBackground && !sessionRunning && !IsExternalActivitySuppressed)
+            if (LockImmediatelyOnBackground && !IsExternalActivitySuppressed)
             {
                 Avalonia.Threading.Dispatcher.UIThread.Post(() =>
                 {
@@ -221,11 +220,9 @@ public class MainActivity : AvaloniaMainActivity<App>
             Window?.SetBackgroundDrawable(new global::Android.Graphics.Drawables.ColorDrawable(global::Android.Graphics.Color.ParseColor("#0E0E10")));
 
             // 3. Configurable auto-lock: locked if backgrounded for longer than the timeout
-            //    and no remote session is running.
-            bool sessionRunning = _sessionService?.IsConnected == true;
             bool shouldLock = false;
 
-            if (_lastBackgroundedUtc != DateTime.MinValue && !sessionRunning)
+            if (_lastBackgroundedUtc != DateTime.MinValue)
             {
                 TimeSpan elapsed = DateTime.UtcNow - _lastBackgroundedUtc;
                 if (ConfiguredLockMinutes > 0 && elapsed.TotalMinutes >= ConfiguredLockMinutes)

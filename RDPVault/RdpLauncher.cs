@@ -305,6 +305,15 @@ public static class RdpLauncher
         System.Threading.CancellationToken ct = default)
     {
         SessionManager.Current.Touch();   // issue #11: connecting is activity
+        // Work on a snapshot. The Port field always wins over a stale port pasted in Host.
+        p = p.Clone();
+        try
+        {
+            var ep = ConnectionEndpoint.FromProfile(p);
+            p.Host = ep.Host;
+            p.Port = ep.Port;
+        }
+        catch (ArgumentException ex) { LaunchFailed?.Invoke(ex.Message); return false; }
 
         // Wake-on-LAN handling
         if (p.EnableWol && !string.IsNullOrWhiteSpace(p.WolMacAddress))
@@ -379,6 +388,19 @@ public static class RdpLauncher
         {
             LaunchFailed?.Invoke("Connection cancelled by user.");
             return false;
+        }
+
+        if (p.EnableIcmpKnock)
+        {
+            progress?.Invoke(new LaunchProgressUpdate
+            {
+                Step = "Sending ICMP knock",
+                Details = $"Sending the saved signature to {p.Host}; waiting 2 seconds before RDP on port {p.Port}.",
+                IsIndeterminate = true
+            });
+            try { await IcmpKnock.SendBeforeConnectAsync(p, IcmpKnock.SendWindowsAsync, ct); }
+            catch (OperationCanceledException) { LaunchFailed?.Invoke("Connection cancelled."); return false; }
+            catch (Exception ex) { LaunchFailed?.Invoke("ICMP knock could not be sent: " + ex.Message); return false; }
         }
 
         progress?.Invoke(new LaunchProgressUpdate
@@ -578,6 +600,7 @@ public static class RdpLauncher
         sb.AppendLine("disable cursor setting:i:0");
         sb.AppendLine("bitmapcachepersistenable:i:1");
         sb.AppendLine("full address:s:" + FullAddress(p));
+        sb.AppendLine($"server port:i:{p.Port}");
         sb.AppendLine("audiomode:i:0");
         sb.AppendLine("redirectprinters:i:" + (p.AllowPrinters ? 1 : 0));
         sb.AppendLine("redirectcomports:i:0");
@@ -619,7 +642,7 @@ public static class RdpLauncher
         return sb.ToString();
     }
 
-    private static string FullAddress(RdpProfile p) => p.Port == 3389 ? p.Host : $"{p.Host}:{p.Port}";
+    private static string FullAddress(RdpProfile p) => ConnectionEndpoint.FromProfile(p).Address;
 
     // ---------------- certificate pinning (issue #2) ----------------
     //
@@ -718,8 +741,16 @@ public static class RdpLauncher
 
     private static IEnumerable<string> CredentialTargets(RdpProfile p)
     {
-        yield return $"TERMSRV/{p.Host}";
-        if (p.Port != 3389) yield return $"TERMSRV/{p.Host}:{p.Port}";
+        var targets = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            $"TERMSRV/{p.Host}",
+            $"TERMSRV/{FullAddress(p)}"
+        };
+        if (p.Port != 3389)
+        {
+            targets.Add($"TERMSRV/{p.Host}:{p.Port}");
+        }
+        return targets;
     }
 
     // ---------------- session credential coordinator (issue #4) ----------------

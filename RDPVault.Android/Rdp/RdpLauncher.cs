@@ -33,21 +33,11 @@ public static class RdpLauncher
             return RdpLaunchStatus.Failed;
         }
 
-        // 1. Resolve host and port
-        string host = profile.Host.Trim();
-        int port = profile.Port > 0 ? profile.Port : 3389;
-
-        if (host.Contains(':') && !host.Contains('['))
-        {
-            var parts = host.Split(':');
-            if (parts.Length == 2 && int.TryParse(parts[1], out int parsedPort))
-            {
-                host = parts[0];
-                port = parsedPort;
-            }
-        }
-
-        string fullAddress = port == 3389 ? host : $"{host}:{port}";
+        // 1. Resolve host and port using authoritative ConnectionEndpoint
+        var endpoint = ConnectionEndpoint.FromProfile(profile);
+        string host = endpoint.Host;
+        int port = endpoint.Port;
+        string fullAddress = endpoint.Address;
 
         // 2. Resolve certificate warning suppression (default to true on Android)
         bool suppressCert = profile.SuppressCertWarningsOverride switch
@@ -91,6 +81,7 @@ public static class RdpLauncher
         var queryList = new List<string>
         {
             $"full%20address=s:{encodedAddress}",
+            $"server%20port=i:{port}",
             $"authentication%20level=i:{authLevel}",
             "promptcredentialonce=i:1",
             "prompt%20for%20credentials%20on%20client=i:0",
@@ -157,6 +148,7 @@ public static class RdpLauncher
             var activities = pm?.QueryIntentActivities(intent, (PackageInfoFlags)0);
             if (activities != null && activities.Count > 0)
             {
+                LastUsedPackage = activities[0].ActivityInfo?.PackageName;
                 context.StartActivity(intent);
                 message = "Remote Desktop client launched.";
                 return RdpLaunchStatus.Success;
@@ -183,6 +175,7 @@ public static class RdpLauncher
                 var launchIntent = pm?.GetLaunchIntentForPackage(pkg);
                 if (launchIntent != null)
                 {
+                    LastUsedPackage = pkg;
                     launchIntent.SetData(rdpUri);
                     launchIntent.AddFlags(ActivityFlags.NewTask);
                     context.StartActivity(launchIntent);
@@ -238,13 +231,28 @@ public static class RdpLauncher
         }
     }
 
+    /// <summary>The package name of the external RDP app that last handled a launch.</summary>
+    public static string? LastUsedPackage { get; set; }
+
     /// <summary>
-    /// Resumes or brings the external RDP application to the foreground.
+    /// Creates an explicit launch Intent targeting the active or first available RDP client app.
+    /// Used for direct Activity PendingIntents to avoid Android 12+ notification service trampolines.
     /// </summary>
-    public static bool ResumeRemoteDesktop(Context context)
+    public static Intent? CreateResumeIntent(Context context)
     {
-        MainActivity.Instance?.BeginExternalActivity();
         var pm = context.PackageManager;
+        if (pm == null) return null;
+
+        if (!string.IsNullOrEmpty(LastUsedPackage))
+        {
+            try
+            {
+                var directIntent = pm.GetLaunchIntentForPackage(LastUsedPackage);
+                if (directIntent != null) return directIntent;
+            }
+            catch { }
+        }
+
         string[] knownPackages = new[]
         {
             "com.microsoft.rdc.androidx",
@@ -257,15 +265,26 @@ public static class RdpLauncher
         {
             try
             {
-                var launchIntent = pm?.GetLaunchIntentForPackage(pkg);
-                if (launchIntent != null)
-                {
-                    launchIntent.AddFlags(ActivityFlags.NewTask | ActivityFlags.ReorderToFront);
-                    context.StartActivity(launchIntent);
-                    return true;
-                }
+                var launchIntent = pm.GetLaunchIntentForPackage(pkg);
+                if (launchIntent != null) return launchIntent;
             }
             catch { }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Resumes or brings the external RDP application to the foreground.
+    /// </summary>
+    public static bool ResumeRemoteDesktop(Context context)
+    {
+        MainActivity.Instance?.BeginExternalActivity();
+        var intent = CreateResumeIntent(context);
+        if (intent != null)
+        {
+            intent.AddFlags(ActivityFlags.NewTask | ActivityFlags.ReorderToFront);
+            context.StartActivity(intent);
+            return true;
         }
         return false;
     }

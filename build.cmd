@@ -16,7 +16,6 @@ if "%RC%"=="1" (
   echo  BUILD FAILED - nothing was published.
   echo  The existing GitHub release was NOT touched.
   echo ###########################################################
-  pause
 )
 if "%RC%"=="2" (
   echo.
@@ -24,7 +23,6 @@ if "%RC%"=="2" (
   echo  BUILD OK - but the release was NOT updated.
   echo  .\compiled\RDPVault.exe is good and usable.
   echo ###########################################################
-  pause
 )
 
   popd >nul

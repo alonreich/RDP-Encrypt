@@ -201,6 +201,39 @@ public static class SystemPromptFocus
 
     // ------------------------------------------------------------------ forcing focus
 
+    /// <summary>
+    /// Brings a target window to the foreground and focuses it without permanently pinning it topmost.
+    /// </summary>
+    public static void ActivateWindow(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero) return;
+        try
+        {
+            ShowWindow(hwnd, SW_SHOW);
+            SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+            SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+            BringWindowToTop(hwnd);
+
+            IntPtr fg = GetForegroundWindow();
+            uint fgThread = fg == IntPtr.Zero ? 0 : GetWindowThreadProcessId(fg, out _);
+            uint thisThread = GetCurrentThreadId();
+
+            bool attached = fgThread != 0 && fgThread != thisThread &&
+                            AttachThreadInput(thisThread, fgThread, true);
+            try
+            {
+                if (!SetForegroundWindow(hwnd))
+                    SwitchToThisWindow(hwnd, true);
+                SetActiveWindow(hwnd);
+            }
+            finally
+            {
+                if (attached) AttachThreadInput(thisThread, fgThread, false);
+            }
+        }
+        catch { }
+    }
+
     private static void ForceForeground(IntPtr hwnd)
     {
         try

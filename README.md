@@ -73,21 +73,109 @@ RDP Vault provides an Android mobile APK companion sharing the exact same crypto
 
 ## Android Installation & Zero-Clipboard Setup Guide
 
-### Method A: Fast 1-Click Install via ADB (Recommended — Zero Restrictions)
-If your phone is connected to your PC with USB debugging enabled, this method installs the app and activates Auto-Type without any grayed-out menus or permission hurdles:
+### Method A: Step-by-Step Installation via ADB (Recommended — Zero Restrictions)
 
-```powershell
-# 1. Install the APK
-adb install -r compiled\RDPVault.apk
+This method sideloads the application directly and activates the secure Auto-Type Accessibility service without dealing with Android 13/14/15's grayed-out "Restricted Settings" menus.
 
-# 2. Grant Auto-Type accessibility permission directly
+#### Step 1: Prepare the APK File & Working Directory
+1. Build or download `RDPVault.apk`:
+   - If building from source: run `build-apk.cmd` (or `build.cmd`). The output artifact is generated at `compiled\RDPVault.apk`.
+   - If downloading from GitHub Releases: place `RDPVault.apk` into your project directory or into a known folder (e.g., `C:\Full_Control\RDP_Encrypt\compiled\RDPVault.apk`).
+2. Verify ADB is installed on your Windows PC:
+   ```cmd
+   adb version
+   ```
+   *If ADB is not recognized, install it via Windows Package Manager: `winget install Google.PlatformTools`, or download Android SDK Platform-Tools and add it to your PATH.*
+
+#### Step 2: Enable Developer Options & USB Debugging on Your Phone
+1. Open phone **Settings** → **About phone** (or **About device** → **Software information**).
+2. Locate the **Build number** entry.
+3. Tap **Build number** 7 times consecutively until you see the toast message: *"You are now a developer!"* (enter your phone PIN/pattern if prompted).
+4. Return to the main **Settings** menu and tap **System → Developer options** (on Samsung devices, **Developer options** appears at the very bottom of the main Settings menu).
+5. Scroll down to the **Debugging** section and toggle **USB debugging** to **ON**. Tap **OK** on the confirmation dialog.
+
+#### Step 3: Connect Phone via USB & Authorize PC
+1. Connect your phone to your PC using a high-quality USB data cable (ensure it is not a charge-only cable).
+2. If prompted on the phone for USB connection mode, select **Transferring files / Android Auto** (MTP).
+3. Look at your phone's screen. A dialog will appear: **"Allow USB debugging?"**.
+4. Check the box **"Always allow from this computer"** and tap **Allow**.
+
+#### Step 4: Verify Device Connection & ADB Status
+Open PowerShell or CMD on your PC and run:
+```cmd
+adb devices
+```
+**Verification Check:**
+- **Successful output:**
+  ```text
+  List of devices attached
+  RFCW1234567    device
+  ```
+  *(The state must say `device`)*.
+- **If output shows `unauthorized`:** Unlock your phone and accept the "Allow USB debugging" prompt.
+- **If output is blank:** Verify the USB cable, try another USB port, or restart the ADB server:
+  ```cmd
+  adb kill-server
+  adb start-server
+  adb devices
+  ```
+
+#### Step 5: Sideload & Install the APK
+Run the installation command from the repository root:
+```cmd
+adb install -r -d compiled\RDPVault.apk
+```
+*(Flags: `-r` keeps existing app data/vault intact; `-d` allows version code downgrades if reinstalling).*
+
+**Verification Check:**
+The terminal must output:
+```text
+Performing Streamed Install
+Success
+```
+
+#### Step 6: Verify Package Installation on the Phone
+Run:
+```cmd
+adb shell pm list packages | findstr rdpvault
+```
+**Verification Check:**
+Expected response:
+```text
+package:com.rdpvault.app
+```
+
+To verify the installed version details:
+```cmd
+adb shell dumpsys package com.rdpvault.app | findstr /C:"versionName" /C:"versionCode"
+```
+
+#### Step 7: Grant Auto-Type Accessibility Service via ADB (Zero-Click Bypass)
+Android 13+ restricts accessibility services on sideloaded apps. You can bypass all restricted setting menus instantly via ADB:
+```cmd
 adb shell settings put secure enabled_accessibility_services com.rdpvault.app/com.rdpvault.app.services.RdpAutoTypeService
 adb shell settings put secure accessibility_enabled 1
 ```
 
+**Verification Check:**
+Run:
+```cmd
+adb shell settings get secure enabled_accessibility_services
+```
+Confirm the output contains `com.rdpvault.app/com.rdpvault.app.services.RdpAutoTypeService`.
+
+#### Step 8: Launch App & Final Verification
+Launch RDP Vault directly from ADB:
+```cmd
+adb shell monkey -p com.rdpvault.app -c android.intent.category.LAUNCHER 1
+```
+The app will open on the device. Create or unlock your vault, configure biometric unlock, and connect securely.
+
 ---
 
-### Method B: Manual Sideload via Phone
+### Method B: Manual Sideload via Phone (Without PC/ADB)
+
+If you do not have a PC with ADB available, install directly on the phone:
 
 1. **If Samsung blocks installation ("App blocked to protect your device")**:
    - Go to **Settings → Security and privacy → Auto Blocker** and toggle it **OFF**.
@@ -101,12 +189,15 @@ adb shell settings put secure accessibility_enabled 1
    - Tap **Allow restricted settings** and confirm with your PIN/fingerprint.
    - Return to **Accessibility → RDP Vault Auto-Type** and toggle the switch **ON**.
 
-Build Android APK:
-```
+---
+
+### Android Build Prerequisites
+To compile the Android APK from source on Windows:
+```cmd
 dotnet workload install android
 build-apk.cmd
 ```
-The output is `compiled\RDPVault.apk`.
+The output package is placed at `compiled\RDPVault.apk`.
 
 ## Build from source
 

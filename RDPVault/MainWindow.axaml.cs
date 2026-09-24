@@ -25,7 +25,11 @@ public partial class MainWindow : Window
         mgr.UsbRemoved += OnUsbRemoved;          // issue #17: was never wired up
         mgr.VaultDestroyed += OnVaultDestroyed;
         mgr.Notice += SetStatus;
-        mgr.LaunchRequested += async (p, fromShortcut) => await ValidateAndLaunchProfileAsync(p, fromShortcut);
+        mgr.LaunchRequested += async (p, fromShortcut) =>
+        {
+            BringToForeground();
+            await ValidateAndLaunchProfileAsync(p, fromShortcut);
+        };
 
         RdpLauncher.SessionStarted += name => Dispatcher.UIThread.Post(() => SetStatus($"Connecting to {name}..."));
         RdpLauncher.SessionEnded += status => Dispatcher.UIThread.Post(() => SetStatus(status));
@@ -50,7 +54,9 @@ public partial class MainWindow : Window
         {
             // Issue #21: the OS credential prompt has no owner-window API, so it
             // needs to know which of our windows to hand the foreground back to.
-            SystemPromptFocus.SetOwner(TryGetPlatformHandle()?.Handle ?? IntPtr.Zero);
+            var handle = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+            SystemPromptFocus.SetOwner(handle);
+            BringToForeground();
 
             await Task.Delay(300);   // let the window render before any OS Hello prompt
             if (SessionManager.Current.VaultExists && SessionManager.Current.HelloSealAvailable())
@@ -59,6 +65,27 @@ public partial class MainWindow : Window
                 await AttemptHelloUnlockAsync();
             }
         };
+    }
+
+    /// <summary>
+    /// Forces the vault window to restore, stay focused, and remain visible in the foreground.
+    /// </summary>
+    public void BringToForeground()
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+            Show();
+            Activate();
+            Topmost = true;
+            Topmost = false;
+            Focus();
+            var handle = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+            if (handle != IntPtr.Zero)
+            {
+                SystemPromptFocus.ActivateWindow(handle);
+            }
+        });
     }
 
     // ---------------------------------------------------------------- state
@@ -156,9 +183,7 @@ public partial class MainWindow : Window
 
     private void OnShowRequested() => Dispatcher.UIThread.Post(() =>
     {
-        Show();
-        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
-        Activate();
+        BringToForeground();
     });
 
     private void OnUsbRemoved() => Dispatcher.UIThread.Post(() =>
@@ -538,13 +563,8 @@ public partial class MainWindow : Window
             OverlayLaunch.IsVisible = false;
         }
 
-        if (launched && fromShortcut)
-        {
-            Dispatcher.UIThread.Post(() =>
-            {
-                WindowState = WindowState.Minimized;
-            });
-        }
+        // Keep the vault window open, active, and focused in the foreground after launching
+        BringToForeground();
     }
 
     private void BtnCancelLaunch_Click(object? sender, RoutedEventArgs e)

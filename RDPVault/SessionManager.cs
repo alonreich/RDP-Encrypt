@@ -582,6 +582,8 @@ public sealed class SessionManager : IDisposable
                 if (msg.StartsWith("LAUNCH:", StringComparison.Ordinal))
                 {
                     string target = msg.Substring(7);
+                    OnUi(() => ShowRequested?.Invoke());
+
                     if (IsUnlocked && Payload != null)
                     {
                         var p = Payload.Profiles.FirstOrDefault(x => x.Id == target);
@@ -595,7 +597,6 @@ public sealed class SessionManager : IDisposable
                     else
                     {
                         PendingLaunchId = target;
-                        OnUi(() => ShowRequested?.Invoke());
                     }
                 }
                 else

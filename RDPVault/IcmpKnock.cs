@@ -116,16 +116,35 @@ public static class IcmpKnock
 
     public static async Task SendTcpKnockAsync(string host, int port, CancellationToken ct)
     {
+        // Emulates: curl -m 1 http://<host>:<port>
+        // Initiates a TCP connection to the destination host:port and transmits an HTTP GET request.
         try
         {
             using var client = new TcpClient();
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromMilliseconds(1500));
+            cts.CancelAfter(TimeSpan.FromMilliseconds(1000)); // -m 1 equivalent
+
             await client.ConnectAsync(host, port, cts.Token).ConfigureAwait(false);
+
+            if (client.Connected)
+            {
+                using var stream = client.GetStream();
+                string hostHeader = host.Contains(':') && !host.StartsWith('[') ? $"[{host}]" : host;
+                string httpRequest = $"GET / HTTP/1.1\r\nHost: {hostHeader}:{port}\r\nUser-Agent: curl/8.0\r\nAccept: */*\r\nConnection: close\r\n\r\n";
+                byte[] requestBytes = System.Text.Encoding.ASCII.GetBytes(httpRequest);
+
+                await stream.WriteAsync(requestBytes, 0, requestBytes.Length, cts.Token).ConfigureAwait(false);
+                await stream.FlushAsync(cts.Token).ConfigureAwait(false);
+
+                // Give the server a brief window up to the 1s timeout to process/acknowledge the knock
+                byte[] buffer = new byte[256];
+                await stream.ReadAsync(buffer, 0, buffer.Length, cts.Token).ConfigureAwait(false);
+            }
         }
         catch
         {
-            // A knock port is typically closed or firewalled - the TCP SYN/connection attempt itself is the knock.
+            // Port knock daemons (knockd, router firewalls, webhooks) often close or reset connections,
+            // or consume the knock silently without a reply. All timeouts and socket errors are expected.
         }
     }
 }

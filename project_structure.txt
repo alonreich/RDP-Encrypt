@@ -156,7 +156,11 @@ RDP_Encrypt\                       (repo root, c:\Full_Control\RDP_Encrypt)
 ├── .github\workflows\
 │   └── build-and-release.yml      ← Automated dual-target CI/CD release workflow.
 ├── developer_tools\
-│   └── UploadAsset.ps1            ← SChannel curl-based GitHub release asset publisher.
+│   ├── Find_and_Remove_Comments.py ← C# comment stripper, syntax checker & duplicate analyzer.
+│   ├── Pull_Code_files.py          ← Code aggregator & staging tool (<=10 files for AI chat).
+│   ├── assemble-apk.cmd            ← Android packaging & signing utility.
+│   ├── SetConsoleFont.ps1          ← Console font customization script.
+│   └── UploadAsset.ps1             ← SChannel curl-based GitHub release asset publisher.
 ├── AvaloniaPort\                  ← LEGACY prototype, not built or shipped.
 ├── RDPVault.Core\                 ← Shared .NET 9 BCL library linking core components:
 │   ├── RDPVault.Core.csproj

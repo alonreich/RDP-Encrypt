@@ -196,7 +196,32 @@ Start the application on the phone:
 
 </div>
 
-#### Diagnostic Checks (Optional)
+#### Step 13: Prevent Host Desktop Scramble & Lock 1:1 Scroll (Crucial Setup)
+
+When connecting from a phone to a multi-monitor or 1080p Windows host, mobile RDP clients (such as Microsoft Remote Desktop / Windows App) attempt by default to adapt the remote session to the phone's vertical screen (e.g. 1220x2580) and apply 225% DPI scaling. This shrinks open applications, enlarges fonts, and scrambles desktop icons across monitors.
+
+Follow these two steps to preserve the untouched 1920x1080 desktop layout and scroll/pan smoothly on the phone:
+
+##### A. Windows Host: Lock 100% Native Desktop Scale (Elevated PowerShell)
+Execute on the Windows host machine to strictly ignore incoming mobile DPI scaling requests:
+<div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
+
+```powershell
+Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations" -Name "IgnoreClientDesktopScaleFactor" -Value 1 -Type DWord; Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "IgnoreClientDesktopScaleFactor" -Value 1 -Type DWord
+```
+
+</div>
+
+##### B. Phone: Lock Microsoft Remote Desktop to Landscape & 1080p
+In the **Windows App** (Microsoft Remote Desktop) on your Android device:
+1. Tap the **Settings** icon (or menu `≡` in the top left).
+2. Tap **Display**.
+3. Under **Orientation**, select **"Lock to landscape"** (prevents the session from collapsing into a portrait strip when held vertically).
+4. Under **Display resolution**, select **"1920 x 1080"** (prevents the client from requesting dynamic phone dimensions).
+
+In RDP Vault, connections default to **1:1 Native Resolution** (`smart sizing: 0`, `screen mode: 1`). You can freely pan and zoom across the complete 1920x1080 desktop canvas without altering window geometry or icon positions on your host PC.
+
+#### Step 14: Diagnostic Checks (Optional)
 
 Verify that the Auto-Type accessibility service is bound:
 <div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
@@ -233,6 +258,10 @@ If you do not have a PC with ADB available, install directly on the phone:
    - Tap **Force Stop**, then tap the **3 dots (`⋮`)** in the top-right corner.
    - Tap **Allow restricted settings** and confirm with your PIN/fingerprint.
    - Return to **Accessibility → RDP Vault Auto-Type** and toggle the switch **ON**.
+
+3. **Lock 1:1 Native Scroll & Prevent Desktop Layout Collapse**:
+   - On the Windows host PC, run the elevated PowerShell command from Step 13.A above to lock 100% DPI scale.
+   - In Windows App on Android, tap **Settings (`≡`) → Display**, set **Orientation** to **"Lock to landscape"**, and set **Display resolution** to **"1920 x 1080"**.
 
 ---
 

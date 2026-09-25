@@ -2000,7 +2000,79 @@ SECTION 26 — APP DECLUTTERING, MINIMAL LAUNCH & 1080P LANDSCAPE DEFAULTS (2026
      - If width < height, RdpProfile.ResolveResolution() and RdpLauncher.LaunchRdp() automatically swap dimensions to ensure width >= height (landscape).
   2. Smart-Scroll & Pan Preservation:
      - RDP URI query sets dynamic resolution=i:0 to strictly block client-side display control PDUs (MS-RDPEDISP) from shrinking the remote Windows OS desktop.
-     - RDP URI query sets smart sizing=i:1 (with screen mode id=2) to enable touch panning and pinch-to-zoom across the full 1920x1080 desktop canvas without altering desktop icon positions or window bounds on the remote PC.
+
+--------------------------------------------------------------------------------
+SECTION 27 — BIOMETRIC KEYSTORE INVALIDATION & UNSEAL RESILIENCE
+--------------------------------------------------------------------------------
+27.A - ROOT CAUSE ANALYSIS (INFINITE RE-SEAL LOOP):
+  1. Hardware KeyStore Key Invalidation:
+     - Android Keystore keys generated with SetInvalidatedByBiometricEnrollment(true) become permanently un-usable when a user adds/removes a fingerprint or enrolls facial recognition.
+     - When unsealing, Android threw KeyPermanentlyInvalidatedException or BadPaddingException.
+     - Previously, the app surfaced a generic error and prompted re-seal, but re-sealing against an invalidated alias immediately threw again on the next session, trapping the user in an infinite re-seal loop.
+  2. Architectural Resolution (AndroidHardwareKeyStore.cs & MainView.axaml.cs):
+     - Added explicit detection for KeyPermanentlyInvalidatedException.
+     - On invalidation, AndroidHardwareKeyStore automatically purges the tainted KeyStore alias from the hardware TEE and removes the obsolete seal payload.
+     - MainView displays a clear one-time advisory requiring password authentication, re-generates a fresh hardware-backed key pair, and seals the vault cleanly without cyclical prompts.
+
+--------------------------------------------------------------------------------
+SECTION 28 — AUTO-TYPE CREDENTIAL INJECTION OVERHAUL (com.microsoft.rdc.androidx)
+--------------------------------------------------------------------------------
+28.A - DEFECTS IDENTIFIED IN ACCESSIBILITY AUTO-TYPE:
+  1. False-Positive Host Verification Abort:
+     - Microsoft Remote Desktop / Windows App (com.microsoft.rdc.androidx) NLA prompts display NetBIOS hostnames (e.g. WORKSTATION-PC) or omit destination host text completely.
+     - The previous logic mandated an exact IP/FQDN token match within candidate dialog text; failing this, credentials were wiped and auto-type aborted 100% of the time.
+  2. Input Focus Absence Before SetText:
+     - Calling Action.SetText without first acquiring Action.Focus and Action.AccessibilityFocus caused modern AndroidX and Compose text watchers / ViewModel state to drop or ignore the injected password.
+  3. Parent Container False-Match in FindConnectButton:
+     - Top-down recursion evaluated clickable parent ViewGroups (e.g. LinearLayout dialog panels containing "Connect") before visiting leaf nodes, causing clicks to hit layout containers rather than the actual positive action Button.
+  4. Premature Credential Wipe on Intermediate Failures:
+     - Credentials were wiped immediately even if SetText returned false, preventing re-injection on subsequent window state events.
+
+28.B - IMPLEMENTED ARCHITECTURAL FIXES (RdpAutoTypeService.cs):
+  1. Conflict-Only Identity Verification:
+     - Retains strict package scoping (_armedPackage == "com.microsoft.rdc.androidx") within a 45-second deadline.
+     - Aborts if an explicit conflicting destination (foreign IP/domain) or gateway login prompt is detected.
+     - Allows credential injection for verified armed packages when standard generic NLA prompts omit destination text.
+     - Container fallback: FindDialogContainer(passwordField) ?? passwordField.Parent ?? root.
+  2. Guaranteed Focus & Text Commitment:
+     - Asserts Action.Focus and Action.AccessibilityFocus prior to Action.SetText on username and password nodes.
+     - Updates cursor position to text end via Action.SetSelection.
+     - Leaves credentials armed if SetText fails, allowing retries across successive accessibility events until timeout.
+  3. Bottom-Up Leaf Node Button Resolution & Retries:
+     - Re-engineered FindConnectButton and FindCancelButton to traverse depth-first, matching positive action button IDs (:id/button1, :id/positive_button, btn_connect, connect_button) and action labels ("Connect", "OK", "Sign in").
+     - Implemented an 8-attempt retry loop (200ms intervals) verifying connectBtn.Enabled == true before executing the click.
+  4. Diagnostic Telemetry:
+     - Structured logging under tag RDPVault covering package verification, node detection, SetText status, and click outcomes.
+
+--------------------------------------------------------------------------------
+SECTION 29 — HOST DESKTOP LAYOUT PROTECTION & 100% NATIVE 1:1 SCROLL POLICY
+--------------------------------------------------------------------------------
+29.A - ROOT CAUSE OF DESKTOP SCRAMBLE & ENLARGED FONTS:
+  1. Client-Side Resolution & Scaling Override:
+     - Microsoft Remote Desktop (Windows App) defaults "Display resolution" to "Match this device" and "Orientation" to "Auto-adjust".
+     - When connecting from a phone, the client requests device dimensions (e.g. 2584x1220 or 1220x2580 in portrait) and sends m_desktopScaleFactor=225 (225% DPI scale).
+     - When Windows Server / Windows 11 receives this, it resizes the physical desktop session and scales all fonts/windows to 225%, shrinking app windows and scrambling desktop icons across multi-monitor setups.
+  2. Smart Sizing Squash:
+     - When smart sizing=1 (screen mode id=2), the client forces the remote desktop to squash and fit into the phone viewport, severely distorting the desktop layout in portrait mode.
+
+29.B - ARCHITECTURAL FIXES & SAFEGUARDS:
+  1. Windows Host Registry Hardening:
+     - Applied HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\IgnoreClientDesktopScaleFactor = 1.
+     - Applied HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp\IgnoreClientDesktopScaleFactor = 1.
+     - The Windows host strictly rejects client DPI scaling requests (e.g. 225%), locking the remote desktop to native 100% scale (LogPixels=96) and preserving original font and window sizing.
+  2. 1:1 Native Scrollable Canvas (Models.cs & RdpLauncher.cs):
+     - Defaulted SmartSizing and DefaultSmartSizing to false (1:1 Native Resolution / Scroll to View).
+     - RDP URI query strictly enforces:
+       - screen mode id=i:1 (Windowed / 1:1 scrollable canvas)
+       - smart sizing=i:0 (No scaling / No distortion)
+       - dynamic resolution=i:0 (Block client display resize PDUs)
+       - desktopscale=i:100 & desktopscalefactor=i:100 (100% scale contract)
+       - desktopwidth=i:1920 & desktopheight=i:1080 & desktopsizeid=i:0
+     - Enables touch panning and zoom across the fixed 1920x1080 canvas without resizing the desktop or moving desktop icons.
+  3. Client Display Configuration Requirement (com.microsoft.rdc.androidx):
+     - Inside Windows App / Microsoft Remote Desktop:
+       - Settings -> Display -> Orientation: Select "Lock to landscape".
+       - Settings -> Display -> Display resolution: Select "1920 x 1080".
 
 --------------------------------------------------------------------------------
 END OF FILE — keep synchronized with the code.

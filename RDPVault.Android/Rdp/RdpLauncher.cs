@@ -92,6 +92,7 @@ public static class RdpLauncher
             $"screen%20mode%20id=i:{screenModeId}",
             $"use%20multimon=i:{(useMultiMon ? 1 : 0)}",
             $"span%20monitors=i:{(useMultiMon ? 1 : 0)}",
+            "desktopsizeid=i:0",
             "desktopscale=i:100",
             "desktopscalefactor=i:100",
             "session%20bpp=i:32",
@@ -109,7 +110,7 @@ public static class RdpLauncher
         queryList.Add($"desktopwidth=i:{targetWidth}");
         queryList.Add($"desktopheight=i:{targetHeight}");
         // CRITICAL: Disable dynamic resolution updates to prevent Microsoft Remote Desktop from sending
-        // a display resize PDU (MS-RDPEDISP) that alters the Windows OS physical monitor resolution to 1080x1920!
+        // a display resize PDU (MS-RDPEDISP) that alters the Windows OS physical monitor resolution!
         queryList.Add("dynamic%20resolution=i:0");
         queryList.Add($"smart%20sizing=i:{(effectiveSmartSizing ? 1 : 0)}");
 

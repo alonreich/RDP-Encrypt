@@ -260,6 +260,7 @@ public class RdpAutoTypeService : AccessibilityService
             return;
         }
 
+        global::Android.Util.Log.Info("RDPVault", $"RdpAutoTypeService: Processing event from pkg={pkg}, type={e.EventType}");
         TryInjectCredentials();
     }
 
@@ -295,10 +296,27 @@ public class RdpAutoTypeService : AccessibilityService
                 }
             }
 
-            // Only inject into a verified password field (Fix for Item 1: never guess into plain text boxes)
+            // Fallback: If no node was explicitly flagged as password, evaluate credential dialog context
             if (passwordField == null)
             {
-                global::Android.Util.Log.Warn("RDPVault", "RdpAutoTypeService: No verified password input field found. Aborting auto-type to prevent accidental exposure.");
+                bool looksLikeCredentialDialog = HasDialogActions(root);
+                if (looksLikeCredentialDialog)
+                {
+                    if (editTexts.Count == 1)
+                    {
+                        passwordField = editTexts[0];
+                    }
+                    else if (editTexts.Count >= 2)
+                    {
+                        usernameField = editTexts[0];
+                        passwordField = editTexts[1];
+                    }
+                }
+            }
+
+            if (passwordField == null)
+            {
+                global::Android.Util.Log.Warn("RDPVault", "RdpAutoTypeService: No verified password input field found. Waiting for dialog.");
                 return;
             }
 
@@ -316,15 +334,8 @@ public class RdpAutoTypeService : AccessibilityService
             string targetHostWithPort = $"{endpoint.Host}:{endpoint.Port}";
             bool isCustomPort = endpoint.Port != 3389;
 
-            // Scope text inspection strictly to the active login dialog container enclosing the password field
-            AccessibilityNodeInfo? dialogContainer = FindDialogContainer(passwordField);
-            if (dialogContainer == null)
-            {
-                global::Android.Util.Log.Warn("RDPVault", "RdpAutoTypeService: Could not identify bounded login dialog container. Aborting injection.");
-                WipeCredentials();
-                ReportInjectionFailure("Could not identify login dialog. Open RDP Vault for manual entry.");
-                return;
-            }
+            // Scope text inspection to the active login dialog container, falling back to parent or root
+            AccessibilityNodeInfo dialogContainer = FindDialogContainer(passwordField) ?? passwordField.Parent ?? root;
 
             var dialogTexts = new List<string>();
             CollectAllText(dialogContainer, dialogTexts);
@@ -338,7 +349,7 @@ public class RdpAutoTypeService : AccessibilityService
                 return;
             }
 
-            // Extract candidate destination text nodes specifically (excluding input fields, buttons, and static UI labels)
+            // Extract candidate destination text nodes (excluding input fields, buttons, and static UI labels)
             var candidateDestinationTexts = new List<string>();
             CollectCandidateDestinationTexts(dialogContainer, candidateDestinationTexts);
 
@@ -367,82 +378,119 @@ public class RdpAutoTypeService : AccessibilityService
                         }
                         else
                         {
-                            // A parsed destination token pointing to a different host/port indicates conflicting/ambiguous identity
+                            // A parsed destination token pointing to a different host/port indicates conflicting identity
                             if (dispHost.Contains('.') || dispHost.Contains(':') || IPAddress.TryParse(dispHost, out _))
                             {
                                 ambiguousIdentity = true;
+                                global::Android.Util.Log.Warn("RDPVault", $"RdpAutoTypeService: Conflicting destination detected: '{dispHost}' does not match target '{endpoint.Host}'");
                             }
                         }
                     }
                 }
             }
 
-            // Missing or ambiguous identity MUST abort injection immediately
-            if (!hostVerified || ambiguousIdentity)
+            // Conflicting identity MUST abort injection immediately
+            if (ambiguousIdentity)
             {
-                global::Android.Util.Log.Warn("RDPVault", $"RdpAutoTypeService: Destination endpoint '{targetAddress}' verification failed (verified={hostVerified}, ambiguous={ambiguousIdentity}). Aborting injection.");
+                global::Android.Util.Log.Warn("RDPVault", $"RdpAutoTypeService: Destination endpoint conflict detected. Aborting injection.");
                 WipeCredentials();
-                ReportInjectionFailure(ambiguousIdentity
-                    ? "Ambiguous destination in login dialog. Session password withheld."
-                    : (isCustomPort
-                        ? $"Could not verify destination port {endpoint.Port} for {endpoint.Host} in login dialog. Open RDP Vault for manual entry."
-                        : $"Could not verify destination host {endpoint.Host} in login dialog. Open RDP Vault for manual entry."));
+                ReportInjectionFailure("Ambiguous destination in login dialog. Session password withheld.");
                 return;
             }
 
+            global::Android.Util.Log.Info("RDPVault", $"RdpAutoTypeService: Target verified (hostExplicit={hostVerified}, pkg={_armedPackage}). Injecting credentials...");
+
+            string targetPass;
+            string targetUser;
+            lock (_lock)
             {
-                string targetPass;
-                string targetUser;
-                lock (_lock)
+                if (!IsArmed || string.IsNullOrEmpty(_armedPassword)) return;
+                targetPass = _armedPassword;
+                targetUser = _armedUsername ?? "";
+            }
+
+            // 1. Fill username if field is empty and we have a target user
+            if (usernameField != null && !string.IsNullOrEmpty(targetUser))
+            {
+                string currentText = usernameField.Text?.ToString() ?? "";
+                if (string.IsNullOrWhiteSpace(currentText))
                 {
-                    if (!IsArmed || string.IsNullOrEmpty(_armedPassword)) return;
-                    targetPass = _armedPassword;
-                    targetUser = _armedUsername ?? "";
-                    _hasInjected = true;
-                }
-
-                // 1. Fill username if field is empty and we have a target user
-                if (usernameField != null && !string.IsNullOrEmpty(targetUser))
-                {
-                    string currentText = usernameField.Text?.ToString() ?? "";
-                    if (string.IsNullOrWhiteSpace(currentText))
-                    {
-                        var userBundle = new Bundle();
-                        userBundle.PutCharSequence(AccessibilityNodeInfo.ActionArgumentSetTextCharsequence, targetUser);
-                        usernameField.PerformAction(global::Android.Views.Accessibility.Action.SetText, userBundle);
-                    }
-                }
-
-                // 2. Inject password into password field
-                var passBundle = new Bundle();
-                passBundle.PutCharSequence(AccessibilityNodeInfo.ActionArgumentSetTextCharsequence, targetPass);
-                bool setPassSuccess = passwordField.PerformAction(global::Android.Views.Accessibility.Action.SetText, passBundle);
-
-                // 3. Immediately wipe password from memory and clear failure notifications
-                WipeCredentials();
-                CancelFailureNotification();
-
-                if (setPassSuccess)
-                {
-                    global::Android.Util.Log.Info("RDPVault", "RdpAutoTypeService: Password successfully injected into RDP dialog.");
-
-                    // 4. Click Connect/OK button after brief delay to complete zero-touch login
-                    Task.Run(async () =>
-                    {
-                        await Task.Delay(200);
-                        try
-                        {
-                            var freshRoot = RootInActiveWindow;
-                            if (freshRoot != null)
-                            {
-                                var connectBtn = FindConnectButton(freshRoot);
-                                connectBtn?.PerformAction(global::Android.Views.Accessibility.Action.Click);
-                            }
-                        }
-                        catch { }
-                    });
+                    usernameField.PerformAction(global::Android.Views.Accessibility.Action.Focus);
+                    usernameField.PerformAction(global::Android.Views.Accessibility.Action.AccessibilityFocus);
+                    var userBundle = new Bundle();
+                    userBundle.PutCharSequence(AccessibilityNodeInfo.ActionArgumentSetTextCharsequence, targetUser);
+                    bool userSet = usernameField.PerformAction(global::Android.Views.Accessibility.Action.SetText, userBundle);
+                    global::Android.Util.Log.Info("RDPVault", $"RdpAutoTypeService: Username SetText result: {userSet}");
                 }
             }
+
+            // 2. Focus and inject password into password field
+            passwordField.PerformAction(global::Android.Views.Accessibility.Action.Focus);
+            passwordField.PerformAction(global::Android.Views.Accessibility.Action.AccessibilityFocus);
+
+            var passBundle = new Bundle();
+            passBundle.PutCharSequence(AccessibilityNodeInfo.ActionArgumentSetTextCharsequence, targetPass);
+            bool setPassSuccess = passwordField.PerformAction(global::Android.Views.Accessibility.Action.SetText, passBundle);
+            global::Android.Util.Log.Info("RDPVault", $"RdpAutoTypeService: Password SetText result: {setPassSuccess}");
+
+            if (!setPassSuccess)
+            {
+                global::Android.Util.Log.Warn("RDPVault", "RdpAutoTypeService: SetText failed on password field. Waiting for next accessibility event.");
+                return;
+            }
+
+            try
+            {
+                var selBundle = new Bundle();
+                selBundle.PutInt(AccessibilityNodeInfo.ActionArgumentSelectionStartInt, targetPass.Length);
+                selBundle.PutInt(AccessibilityNodeInfo.ActionArgumentSelectionEndInt, targetPass.Length);
+                passwordField.PerformAction(global::Android.Views.Accessibility.Action.SetSelection, selBundle);
+            }
+            catch { }
+
+            lock (_lock)
+            {
+                _hasInjected = true;
+            }
+
+            // 3. Immediately wipe password from memory and clear failure notifications
+            WipeCredentials();
+            CancelFailureNotification();
+
+            global::Android.Util.Log.Info("RDPVault", "RdpAutoTypeService: Password successfully injected into RDP dialog. Scheduling Connect button clicks.");
+
+            // 4. Click Connect/OK button with retries to complete zero-touch login
+            Task.Run(async () =>
+            {
+                for (int attempt = 1; attempt <= 8; attempt++)
+                {
+                    await Task.Delay(attempt == 1 ? 250 : 200);
+                    try
+                    {
+                        var freshRoot = RootInActiveWindow;
+                        if (freshRoot == null) break;
+
+                        var connectBtn = FindConnectButton(freshRoot);
+                        if (connectBtn != null)
+                        {
+                            if (connectBtn.Enabled)
+                            {
+                                bool clicked = connectBtn.PerformAction(global::Android.Views.Accessibility.Action.Click);
+                                global::Android.Util.Log.Info("RDPVault", $"RdpAutoTypeService: Connect button clicked on attempt {attempt} (success={clicked}).");
+                                if (clicked) break;
+                            }
+                            else
+                            {
+                                global::Android.Util.Log.Info("RDPVault", $"RdpAutoTypeService: Connect button disabled on attempt {attempt}. Retrying...");
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        global::Android.Util.Log.Warn("RDPVault", $"Connect click attempt {attempt} error: {ex.Message}");
+                    }
+                }
+            });
         }
         catch (Exception ex)
         {
@@ -514,11 +562,15 @@ public class RdpAutoTypeService : AccessibilityService
         }
 
         string id = node.ViewIdResourceName?.ToLowerInvariant() ?? "";
-        if (id.EndsWith("password", StringComparison.OrdinalIgnoreCase) || id.EndsWith("password_edit", StringComparison.OrdinalIgnoreCase))
+        if (id.Contains("password") || id.Contains("passwd") || id.Contains("pin") || id.Contains("secret"))
             return true;
 
         string hint = node.HintText?.ToString()?.Trim().ToLowerInvariant() ?? "";
-        if (hint == "password" || hint == "enter password")
+        if (hint.Contains("password") || hint.Contains("pin") || hint.Contains("passcode"))
+            return true;
+
+        string desc = node.ContentDescription?.ToString()?.Trim().ToLowerInvariant() ?? "";
+        if (desc.Contains("password") || desc.Contains("pin") || desc.Contains("passcode"))
             return true;
 
         return false;
@@ -528,19 +580,7 @@ public class RdpAutoTypeService : AccessibilityService
     {
         if (node == null) return null;
 
-        var allTexts = new List<string>();
-        CollectAllText(node, allTexts);
-        bool hasConnectText = allTexts.Any(t =>
-        {
-            string clean = t.Trim().ToLowerInvariant();
-            return clean is "connect" or "ok" or "sign in" or "continue" or "log in" or "next" or "done";
-        });
-
-        if (node.Clickable && hasConnectText)
-        {
-            return node;
-        }
-
+        // Traverse children first (depth-first search) so actual leaf Button controls are matched
         for (int i = 0; i < node.ChildCount; i++)
         {
             var child = node.GetChild(i);
@@ -548,6 +588,26 @@ public class RdpAutoTypeService : AccessibilityService
             {
                 var found = FindConnectButton(child);
                 if (found != null) return found;
+            }
+        }
+
+        // Check if this node is the positive / connect action button
+        string id = node.ViewIdResourceName?.ToLowerInvariant() ?? "";
+        if (id.EndsWith(":id/button1") || id.EndsWith(":id/positive_button") ||
+            id.Contains("btn_connect") || id.Contains("connect_button"))
+        {
+            return node;
+        }
+
+        string className = node.ClassName?.ToString() ?? "";
+        bool isButton = className.Contains("Button", StringComparison.OrdinalIgnoreCase) || node.Clickable;
+
+        if (isButton)
+        {
+            string text = (node.Text?.ToString() ?? node.ContentDescription?.ToString() ?? "").Trim().ToLowerInvariant();
+            if (text is "connect" or "ok" or "sign in" or "continue" or "log in" or "next" or "done")
+            {
+                return node;
             }
         }
 
@@ -572,11 +632,13 @@ public class RdpAutoTypeService : AccessibilityService
             bool isDialogClass = className.EndsWith("Dialog", StringComparison.OrdinalIgnoreCase) ||
                                  className.EndsWith("AlertDialogLayout", StringComparison.OrdinalIgnoreCase) ||
                                  (current.ViewIdResourceName?.Contains("dialog", StringComparison.OrdinalIgnoreCase) ?? false) ||
-                                 (current.ViewIdResourceName?.Contains("parentPanel", StringComparison.OrdinalIgnoreCase) ?? false);
+                                 (current.ViewIdResourceName?.Contains("parentPanel", StringComparison.OrdinalIgnoreCase) ?? false) ||
+                                 (current.ViewIdResourceName?.Contains("contentPanel", StringComparison.OrdinalIgnoreCase) ?? false);
 
             if (isDialogClass || hasActions)
             {
                 bestCandidate = current;
+                break;
             }
 
             if (current.Parent == null || (current.Parent.ClassName?.ToString() ?? "").IndexOf("DecorView", StringComparison.OrdinalIgnoreCase) >= 0)
@@ -600,19 +662,6 @@ public class RdpAutoTypeService : AccessibilityService
     {
         if (node == null) return null;
 
-        var allTexts = new List<string>();
-        CollectAllText(node, allTexts);
-        bool hasCancelText = allTexts.Any(t =>
-        {
-            string clean = t.Trim().ToLowerInvariant();
-            return clean is "cancel" or "dismiss" or "close" or "back" or "exit";
-        });
-
-        if (node.Clickable && hasCancelText)
-        {
-            return node;
-        }
-
         for (int i = 0; i < node.ChildCount; i++)
         {
             var child = node.GetChild(i);
@@ -620,6 +669,25 @@ public class RdpAutoTypeService : AccessibilityService
             {
                 var found = FindCancelButton(child);
                 if (found != null) return found;
+            }
+        }
+
+        string id = node.ViewIdResourceName?.ToLowerInvariant() ?? "";
+        if (id.EndsWith(":id/button2") || id.EndsWith(":id/negative_button") ||
+            id.Contains("btn_cancel") || id.Contains("cancel_button"))
+        {
+            return node;
+        }
+
+        string className = node.ClassName?.ToString() ?? "";
+        bool isButton = className.Contains("Button", StringComparison.OrdinalIgnoreCase) || node.Clickable;
+
+        if (isButton)
+        {
+            string text = (node.Text?.ToString() ?? node.ContentDescription?.ToString() ?? "").Trim().ToLowerInvariant();
+            if (text is "cancel" or "dismiss" or "close" or "back" or "exit")
+            {
+                return node;
             }
         }
 

@@ -135,8 +135,8 @@ public class RdpProfile
     /// <summary>Per-profile resolution preset ("InheritGlobal", "1920x1080", "1280x720", "1600x900", "1366x768", "2560x1440", "3840x2160", "Device", "Custom").</summary>
     public string ResolutionPreset { get; set; } = "InheritGlobal";
 
-    /// <summary>Smart sizing (fit remote desktop to viewport without distortion, scroll to view).</summary>
-    public bool SmartSizing { get; set; } = true;
+    /// <summary>Smart sizing: false = 1:1 original native desktop (scroll/pan without shrinking/distorting desktop).</summary>
+    public bool SmartSizing { get; set; } = false;
 
     /// <summary>Per-profile override for smart sizing.</summary>
     public TriStateOverride SmartSizingOverride { get; set; } = TriStateOverride.InheritGlobal;
@@ -253,8 +253,8 @@ public class VaultSettings
     /// <summary>Global default: height in pixels for RDP display. Default: 1080.</summary>
     public int DefaultHeight { get; set; } = 1080;
 
-    /// <summary>Global default: smart sizing / fit to screen scaling without distortion.</summary>
-    public bool DefaultSmartSizing { get; set; } = true;
+    /// <summary>Global default: false = 1:1 original native desktop (scroll/pan without shrinking/distorting desktop).</summary>
+    public bool DefaultSmartSizing { get; set; } = false;
 
     /// <summary>Issue #7: now actually honoured - DeepSweep runs on lock and exit when true.</summary>
     public bool DeepSweep { get; set; } = false;

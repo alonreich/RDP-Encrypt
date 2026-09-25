@@ -84,9 +84,13 @@ This method sideloads the application directly and activates the secure Auto-Typ
    - If building from source: run `build-apk.cmd` (or `build.cmd`). The output artifact is generated at `compiled\RDPVault.apk`.
    - If downloading from GitHub Releases: place `RDPVault.apk` into your project directory or into a known folder (e.g., `C:\Full_Control\RDP_Encrypt\compiled\RDPVault.apk`).
 2. Verify ADB is installed on your Windows PC:
-   ```cmd
-   adb version
-   ```
+<div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); border-radius: 6px; margin: 6px 0 14px 0;">
+
+```cmd
+adb version
+```
+
+</div>
    *If ADB is not recognized, install it via Windows Package Manager: `winget install Google.PlatformTools`, or download Android SDK Platform-Tools and add it to your PATH.*
 
 #### Step 2: Enable Developer Options & USB Debugging on Your Phone
@@ -102,91 +106,95 @@ This method sideloads the application directly and activates the secure Auto-Typ
 3. Look at your phone's screen. A dialog will appear: **"Allow USB debugging?"**.
 4. Check the box **"Always allow from this computer"** and tap **Allow**.
 
-#### Step 4: Verify Device Connection & ADB Status
-Open PowerShell or CMD on your PC and run:
+#### Step 4: Verify Device Connection
+Confirm your phone is authorized and recognized:
+<div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
+
 ```cmd
 adb devices
 ```
-**Verification Check:**
-- **Successful output:**
-  ```text
-  List of devices attached
-  RFCW1234567    device
-  ```
-  *(The state must say `device`)*.
-- **If output shows `unauthorized`:** Unlock your phone and accept the "Allow USB debugging" prompt.
-- **If output is blank:** Verify the USB cable, try another USB port, or restart the ADB server:
-  ```cmd
-  adb kill-server
-  adb start-server
-  adb devices
-  ```
 
-#### Step 5: Sideload & Install the APK
-Run the installation command from the repository root:
+</div>
+
+#### Step 5: Sideload & Install APK
+Install the freshly built package with update and downgrade flags:
+<div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
+
 ```cmd
 adb install -r -d compiled\RDPVault.apk
 ```
-*(Flags: `-r` keeps existing app data/vault intact; `-d` allows version code downgrades if reinstalling).*
 
-**Verification Check:**
-The terminal must output:
-```text
-Performing Streamed Install
-Success
-```
+</div>
 
-#### Step 6: Verify Package Installation on the Phone
-Run:
-```cmd
-adb shell pm list packages | findstr rdpvault
-```
-**Verification Check:**
-Expected response:
-```text
-package:com.rdpvault.app
-```
-
-To verify the installed version details:
-```cmd
-adb shell dumpsys package com.rdpvault.app | findstr /C:"versionName" /C:"versionCode"
-```
-
-#### Step 7: Grant Auto-Type Accessibility & Notification Permissions (Zero-Click Bypass)
-Android 13+ restricts accessibility services on sideloaded apps, and Android 14/15/16 suspends accessibility services after in-place APK updates. Run these commands to register, bind, and authorize the service cleanly:
+#### Step 6: Reset Stale Accessibility State
+Clear any crashed or suspended accessibility state from prior versions:
+<div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
 
 ```cmd
-rem 1. Reset any stale/crashed service binding after APK update
 adb shell settings delete secure enabled_accessibility_services
+```
 
-rem 2. Enable accessibility subsystem
+</div>
+
+#### Step 7: Enable Accessibility Subsystem
+Activate the Android accessibility subsystem:
+<div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
+
+```cmd
 adb shell settings put secure accessibility_enabled 1
+```
 
-rem 3. Register and bind RDP Vault Auto-Type
+</div>
+
+#### Step 8: Register & Bind RDP Vault Auto-Type
+Bypass Android restricted settings and bind the service immediately:
+<div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
+
+```cmd
 adb shell settings put secure enabled_accessibility_services com.rdpvault.app/com.rdpvault.app.services.RdpAutoTypeService
+```
 
-rem 4. Grant runtime notification permissions for foreground status
+</div>
+
+#### Step 9: Grant Foreground Notification Permission
+Authorize session foreground notifications without runtime prompts:
+<div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
+
+```cmd
 adb shell pm grant com.rdpvault.app android.permission.POST_NOTIFICATIONS
 ```
 
-**Verification Check:**
-Run:
-```cmd
-adb shell dumpsys accessibility | findstr /C:"Bound services" /C:"Crashed services"
-```
-Confirm `Bound services:` contains `com.rdpvault.app.services.RdpAutoTypeService` and `Crashed services:` is empty `{}`.
+</div>
 
-#### Step 8: Launch App & Final Verification
-Launch RDP Vault directly from ADB:
+#### Step 10: Launch RDP Vault
+Start the application on the phone:
+<div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
+
 ```cmd
 adb shell am start -n com.rdpvault.app/com.rdpvault.app.MainActivity
 ```
-The app will open on the device. Create or unlock your vault, configure biometric unlock, and connect securely.
 
-To monitor live diagnostic logs during connection, port knocking, and password injection:
+</div>
+
+#### Diagnostic Checks (Optional)
+
+Verify that the Auto-Type accessibility service is bound:
+<div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
+
+```cmd
+adb shell dumpsys accessibility | findstr /C:"Bound services"
+```
+
+</div>
+
+Stream real-time connection, port knocking, and password injection logs:
+<div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
+
 ```cmd
 adb logcat -v time -s RDPVault RdpAutoTypeService
 ```
+
+</div>
 
 ---
 
@@ -210,20 +218,45 @@ If you do not have a PC with ADB available, install directly on the phone:
 
 ### Android Build Prerequisites
 To compile the Android APK from source on Windows:
+<div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
+
 ```cmd
 dotnet workload install android
+```
+
+</div>
+
+<div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
+
+```cmd
 build-apk.cmd
 ```
+
+</div>
+
 The output package is placed at `compiled\RDPVault.apk`.
 
 ## Build from source
 
 Requires the .NET 9 SDK on Windows.
 
+Build and replace GitHub release:
+<div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
+
+```cmd
+build.cmd
 ```
-build.cmd              rem clean, publish, then replace the GitHub release
-build.cmd --no-publish rem clean and publish only
+
+</div>
+
+Build only (clean and publish locally without touching GitHub releases):
+<div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
+
+```cmd
+build.cmd --no-publish
 ```
+
+</div>
 
 The build outputs are `compiled\RDPVault.exe` (Windows desktop) and `compiled\RDPVault.apk` (Android mobile). The automated CI pipeline builds both artifacts on every release commit, tagging `vYYYY.MM.DD` with both assets attached.
 

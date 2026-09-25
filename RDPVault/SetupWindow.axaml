@@ -1,10 +1,10 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="RDPVault.SetupWindow"
-        Title="RDP Vault Setup" Width="550" Height="400"
+        Title="RDP Vault Setup" Width="550" Height="420"
         Icon="avares://RDPVault/Assets/icon.ico"
         WindowStartupLocation="CenterScreen" CanResize="False"
-        Background="#13283E" Foreground="#EDEDED" FontFamily="Inter, Arial"
+        Background="#0E0E10" Foreground="#EDEDED" FontFamily="Inter, Arial"
         Topmost="True">
 
     <Window.Styles>
@@ -15,6 +15,7 @@
             <Setter Property="CornerRadius" Value="4"/>
             <Setter Property="Padding" Value="16,10"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor" Value="Hand"/>
         </Style>
         <Style Selector="Button:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="#2A2A30"/>
@@ -30,26 +31,27 @@
 
     <Grid Margin="30">
         <!-- MODE SELECTION PANEL -->
-        <StackPanel Name="PnlSelection" Spacing="20" VerticalAlignment="Center">
+        <StackPanel Name="PnlSelection" Spacing="16" VerticalAlignment="Center">
+            <TextBlock Text="STEP 1 OF 2: DEPLOYMENT MODE" FontSize="11" FontWeight="Bold" Foreground="#005FB8" HorizontalAlignment="Center" LetterSpacing="1"/>
             <TextBlock Text="WELCOME TO RDP VAULT" FontSize="22" FontWeight="Bold" HorizontalAlignment="Center" LetterSpacing="2"/>
             <TextBlock Text="How would you like to run the application?" FontSize="14" Foreground="#8A8A93" HorizontalAlignment="Center" Margin="0,0,0,10"/>
             
             <Grid ColumnDefinitions="*,20,*">
-                <Button Grid.Column="0" Name="BtnInstall" Classes="Accent" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="BtnInstall_Click">
+                <Button Grid.Column="0" Name="BtnInstall" Classes="Accent" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="BtnInstall_Click" AutomationProperties.Name="Install to this PC">
                     <StackPanel Spacing="6">
                         <TextBlock Name="TxtInstallTitle" Text="Install to this PC" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center"/>
                         <TextBlock Name="TxtInstallSubtitle" Text="Registers shortcuts and uninstaller" FontSize="11" Foreground="#A0C0E0" HorizontalAlignment="Center"/>
                     </StackPanel>
                 </Button>
                 
-                <Button Grid.Column="2" Name="BtnPortable" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="BtnPortable_Click">
+                <Button Grid.Column="2" Name="BtnPortable" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="BtnPortable_Click" AutomationProperties.Name="Run Portably">
                     <StackPanel Spacing="6">
                         <TextBlock Text="Run Portably" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center"/>
                         <TextBlock Text="Ideal for USB drives (No traces)" FontSize="11" Foreground="#8A8A93" HorizontalAlignment="Center"/>
                     </StackPanel>
                 </Button>
             </Grid>
-            <Button Name="BtnCleanInstall" IsVisible="False" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="BtnCleanInstall_Click" Margin="0,5,0,0">
+            <Button Name="BtnCleanInstall" IsVisible="False" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="BtnCleanInstall_Click" Margin="0,5,0,0" AutomationProperties.Name="Clean install (erase existing vault)">
                 <StackPanel Spacing="6">
                     <TextBlock Text="Clean install (erase the existing vault)" FontSize="14" FontWeight="Bold" HorizontalAlignment="Center" Foreground="IndianRed"/>
                     <TextBlock Text="Permanently deletes the installed vault.rdpv and every saved profile" FontSize="11" Foreground="#8A8A93" HorizontalAlignment="Center"/>
@@ -59,14 +61,15 @@
 
         <!-- PROGRESS PANEL -->
         <StackPanel Name="PnlProgress" Spacing="16" VerticalAlignment="Center" IsVisible="False">
+            <TextBlock Text="STEP 2 OF 2: INSTALLATION PROGRESS" FontSize="11" FontWeight="Bold" Foreground="#005FB8" HorizontalAlignment="Center" LetterSpacing="1"/>
             <TextBlock Text="INSTALLING RDP VAULT" FontSize="18" FontWeight="Bold" HorizontalAlignment="Center" LetterSpacing="1"/>
-            <Border Background="#121215" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="4" Height="200" Padding="10">
+            <Border Background="#121215" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="4" Height="190" Padding="10">
                 <ScrollViewer Name="ScrollLog">
                     <TextBlock Name="TxtLog" FontSize="12" FontFamily="Consolas" Foreground="#8A8A93" TextWrapping="Wrap"/>
                 </ScrollViewer>
             </Border>
             <ProgressBar Name="ProgInstall" IsIndeterminate="True" Height="4" Margin="0,10,0,0" Foreground="#005FB8"/>
-            <Button Name="BtnFinish" Content="Launch RDP Vault" Classes="Accent" HorizontalAlignment="Center" IsVisible="False" Click="BtnFinish_Click"/>
+            <Button Name="BtnFinish" Content="Launch RDP Vault" Classes="Accent" HorizontalAlignment="Center" IsVisible="False" Click="BtnFinish_Click" AutomationProperties.Name="Launch RDP Vault"/>
         </StackPanel>
     </Grid>
 </Window>

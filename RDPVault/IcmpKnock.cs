@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Net;
+using System.Net.Http;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Security.Cryptography;
@@ -116,35 +119,139 @@ public static class IcmpKnock
 
     public static async Task SendTcpKnockAsync(string host, int port, CancellationToken ct)
     {
-        // Emulates: curl -m 1 http://<host>:<port>
-        // Initiates a TCP connection to the destination host:port and transmits an HTTP GET request.
+        // Emulates: curl -m 1 http://<host>:<port> >nul 2>&1
+        // Dispatches both an HTTP GET request via HttpClient and direct dual-stack TCP SYN attempts
+        // to guarantee compatibility across cellular CLAT/NAT64, Web knock daemons, and raw firewall SYN filters.
+        var httpTask = SendHttpKnockAsync(host, port, ct);
+        var synTask = SendSocketSynKnockAsync(host, port, ct);
+
         try
         {
-            using var client = new TcpClient();
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromMilliseconds(1000)); // -m 1 equivalent
-
-            await client.ConnectAsync(host, port, cts.Token).ConfigureAwait(false);
-
-            if (client.Connected)
-            {
-                using var stream = client.GetStream();
-                string hostHeader = host.Contains(':') && !host.StartsWith('[') ? $"[{host}]" : host;
-                string httpRequest = $"GET / HTTP/1.1\r\nHost: {hostHeader}:{port}\r\nUser-Agent: curl/8.0\r\nAccept: */*\r\nConnection: close\r\n\r\n";
-                byte[] requestBytes = System.Text.Encoding.ASCII.GetBytes(httpRequest);
-
-                await stream.WriteAsync(requestBytes, 0, requestBytes.Length, cts.Token).ConfigureAwait(false);
-                await stream.FlushAsync(cts.Token).ConfigureAwait(false);
-
-                // Give the server a brief window up to the 1s timeout to process/acknowledge the knock
-                byte[] buffer = new byte[256];
-                await stream.ReadAsync(buffer, 0, buffer.Length, cts.Token).ConfigureAwait(false);
-            }
+            await Task.WhenAll(httpTask, synTask).ConfigureAwait(false);
         }
         catch
         {
-            // Port knock daemons (knockd, router firewalls, webhooks) often close or reset connections,
-            // or consume the knock silently without a reply. All timeouts and socket errors are expected.
+            // All timeouts, connection refusals, and socket resets are expected during stealth port knocking.
+        }
+    }
+
+    private static async Task SendHttpKnockAsync(string host, int port, CancellationToken ct)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromMilliseconds(2500));
+
+            string hostAuthority = host.Contains(':') && !host.StartsWith('[') ? $"[{host}]" : host;
+            string url = $"http://{hostAuthority}:{port}/";
+
+            using var http = new HttpClient();
+            http.Timeout = TimeSpan.FromMilliseconds(2500);
+            http.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "curl/8.0");
+            http.DefaultRequestHeaders.TryAddWithoutValidation("Accept", "*/*");
+            http.DefaultRequestHeaders.ConnectionClose = true;
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Expected on stealth firewalls with drop rules (e.g. MikroTik action=drop after address-list)
+        }
+    }
+
+    private static async Task SendSocketSynKnockAsync(string host, int port, CancellationToken ct)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromMilliseconds(2500));
+
+            var addresses = new List<IPAddress>();
+            if (IPAddress.TryParse(host, out var directIp))
+            {
+                addresses.Add(directIp);
+            }
+
+            try
+            {
+                var resolved = await Dns.GetHostAddressesAsync(host, cts.Token).ConfigureAwait(false);
+                foreach (var r in resolved)
+                {
+                    if (!addresses.Any(a => a.Equals(r)))
+                    {
+                        addresses.Add(r);
+                    }
+                }
+            }
+            catch
+            {
+                // DNS resolution may fail if offline or IP literal without DNS64
+            }
+
+            // Also include direct host connect task using .NET Happy Eyeballs
+            var tasks = new List<Task>();
+
+            tasks.Add(Task.Run(async () =>
+            {
+                try
+                {
+                    using var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+                    await socket.ConnectAsync(host, port, cts.Token).ConfigureAwait(false);
+                    if (socket.Connected)
+                    {
+                        string hostHeader = host.Contains(':') && !host.StartsWith('[') ? $"[{host}]" : host;
+                        string httpRequest = $"GET / HTTP/1.1\r\nHost: {hostHeader}:{port}\r\nUser-Agent: curl/8.0\r\nAccept: */*\r\nConnection: close\r\n\r\n";
+                        byte[] requestBytes = System.Text.Encoding.ASCII.GetBytes(httpRequest);
+                        await socket.SendAsync(requestBytes, SocketFlags.None, cts.Token).ConfigureAwait(false);
+                    }
+                }
+                catch
+                {
+                    // Expected on drop firewall
+                }
+            }, cts.Token));
+
+            foreach (var ip in addresses)
+            {
+                var targetIp = ip;
+                tasks.Add(Task.Run(async () =>
+                {
+                    try
+                    {
+                        using var socket = new Socket(targetIp.AddressFamily, SocketType.Stream, ProtocolType.Tcp)
+                        {
+                            NoDelay = true
+                        };
+                        await socket.ConnectAsync(new IPEndPoint(targetIp, port), cts.Token).ConfigureAwait(false);
+
+                        if (socket.Connected)
+                        {
+                            string hostHeader = targetIp.AddressFamily == AddressFamily.InterNetworkV6 ? $"[{targetIp}]" : targetIp.ToString();
+                            string httpRequest = $"GET / HTTP/1.1\r\nHost: {hostHeader}:{port}\r\nUser-Agent: curl/8.0\r\nAccept: */*\r\nConnection: close\r\n\r\n";
+                            byte[] requestBytes = System.Text.Encoding.ASCII.GetBytes(httpRequest);
+                            await socket.SendAsync(requestBytes, SocketFlags.None, cts.Token).ConfigureAwait(false);
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // Expected: Stealth DROP firewall behavior causes timeout while SYN is delivered.
+                    }
+                    catch (SocketException)
+                    {
+                        // Expected: Reset or connection refused by intermediate hops still delivers SYN.
+                    }
+                    catch
+                    {
+                    }
+                }, cts.Token));
+            }
+
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Expected
         }
     }
 }

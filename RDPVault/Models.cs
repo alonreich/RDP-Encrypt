@@ -135,8 +135,8 @@ public class RdpProfile
     /// <summary>Per-profile resolution preset ("InheritGlobal", "1920x1080", "1280x720", "1600x900", "1366x768", "2560x1440", "3840x2160", "Device", "Custom").</summary>
     public string ResolutionPreset { get; set; } = "InheritGlobal";
 
-    /// <summary>Smart sizing (fit remote desktop to viewport without distortion).</summary>
-    public bool SmartSizing { get; set; } = false;
+    /// <summary>Smart sizing (fit remote desktop to viewport without distortion, scroll to view).</summary>
+    public bool SmartSizing { get; set; } = true;
 
     /// <summary>Per-profile override for smart sizing.</summary>
     public TriStateOverride SmartSizingOverride { get; set; } = TriStateOverride.InheritGlobal;
@@ -186,9 +186,9 @@ public class RdpProfile
         }
 
         string clean = preset.Trim().ToLowerInvariant();
-        return clean switch
+        var (w, h, native) = clean switch
         {
-            "device" or "match device" or "native" => (0, 0, true),
+            "device" or "match device" or "native" => (1920, 1080, false),
             "1920x1080" or "1080p" => (1920, 1080, false),
             "1280x720" or "720p" => (1280, 720, false),
             "1600x900" or "900p" => (1600, 900, false),
@@ -199,6 +199,13 @@ public class RdpProfile
             _ => (Width > 0 ? Width : (settings?.DefaultWidth > 0 ? settings.DefaultWidth : 1920),
                   Height > 0 ? Height : (settings?.DefaultHeight > 0 ? settings.DefaultHeight : 1080), false)
         };
+
+        // Host Desktop Protection: Guarantee landscape ratio (w >= h) to prevent remote workstation scramble
+        if (w < h && w > 0 && h > 0)
+        {
+            (w, h) = (h, w);
+        }
+        return (w, h, native);
     }
 
     public RdpProfile Clone() => (RdpProfile)MemberwiseClone();
@@ -247,7 +254,7 @@ public class VaultSettings
     public int DefaultHeight { get; set; } = 1080;
 
     /// <summary>Global default: smart sizing / fit to screen scaling without distortion.</summary>
-    public bool DefaultSmartSizing { get; set; } = false;
+    public bool DefaultSmartSizing { get; set; } = true;
 
     /// <summary>Issue #7: now actually honoured - DeepSweep runs on lock and exit when true.</summary>
     public bool DeepSweep { get; set; } = false;
@@ -255,8 +262,8 @@ public class VaultSettings
     /// <summary>Issue #20: default is to leave the user's own mstsc history alone.</summary>
     public SweepScope SweepScope { get; set; } = SweepScope.OwnHostsOnly;
 
-    /// <summary>Issue #7: warn (never silently pretend) when the vault drive is not encrypted.</summary>
-    public bool WarnIfDriveNotEncrypted { get; set; } = true;
+    /// <summary>Demoted to Settings info badge (default: false to eliminate main screen nag bars).</summary>
+    public bool WarnIfDriveNotEncrypted { get; set; } = false;
 }
 
 public class VaultPayload

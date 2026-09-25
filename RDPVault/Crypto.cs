@@ -369,6 +369,45 @@ public static class VaultCrypto
         finally { CryptographicOperations.ZeroMemory(tpmKey); }
     }
 
+    public static byte[] ProtectLocalData(byte[] plaintext)
+    {
+        byte[] key = SHA256.HashData(Encoding.UTF8.GetBytes($"{Environment.MachineName}|{Environment.UserDomainName}|{Environment.UserName}|PendingCertsKey"));
+        try
+        {
+            var (nonce, ct) = AeadSeal(key, plaintext);
+            byte[] combined = new byte[nonce.Length + ct.Length];
+            Buffer.BlockCopy(nonce, 0, combined, 0, nonce.Length);
+            Buffer.BlockCopy(ct, 0, combined, nonce.Length, ct.Length);
+            return combined;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(key);
+        }
+    }
+
+    public static byte[]? UnprotectLocalData(byte[] cipher)
+    {
+        if (cipher.Length < NonceBytes + TagBytes) return null;
+        byte[] key = SHA256.HashData(Encoding.UTF8.GetBytes($"{Environment.MachineName}|{Environment.UserDomainName}|{Environment.UserName}|PendingCertsKey"));
+        try
+        {
+            byte[] nonce = new byte[NonceBytes];
+            byte[] ct = new byte[cipher.Length - NonceBytes];
+            Buffer.BlockCopy(cipher, 0, nonce, 0, NonceBytes);
+            Buffer.BlockCopy(cipher, NonceBytes, ct, 0, ct.Length);
+            return AeadOpen(key, nonce, ct);
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(key);
+        }
+    }
+
     // ---------------------------------------------------------------- json
 
     private static byte[] Serialize(VaultPayload p)

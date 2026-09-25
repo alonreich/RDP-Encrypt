@@ -118,9 +118,6 @@ public partial class MainWindow : Window
         {
             RefreshProfiles();
             ShowWarning(null);
-            if (!mgr.HasRecoveryCode)
-                ShowWarning("This vault has no Recovery Code. If you forget the master password there is no way back in. " +
-                            "Open Settings to create one.");
         }
     }
 
@@ -133,10 +130,10 @@ public partial class MainWindow : Window
         var filtered = string.IsNullOrEmpty(query)
             ? profiles
             : profiles.Where(p =>
-                p.Name.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                p.Host.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                p.Username.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                p.Notes.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
+                (p.Name ?? "").Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                (p.Host ?? "").Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                (p.Username ?? "").Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                (p.Notes ?? "").Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
 
         LstProfiles.ItemsSource = null;
         LstProfiles.ItemsSource = filtered;
@@ -165,6 +162,11 @@ public partial class MainWindow : Window
     {
         WarnBar.IsVisible = !string.IsNullOrEmpty(text);
         TxtWarn.Text = text ?? "";
+    }
+
+    private void BtnDismissWarn_Click(object? sender, RoutedEventArgs e)
+    {
+        WarnBar.IsVisible = false;
     }
 
     private void UpdateIdleReadout()
@@ -418,6 +420,7 @@ public partial class MainWindow : Window
         // Issue #21: Settings took ownership of the credential prompt; take it back.
         SystemPromptFocus.SetOwner(TryGetPlatformHandle()?.Handle ?? IntPtr.Zero);
         UpdateUIState();
+        SetStatus("Settings updated.");
     }
 
     private async void BtnAddProfile_Click(object? sender, RoutedEventArgs e)
@@ -429,6 +432,7 @@ public partial class MainWindow : Window
             SessionManager.Current.Payload.Profiles.Add(editor.Profile);
             await SaveOrReport();
             RefreshProfiles();
+            SetStatus($"Profile \"{editor.Profile.Name}\" created.");
         }
     }
 
@@ -444,6 +448,7 @@ public partial class MainWindow : Window
         editor.ApplyTo(p);
         await SaveOrReport();
         RefreshProfiles();
+        SetStatus($"Profile \"{p.Name}\" updated.");
     }
 
     /// <summary>Issue #12: deleting a profile is irreversible, so it now asks first.</summary>
@@ -459,9 +464,11 @@ public partial class MainWindow : Window
             confirmText: "Delete", danger: true);
         if (!go) return;
 
+        string removedName = string.IsNullOrWhiteSpace(p.Name) ? p.Host : p.Name;
         SessionManager.Current.Payload.Profiles.Remove(p);
         await SaveOrReport();
         RefreshProfiles();
+        SetStatus($"Profile \"{removedName}\" deleted.");
     }
 
     private async void BtnConnect_Click(object? sender, RoutedEventArgs e)
@@ -596,12 +603,19 @@ public partial class MainWindow : Window
 
         if (launched && connectionVerified)
         {
-            // Close the main vault behind after successful RDP connection
-            Dispatcher.UIThread.Post(() =>
+            if (fromShortcut)
             {
-                _closing = true;
-                Close();
-            });
+                // When launched via desktop shortcut, minimize the main vault window so mstsc
+                // takes foreground focus immediately while keeping session tracking alive.
+                Dispatcher.UIThread.Post(() =>
+                {
+                    WindowState = WindowState.Minimized;
+                });
+            }
+            else
+            {
+                SetStatus($"Connected to {p.Name}. Session active.");
+            }
         }
         else if (launched)
         {
@@ -668,15 +682,59 @@ public partial class MainWindow : Window
             confirmText: "Close anyway");
         if (!go) return;
 
+        // If sessions are active, do not destroy the window or let Avalonia shutdown the process!
+        // Hide the window, lock the vault immediately, and let background tasks monitor mstsc exit and cert pins.
         _closing = true;
-        Close();
+        _uiTimer.Stop();
+        Hide();
+        SessionManager.Current.Lock(killSessions: false);
+        RdpLauncher.SessionEnded += CheckExitOnAllSessionsEnded;
     }
 
     protected override void OnClosed(EventArgs e)
     {
         _uiTimer.Stop();
-        SessionManager.Current.Dispose();
         base.OnClosed(e);
-        Environment.Exit(0);
+
+        if (RdpLauncher.AnyLive())
+        {
+            // Protect credentials immediately in memory while the window is closed
+            SessionManager.Current.Lock(killSessions: false);
+
+            // Defer process exit until all active mstsc sessions terminate and clean up their traces
+            RdpLauncher.SessionEnded += CheckExitOnAllSessionsEnded;
+        }
+        else
+        {
+            SessionManager.Current.Dispose();
+            if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+            {
+                desktop.Shutdown();
+            }
+            else
+            {
+                Environment.Exit(0);
+            }
+        }
+    }
+
+    private static void CheckExitOnAllSessionsEnded(string status)
+    {
+        if (!RdpLauncher.AnyLive())
+        {
+            RdpLauncher.SessionEnded -= CheckExitOnAllSessionsEnded;
+            SessionManager.Current.Dispose();
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+                {
+                    desktop.Shutdown();
+                }
+                else
+                {
+                    Environment.Exit(0);
+                }
+            });
+        }
     }
 }

@@ -9,6 +9,8 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 using System.Net.NetworkInformation;
+using System.Security.Cryptography;
+using System.Text.Json;
 using Avalonia.Threading;
 using Microsoft.Win32;
 
@@ -17,19 +19,23 @@ namespace RDPVault;
 public sealed class ActiveSessionInfo
 {
     public Process Process { get; }
+    public RdpProfile Profile { get; }
     public string ProfileId { get; }
     public string ProfileName { get; }
     public string Host { get; }
     public int Port { get; }
+    public string? TempRdpPath { get; }
     public DateTime StartedAt { get; }
 
-    public ActiveSessionInfo(Process process, RdpProfile profile)
+    public ActiveSessionInfo(Process process, RdpProfile profile, string? tempRdpPath = null)
     {
         Process = process;
+        Profile = profile;
         ProfileId = profile.Id;
         ProfileName = profile.Name;
         Host = profile.Host;
         Port = profile.Port;
+        TempRdpPath = tempRdpPath;
         StartedAt = DateTime.UtcNow;
     }
 
@@ -86,6 +92,40 @@ public static class RdpLauncher
                 session.Process.Kill(entireProcessTree: true);
         }
         catch { }
+    }
+
+    public static HashSet<string> GetLiveHosts()
+    {
+        lock (Gate)
+        {
+            LiveSessions.RemoveAll(s => s.HasExited);
+            var hosts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var s in LiveSessions)
+            {
+                if (!string.IsNullOrWhiteSpace(s.Host))
+                {
+                    hosts.Add(s.Host.Trim());
+                }
+            }
+            return hosts;
+        }
+    }
+
+    public static HashSet<string> GetLiveTempFiles()
+    {
+        lock (Gate)
+        {
+            LiveSessions.RemoveAll(s => s.HasExited);
+            var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var s in LiveSessions)
+            {
+                if (!string.IsNullOrEmpty(s.TempRdpPath))
+                {
+                    files.Add(s.TempRdpPath);
+                }
+            }
+            return files;
+        }
     }
 
     // ---------------- Wake-on-LAN (WOL) ----------------
@@ -172,6 +212,17 @@ public static class RdpLauncher
             if (!string.IsNullOrWhiteSpace(host))
             {
                 string cleanHost = host.Trim();
+                if (cleanHost.Contains(':') && !cleanHost.Contains('['))
+                {
+                    var parts = cleanHost.Split(':');
+                    cleanHost = parts[0];
+                }
+                else if (cleanHost.StartsWith('[') && cleanHost.Contains(']'))
+                {
+                    int end = cleanHost.IndexOf(']');
+                    cleanHost = cleanHost[1..end];
+                }
+
                 if (IPAddress.TryParse(cleanHost, out var hostIp))
                 {
                     targetIps.Add(hostIp);
@@ -228,9 +279,11 @@ public static class RdpLauncher
                 {
                     using var boundClient = new UdpClient(new IPEndPoint(localIp, 0));
                     boundClient.EnableBroadcast = true;
+                    try { boundClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.Broadcast, 1); } catch { }
 
-                    var destsForNic = new HashSet<IPAddress> { IPAddress.Broadcast };
+                    var destsForNic = new List<IPAddress>();
                     if (subnetBcast != null) destsForNic.Add(subnetBcast);
+                    destsForNic.Add(IPAddress.Broadcast);
 
                     foreach (var dest in destsForNic)
                     {
@@ -249,9 +302,11 @@ public static class RdpLauncher
             }
 
             // Strategy B: Standard unbound socket sending to all collected targets (including Host unicast)
-            using (var generalClient = new UdpClient())
+            try
             {
+                using var generalClient = new UdpClient();
                 generalClient.EnableBroadcast = true;
+                try { generalClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.Broadcast, 1); } catch { }
                 foreach (var target in targetIps)
                 {
                     foreach (int port in ports)
@@ -265,6 +320,7 @@ public static class RdpLauncher
                     }
                 }
             }
+            catch { }
 
             report.PacketsSent = sentCount;
             return (sentCount > 0, report);
@@ -315,7 +371,31 @@ public static class RdpLauncher
         }
         catch (ArgumentException ex) { LaunchFailed?.Invoke(ex.Message); return false; }
 
-        // Wake-on-LAN handling
+        // 1. Port Knocking handling (Stealth knock opens firewall address list before WOL and RDP)
+        if (p.EnableIcmpKnock)
+        {
+            bool isTcp = string.Equals(p.KnockProtocol, "TCP", StringComparison.OrdinalIgnoreCase);
+            int delaySec = p.KnockDelaySeconds >= 0 ? p.KnockDelaySeconds : 2;
+            progress?.Invoke(new LaunchProgressUpdate
+            {
+                Step = "Port Knocking",
+                Details = isTcp
+                    ? $"Sending TCP knock to {p.Host}:{p.KnockTcpPort}; waiting {delaySec}s before connecting."
+                    : $"Sending ICMP magic packet to {p.Host}; waiting {delaySec}s before connecting.",
+                IsIndeterminate = true
+            });
+            try { await IcmpKnock.SendBeforeConnectAsync(p, IcmpKnock.SendWindowsAsync, ct); }
+            catch (OperationCanceledException) { LaunchFailed?.Invoke("Connection cancelled."); return false; }
+            catch (Exception ex) { LaunchFailed?.Invoke("Port knock could not be sent: " + ex.Message); return false; }
+        }
+
+        if (ct.IsCancellationRequested)
+        {
+            LaunchFailed?.Invoke("Connection cancelled by user.");
+            return false;
+        }
+
+        // 2. Wake-on-LAN handling (Magic packet can now pass through the opened firewall)
         if (p.EnableWol && !string.IsNullOrWhiteSpace(p.WolMacAddress))
         {
             SessionStarted?.Invoke($"{p.Name} (Sending Wake-on-LAN magic packet...)");
@@ -326,9 +406,10 @@ public static class RdpLauncher
                 IsIndeterminate = true
             });
 
+            string wolTargetHost = ConnectionEndpoint.FromProfile(p).Host;
             var (wolOk, report) = await SendWakeOnLanAsync(
                 p.WolMacAddress,
-                host: p.Host,
+                host: wolTargetHost,
                 broadcastIp: p.WolBroadcastIp,
                 wolPort: p.WolPort,
                 rdpPort: p.Port);
@@ -390,23 +471,6 @@ public static class RdpLauncher
             return false;
         }
 
-        if (p.EnableIcmpKnock)
-        {
-            bool isTcp = string.Equals(p.KnockProtocol, "TCP", StringComparison.OrdinalIgnoreCase);
-            int delaySec = p.KnockDelaySeconds >= 0 ? p.KnockDelaySeconds : 2;
-            progress?.Invoke(new LaunchProgressUpdate
-            {
-                Step = "Port Knocking",
-                Details = isTcp
-                    ? $"Sending TCP knock to {p.Host}:{p.KnockTcpPort}; waiting {delaySec}s before RDP on port {p.Port}."
-                    : $"Sending ICMP magic packet to {p.Host}; waiting {delaySec}s before RDP on port {p.Port}.",
-                IsIndeterminate = true
-            });
-            try { await IcmpKnock.SendBeforeConnectAsync(p, IcmpKnock.SendWindowsAsync, ct); }
-            catch (OperationCanceledException) { LaunchFailed?.Invoke("Connection cancelled."); return false; }
-            catch (Exception ex) { LaunchFailed?.Invoke("Port knock could not be sent: " + ex.Message); return false; }
-        }
-
         progress?.Invoke(new LaunchProgressUpdate
         {
             Step = "Preparing Connection",
@@ -425,8 +489,8 @@ public static class RdpLauncher
             return false;
         }
 
-        // Issue #4: Reference-counted session credentials to avoid cross-session collisions
-        var credTargets = new List<string>();
+        // Reference-counted session credentials with isolated leases to avoid cross-session collisions
+        var credLeases = new List<(string Target, string LeaseId)>();
         if (p.HasPassword && !string.IsNullOrEmpty(p.Username))
         {
             progress?.Invoke(new LaunchProgressUpdate
@@ -437,8 +501,27 @@ public static class RdpLauncher
             });
             foreach (string target in CredentialTargets(p))
             {
-                if (SessionCredentialCoordinator.Acquire(target, p.Username, p.Password))
-                    credTargets.Add(target);
+                var acquireResult = SessionCredentialCoordinator.Acquire(target, p.Username, p.Password, out string leaseId);
+                if (acquireResult == SessionCredentialCoordinator.CredentialAcquireResult.Success)
+                {
+                    credLeases.Add((target, leaseId));
+                }
+                else
+                {
+                    // Full rollback and immediate connection abort
+                    foreach (var (t, l) in credLeases) SessionCredentialCoordinator.Release(t, l);
+                    TryDelete(tempRdp);
+
+                    if (acquireResult == SessionCredentialCoordinator.CredentialAcquireResult.Conflict)
+                    {
+                        LaunchFailed?.Invoke($"Another active session to target '{target}' is using different credentials. Connection aborted to prevent hijacking.");
+                    }
+                    else
+                    {
+                        LaunchFailed?.Invoke($"Failed to write session credentials for target '{target}' to Windows Credential Manager.");
+                    }
+                    return false;
+                }
             }
         }
 
@@ -464,7 +547,7 @@ public static class RdpLauncher
         catch (Exception ex)
         {
             TryDelete(tempRdp);
-            foreach (string t in credTargets) SessionCredentialCoordinator.Release(t);
+            foreach (var (t, l) in credLeases) SessionCredentialCoordinator.Release(t, l);
             RemoveCertPin(p);
             LaunchFailed?.Invoke($"Windows could not start Remote Desktop: {ex.Message}");
             return false;
@@ -472,14 +555,14 @@ public static class RdpLauncher
         if (proc == null)
         {
             TryDelete(tempRdp);
-            foreach (string t in credTargets) SessionCredentialCoordinator.Release(t);
+            foreach (var (t, l) in credLeases) SessionCredentialCoordinator.Release(t, l);
             RemoveCertPin(p);
             LaunchFailed?.Invoke("Windows could not start Remote Desktop.");
             return false;
         }
 
         proc.EnableRaisingEvents = true;
-        var sessionInfo = new ActiveSessionInfo(proc, p);
+        var sessionInfo = new ActiveSessionInfo(proc, p, tempRdp);
         lock (Gate)
         {
             LiveSessions.RemoveAll(pr => pr.HasExited);
@@ -517,7 +600,7 @@ public static class RdpLauncher
 
             CaptureCertPin(p);
             TryDelete(tempRdp);
-            foreach (string t in credTargets) SessionCredentialCoordinator.Release(t);
+            foreach (var (t, l) in credLeases) SessionCredentialCoordinator.Release(t, l);
 
             // Issue #1: deterministic host cleanup even if vault locked during session
             var report = TraceCleaner.SweepHosts(new[] { targetHost });
@@ -656,10 +739,21 @@ public static class RdpLauncher
         sb.AppendLine("remoteapplicationmode:i:0");
         sb.AppendLine("alternate shell:s:");
         sb.AppendLine("shell working directory:s:");
-        sb.AppendLine("gatewayhostname:s:" + p.GatewayHost);
-        sb.AppendLine("gatewayusagemethod:i:" + (string.IsNullOrEmpty(p.GatewayHost) ? 0 : 1));
-        sb.AppendLine("gatewaycredentialssource:i:4");
-        sb.AppendLine("gatewayprofileusagemethod:i:" + (string.IsNullOrEmpty(p.GatewayHost) ? 0 : 1));
+        if (!string.IsNullOrWhiteSpace(p.GatewayHost) &&
+            ConnectionEndpoint.TryParseGatewayAuthority(p.GatewayHost, out var gwEp, out _))
+        {
+            sb.AppendLine("gatewayhostname:s:" + gwEp.Address);
+            sb.AppendLine("gatewayusagemethod:i:1");
+            sb.AppendLine("gatewaycredentialssource:i:4");
+            sb.AppendLine("gatewayprofileusagemethod:i:1");
+        }
+        else
+        {
+            sb.AppendLine("gatewayhostname:s:" + p.GatewayHost);
+            sb.AppendLine("gatewayusagemethod:i:" + (string.IsNullOrEmpty(p.GatewayHost) ? 0 : 1));
+            sb.AppendLine("gatewaycredentialssource:i:4");
+            sb.AppendLine("gatewayprofileusagemethod:i:" + (string.IsNullOrEmpty(p.GatewayHost) ? 0 : 1));
+        }
         sb.AppendLine("promptcredentialonce:i:0");
         sb.AppendLine("use redirection server name:i:0");
         if (!string.IsNullOrEmpty(p.Username))
@@ -721,6 +815,153 @@ public static class RdpLauncher
         catch { /* the user simply gets the normal warning */ }
     }
 
+    public record PendingCertPinUpdate(string ProfileId, string ExpectedEndpoint, string CertThumbprint, DateTime TimestampUtc);
+    private static readonly List<PendingCertPinUpdate> PendingCertUpdates = new();
+    private static readonly object CertUpdatesLock = new();
+
+    private static void SavePendingCertPinsToDisk()
+    {
+        lock (CertUpdatesLock)
+        {
+            try
+            {
+                if (PendingCertUpdates.Count == 0)
+                {
+                    if (File.Exists(AppPaths.PendingCertsPath))
+                        File.Delete(AppPaths.PendingCertsPath);
+                    return;
+                }
+
+                string? dir = Path.GetDirectoryName(AppPaths.PendingCertsPath);
+                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                    Directory.CreateDirectory(dir);
+
+                string json = JsonSerializer.Serialize(PendingCertUpdates);
+                byte[] enc = VaultCrypto.ProtectLocalData(Encoding.UTF8.GetBytes(json));
+                File.WriteAllBytes(AppPaths.PendingCertsPath, enc);
+            }
+            catch { }
+        }
+    }
+
+    private static void LoadPendingCertPinsFromDisk()
+    {
+        lock (CertUpdatesLock)
+        {
+            try
+            {
+                if (!File.Exists(AppPaths.PendingCertsPath)) return;
+                byte[] enc = File.ReadAllBytes(AppPaths.PendingCertsPath);
+                byte[]? plain = VaultCrypto.UnprotectLocalData(enc);
+                if (plain == null) return;
+                string json = Encoding.UTF8.GetString(plain);
+                var loaded = JsonSerializer.Deserialize<List<PendingCertPinUpdate>>(json);
+                if (loaded != null)
+                {
+                    foreach (var item in loaded)
+                    {
+                        if (!PendingCertUpdates.Any(x => x.ProfileId == item.ProfileId && string.Equals(x.ExpectedEndpoint, item.ExpectedEndpoint, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            PendingCertUpdates.Add(item);
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+    }
+
+    public static void SnapshotActiveCertPins()
+    {
+        List<RdpProfile> activeProfiles;
+        lock (Gate)
+        {
+            LiveSessions.RemoveAll(s => s.HasExited);
+            activeProfiles = LiveSessions.Select(s => s.Profile).ToList();
+        }
+
+        if (activeProfiles.Count == 0) return;
+
+        bool hasNew = false;
+        lock (CertUpdatesLock)
+        {
+            LoadPendingCertPinsFromDisk();
+            foreach (var p in activeProfiles)
+            {
+                if (p.AllowUnverifiedServer) continue;
+                try
+                {
+                    using var key = Registry.CurrentUser.OpenSubKey($@"{TscServersKey}\{FullAddress(p)}");
+                    if (key?.GetValue("CertHash") is byte[] b && b.Length > 0)
+                    {
+                        string seen = Convert.ToHexString(b);
+                        if (!string.IsNullOrEmpty(seen) && !string.Equals(seen, p.CertThumbprint, StringComparison.OrdinalIgnoreCase))
+                        {
+                            string launchEp = ConnectionEndpoint.FromProfile(p).ToString();
+                            PendingCertUpdates.RemoveAll(u => u.ProfileId == p.Id);
+                            PendingCertUpdates.Add(new PendingCertPinUpdate(p.Id, launchEp, seen, DateTime.UtcNow));
+                            hasNew = true;
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            if (hasNew)
+            {
+                SavePendingCertPinsToDisk();
+            }
+        }
+    }
+
+    public static void ApplyPendingCertUpdates(VaultPayload? payload)
+    {
+        if (payload?.Profiles == null) return;
+        LoadPendingCertPinsFromDisk();
+
+        var applied = new List<PendingCertPinUpdate>();
+        lock (CertUpdatesLock)
+        {
+            if (PendingCertUpdates.Count == 0) return;
+            foreach (var update in PendingCertUpdates)
+            {
+                var target = payload.Profiles.FirstOrDefault(x => x.Id == update.ProfileId);
+                if (target != null)
+                {
+                    string targetEndpoint = ConnectionEndpoint.FromProfile(target).ToString();
+                    if (string.Equals(targetEndpoint, update.ExpectedEndpoint, StringComparison.OrdinalIgnoreCase))
+                    {
+                        target.CertThumbprint = update.CertThumbprint;
+                        applied.Add(update);
+                    }
+                }
+            }
+        }
+
+        if (applied.Count > 0)
+        {
+            // Atomically save to the vault file first. ONLY if save succeeds do we purge the applied updates!
+            bool saved = false;
+            try
+            {
+                saved = SessionManager.Current.TrySave(out _);
+            }
+            catch { }
+
+            if (saved)
+            {
+                lock (CertUpdatesLock)
+                {
+                    foreach (var app in applied)
+                    {
+                        PendingCertUpdates.Remove(app);
+                    }
+                    SavePendingCertPinsToDisk();
+                }
+            }
+        }
+    }
+
     private static void CaptureCertPin(RdpProfile p)
     {
         if (p.AllowUnverifiedServer) { RemoveCertPin(p); return; }
@@ -747,6 +988,7 @@ public static class RdpLauncher
         // Copy into a non-nullable local: the compiler discards the null-state of a
         // captured variable inside a lambda (CS8601 otherwise).
         string thumb = seen;
+        string launchEndpoint = ConnectionEndpoint.FromProfile(p).ToString();
 
         // This runs on a background task when mstsc exits. Every other vault save
         // happens on the UI thread from a user action, and VaultCrypto.WriteAtomic
@@ -756,12 +998,38 @@ public static class RdpLauncher
             try
             {
                 var mgr = SessionManager.Current;
-                if (!mgr.IsUnlocked) return;                       // locked since; nothing to write into
-                var target = mgr.Payload?.Profiles.FirstOrDefault(x => x.Id == p.Id);
+                if (!mgr.IsUnlocked || mgr.Payload == null)
+                {
+                    // Locked since; preserve pending certificate update safely across vault locking to encrypted store
+                    lock (CertUpdatesLock)
+                    {
+                        PendingCertUpdates.RemoveAll(u => u.ProfileId == p.Id);
+                        PendingCertUpdates.Add(new PendingCertPinUpdate(p.Id, launchEndpoint, thumb, DateTime.UtcNow));
+                        SavePendingCertPinsToDisk();
+                    }
+                    return;
+                }
+
+                var target = mgr.Payload.Profiles.FirstOrDefault(x => x.Id == p.Id);
                 if (target == null) return;  // deleted or edited away
+
+                // Before applying approval, verify that the current profile's normalized endpoint
+                // still equals the launch snapshot's endpoint.
+                string currentEndpoint = ConnectionEndpoint.FromProfile(target).ToString();
+                if (!string.Equals(currentEndpoint, launchEndpoint, StringComparison.OrdinalIgnoreCase))
+                    return;
+
                 target.CertThumbprint = thumb;
                 p.CertThumbprint = thumb;
-                mgr.TrySave(out _);   // bookkeeping: never surface as an error to the user
+                if (!mgr.TrySave(out _))
+                {
+                    lock (CertUpdatesLock)
+                    {
+                        PendingCertUpdates.RemoveAll(u => u.ProfileId == p.Id);
+                        PendingCertUpdates.Add(new PendingCertPinUpdate(p.Id, launchEndpoint, thumb, DateTime.UtcNow));
+                        SavePendingCertPinsToDisk();
+                    }
+                }
             }
             catch { }
         });
@@ -796,59 +1064,91 @@ public static class RdpLauncher
         return targets;
     }
 
-    // ---------------- session credential coordinator (issue #4) ----------------
+    // ---------------- session credential coordinator (lease-based & isolated) ----------------
 
     private static class SessionCredentialCoordinator
     {
-        private record struct ActiveCred(int RefCount, string Username, string Password);
-        private static readonly Dictionary<string, ActiveCred> ActiveCredentials = new(StringComparer.OrdinalIgnoreCase);
-        private static readonly object CredLock = new();
-
-        public static bool Acquire(string target, string user, string password)
+        private sealed class ActiveCred
         {
-            lock (CredLock)
+            public string Username { get; }
+            public byte[] CredHash { get; }
+            public HashSet<string> LeaseIds { get; } = new(StringComparer.Ordinal);
+
+            public ActiveCred(string username, byte[] credHash, string initialLeaseId)
             {
-                if (ActiveCredentials.TryGetValue(target, out var active))
-                {
-                    if (string.Equals(active.Username, user, StringComparison.Ordinal) &&
-                        string.Equals(active.Password, password, StringComparison.Ordinal))
-                    {
-                        ActiveCredentials[target] = active with { RefCount = active.RefCount + 1 };
-                        return true;
-                    }
-
-                    // Different account requested for the same target: update Windows Credential Manager
-                    if (WriteSessionCredential(target, user, password))
-                    {
-                        ActiveCredentials[target] = new ActiveCred(active.RefCount + 1, user, password);
-                        return true;
-                    }
-                    return false;
-                }
-
-                if (WriteSessionCredential(target, user, password))
-                {
-                    ActiveCredentials[target] = new ActiveCred(1, user, password);
-                    return true;
-                }
-                return false;
+                Username = username;
+                CredHash = credHash;
+                LeaseIds.Add(initialLeaseId);
             }
         }
 
-        public static void Release(string target)
+        private static readonly Dictionary<string, ActiveCred> ActiveCredentials = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly object CredLock = new();
+
+        public enum CredentialAcquireResult
         {
+            Success,
+            Conflict,
+            WriteFailed
+        }
+
+        public static CredentialAcquireResult Acquire(string target, string user, string password, out string leaseId)
+        {
+            leaseId = "";
+            byte[]? inputHash = SHA256.HashData(Encoding.UTF8.GetBytes(user + "\0" + password));
+            try
+            {
+                lock (CredLock)
+                {
+                    if (ActiveCredentials.TryGetValue(target, out var active))
+                    {
+                        if (string.Equals(active.Username, user, StringComparison.Ordinal) &&
+                            CryptographicOperations.FixedTimeEquals(active.CredHash, inputHash))
+                        {
+                            string newLease = Guid.NewGuid().ToString("N");
+                            active.LeaseIds.Add(newLease);
+                            leaseId = newLease;
+                            return CredentialAcquireResult.Success;
+                        }
+
+                        // Conflict: Another active session holds a lease on this target with different credentials.
+                        // Reject injection so running sessions are not hijacked.
+                        return CredentialAcquireResult.Conflict;
+                    }
+
+                    if (WriteSessionCredential(target, user, password))
+                    {
+                        string newLease = Guid.NewGuid().ToString("N");
+                        ActiveCredentials[target] = new ActiveCred(user, inputHash, newLease);
+                        leaseId = newLease;
+                        inputHash = null; // ownership transferred to ActiveCred
+                        return CredentialAcquireResult.Success;
+                    }
+                    return CredentialAcquireResult.WriteFailed;
+                }
+            }
+            finally
+            {
+                if (inputHash != null)
+                {
+                    CryptographicOperations.ZeroMemory(inputHash);
+                }
+            }
+        }
+
+        public static void Release(string target, string leaseId)
+        {
+            if (string.IsNullOrEmpty(leaseId)) return;
             lock (CredLock)
             {
                 if (ActiveCredentials.TryGetValue(target, out var active))
                 {
-                    if (active.RefCount <= 1)
+                    active.LeaseIds.Remove(leaseId);
+                    if (active.LeaseIds.Count == 0)
                     {
+                        CryptographicOperations.ZeroMemory(active.CredHash);
                         ActiveCredentials.Remove(target);
                         DeleteCredential(target);
-                    }
-                    else
-                    {
-                        ActiveCredentials[target] = active with { RefCount = active.RefCount - 1 };
                     }
                 }
                 else
@@ -862,8 +1162,9 @@ public static class RdpLauncher
         {
             lock (CredLock)
             {
-                foreach (string target in ActiveCredentials.Keys)
+                foreach (var (target, active) in ActiveCredentials)
                 {
+                    CryptographicOperations.ZeroMemory(active.CredHash);
                     DeleteCredential(target);
                 }
                 ActiveCredentials.Clear();

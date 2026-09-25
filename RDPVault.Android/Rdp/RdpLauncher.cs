@@ -56,10 +56,14 @@ public static class RdpLauncher
         bool useMultiMon = profile.ResolveUseMultiMon(settings);
         bool allowClipboard = profile.ResolveAllowClipboard(settings);
 
-        // NOTE (audit Finding 5): RDP Vault used to force its OWN activity into
-        // SensorLandscape here. Android cannot set the orientation of another app, so all
-        // that ever happened was RDP Vault visibly whipping into landscape for a frame
-        // before handing off. The remote client picks its own orientation. Removed.
+        // Desktop Protection: Force Landscape orientation before handoff for all desktop profiles (where width >= height).
+        // This ensures the Android window manager and Microsoft Remote Desktop / aRDP initialize their viewports
+        // in Landscape mode rather than Portrait (1080x1920), preventing Windows from collapsing multi-monitor
+        // host workstations into a vertical phone screen and scrambling desktop icons and windows.
+        if (width >= height && MainActivity.Instance != null)
+        {
+            MainActivity.Instance.RequestedOrientation = ScreenOrientation.SensorLandscape;
+        }
 
         // 4. Construct standard Microsoft Remote Desktop URI with display & monitor protection
         // Format: rdp://full%20address=s:{host}:{port}&desktopwidth=i:{w}&desktopheight=i:{h}&screen%20mode%20id=i:{mode}&smart%20sizing=i:{sizing}&dynamic%20resolution=i:0&use%20multimon=i:0&span%20monitors=i:0&authentication%20level=i:{authLevel}&promptcredentialonce=i:1
@@ -95,20 +99,19 @@ public static class RdpLauncher
             $"redirectclipboard=i:{(allowClipboard ? 1 : 0)}"
         };
 
-        if (!isDeviceNative && width > 0 && height > 0)
+        int targetWidth = width > 0 ? width : 1920;
+        int targetHeight = height > 0 ? height : 1080;
+        if (targetWidth < targetHeight)
         {
-            queryList.Add($"desktopwidth=i:{width}");
-            queryList.Add($"desktopheight=i:{height}");
-            // CRITICAL: Disable dynamic resolution updates to prevent Microsoft Remote Desktop from sending
-            // a display resize PDU (MS-RDPEDISP) that alters the Windows OS physical monitor resolution to 1080x1920!
-            queryList.Add("dynamic%20resolution=i:0");
-            queryList.Add($"smart%20sizing=i:{(effectiveSmartSizing ? 1 : 0)}");
+            (targetWidth, targetHeight) = (targetHeight, targetWidth);
         }
-        else
-        {
-            queryList.Add($"smart%20sizing=i:{(effectiveSmartSizing ? 1 : 0)}");
-            queryList.Add("dynamic%20resolution=i:1");
-        }
+
+        queryList.Add($"desktopwidth=i:{targetWidth}");
+        queryList.Add($"desktopheight=i:{targetHeight}");
+        // CRITICAL: Disable dynamic resolution updates to prevent Microsoft Remote Desktop from sending
+        // a display resize PDU (MS-RDPEDISP) that alters the Windows OS physical monitor resolution to 1080x1920!
+        queryList.Add("dynamic%20resolution=i:0");
+        queryList.Add($"smart%20sizing=i:{(effectiveSmartSizing ? 1 : 0)}");
 
         if (!string.IsNullOrEmpty(encodedUser))
         {
@@ -117,7 +120,10 @@ public static class RdpLauncher
 
         if (!string.IsNullOrWhiteSpace(profile.GatewayHost))
         {
-            string encGateway = global::Android.Net.Uri.Encode(profile.GatewayHost.Trim()) ?? profile.GatewayHost.Trim();
+            string gwAddress = ConnectionEndpoint.TryParseGatewayAuthority(profile.GatewayHost, out var gwEp, out _)
+                ? gwEp.Address
+                : profile.GatewayHost.Trim();
+            string encGateway = global::Android.Net.Uri.Encode(gwAddress) ?? gwAddress;
             queryList.Add($"gatewayhostname=s:{encGateway}");
             queryList.Add("gatewayusagemethod=i:1");
             queryList.Add("gatewayprofileusagemethod=i:1");
@@ -129,17 +135,6 @@ public static class RdpLauncher
         var intent = new Intent(Intent.ActionView, rdpUri);
         intent.AddFlags(ActivityFlags.NewTask);
 
-        // Arm the accessibility auto-type service if a password is present
-        if (!string.IsNullOrEmpty(profile.Password))
-        {
-            RdpAutoTypeService.Arm(profile.Host, profile.Username, profile.Password, timeoutSeconds: 45);
-        }
-
-        // Tell the activity we are deliberately leaving the screen so the
-        // "lock the instant the app is backgrounded" rule does not slam the vault shut
-        // mid hand-off (and so the user is not re-prompted on the way back).
-        MainActivity.Instance?.BeginExternalActivity();
-
         var pm = context.PackageManager;
 
         string[] knownPackages = new[]
@@ -150,13 +145,14 @@ public static class RdpLauncher
             "com.iiordanov.aRDP"
         };
 
+        string? targetPkg = null;
+
         // Try direct intent resolution targeting an explicit package
         try
         {
             var activities = pm?.QueryIntentActivities(intent, (PackageInfoFlags)0);
             if (activities != null && activities.Count > 0)
             {
-                string? targetPkg = null;
                 foreach (var known in knownPackages)
                 {
                     if (activities.Any(a => string.Equals(a.ActivityInfo?.PackageName, known, StringComparison.OrdinalIgnoreCase)))
@@ -166,20 +162,70 @@ public static class RdpLauncher
                     }
                 }
                 targetPkg ??= activities[0].ActivityInfo?.PackageName;
-
-                if (!string.IsNullOrEmpty(targetPkg))
-                {
-                    intent.SetPackage(targetPkg);
-                    LastUsedPackage = targetPkg;
-                    context.StartActivity(intent);
-                    message = "Remote Desktop client launched.";
-                    return RdpLaunchStatus.Success;
-                }
             }
         }
         catch (Exception ex)
         {
             global::Android.Util.Log.Warn("RDPVault", "QueryIntentActivities failed: " + ex.Message);
+        }
+
+        // Arm the accessibility auto-type service if a password is present
+        if (!string.IsNullOrEmpty(profile.Password))
+        {
+            RdpAutoTypeService.Arm(endpoint, profile.Username, profile.Password, targetPackage: targetPkg, timeoutSeconds: 45);
+        }
+
+        // Tell the activity we are deliberately leaving the screen so the
+        // "lock the instant the app is backgrounded" rule does not slam the vault shut
+        // mid hand-off (and so the user is not re-prompted on the way back).
+        MainActivity.Instance?.BeginExternalActivity();
+
+        global::Android.Net.Uri BuildClientUri(string pkg)
+        {
+            if (pkg.Contains("aRDP", StringComparison.OrdinalIgnoreCase) || pkg.Contains("freeaRDP", StringComparison.OrdinalIgnoreCase))
+            {
+                string ardpUri = !string.IsNullOrEmpty(encodedUser)
+                    ? $"rdp://{encodedUser}@{host}:{port}"
+                    : $"rdp://{host}:{port}";
+                return global::Android.Net.Uri.Parse(ardpUri) ?? rdpUri;
+            }
+            return rdpUri;
+        }
+
+        void AddClientSpecificExtras(Intent targetIntent, string pkg)
+        {
+            if (pkg.Contains("aRDP", StringComparison.OrdinalIgnoreCase) || pkg.Contains("freeaRDP", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!isDeviceNative && width > 0 && height > 0)
+                {
+                    targetIntent.PutExtra("desktopWidth", width);
+                    targetIntent.PutExtra("desktopHeight", height);
+                }
+                targetIntent.PutExtra("autoFitServer", effectiveSmartSizing);
+                targetIntent.PutExtra("panZoomMode", !effectiveSmartSizing);
+                if (!string.IsNullOrEmpty(profile.Username))
+                    targetIntent.PutExtra("username", profile.Username);
+                targetIntent.PutExtra("host", host);
+                targetIntent.PutExtra("port", port);
+                targetIntent.PutExtra("bpp", 32);
+                targetIntent.PutExtra("enableClipboard", allowClipboard);
+            }
+        }
+
+        string FormatSuccessMessage(string pkg)
+        {
+            return "Connected in 1080p Landscape mode.";
+        }
+
+        if (!string.IsNullOrEmpty(targetPkg))
+        {
+            intent.SetData(BuildClientUri(targetPkg));
+            intent.SetPackage(targetPkg);
+            AddClientSpecificExtras(intent, targetPkg);
+            LastUsedPackage = targetPkg;
+            context.StartActivity(intent);
+            message = FormatSuccessMessage(targetPkg);
+            return RdpLaunchStatus.Success;
         }
 
         foreach (var pkg in knownPackages)
@@ -190,10 +236,11 @@ public static class RdpLauncher
                 if (launchIntent != null)
                 {
                     LastUsedPackage = pkg;
-                    launchIntent.SetData(rdpUri);
+                    launchIntent.SetData(BuildClientUri(pkg));
+                    AddClientSpecificExtras(launchIntent, pkg);
                     launchIntent.AddFlags(ActivityFlags.NewTask);
                     context.StartActivity(launchIntent);
-                    message = "Remote Desktop client launched.";
+                    message = FormatSuccessMessage(pkg);
                     return RdpLaunchStatus.Success;
                 }
             }
@@ -207,7 +254,7 @@ public static class RdpLauncher
         try
         {
             context.StartActivity(intent);
-            message = "Remote Desktop client launched.";
+            message = FormatSuccessMessage("default");
             return RdpLaunchStatus.Success;
         }
         catch (ActivityNotFoundException)

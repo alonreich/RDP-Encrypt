@@ -26,6 +26,7 @@ Both links always resolve to the newest release online.
 - **Removable-drive safety.** If you run it from a USB stick and pull the stick, the vault locks, optionally closes the open sessions, and the app exits. The drive has to stay missing for about six seconds first, so a momentary hiccup — an antivirus scan, waking from sleep — does not drop your open desktops.
 - **Server identity is checked by default.** Windows verifies host certificates by default (`authentication level: 2`). RDP Vault remembers your answer *inside the encrypted vault* and replays it, so you are asked once per host rather than on every connection, and nothing is left on the PC. If a host's certificate ever changes you are warned again — which is how you find out something is impersonating it. You can turn the check off per profile, but then your saved password is sent to whatever answers at that address.
 - **Tactical connection overlay & Wake-on-LAN.** Shows a real-time progress overlay during unlock and connection sequences. When Wake-on-LAN is enabled, a live countdown with an instant Cancel button tracks remote host initialization so you are never left waiting in the dark.
+- **Stealth Port Knocking & WAN Wake-on-LAN.** Bypasses hardened perimeter firewalls (such as MikroTik RouterOS) using configurable TCP port knocks or ICMP magic payloads before dispatching connections. Port knocking executes first to dynamically whitelist the client source IP, allowing subsequent unicast Wake-on-LAN magic packets across cellular/WAN as well as local subnet broadcasts on Wi-Fi.
 - **Desktop shortcuts.** One click per connection. These are ordinary Windows `.lnk` shortcuts pointing at `RDPVault.exe --launch <id>`; they contain no host name.
 - **Optional self-destruct.** Off by default. Repeated wrong passwords are always slowed down with an escalating delay, which is the real protection. If you deliberately arm self-destruct, the vault is erased after the limit you set — you have to save a Recovery Code and type `ERASE` to turn it on.
 
@@ -67,8 +68,9 @@ RDP Vault provides an Android mobile APK companion sharing the exact same crypto
 - **It hands off, it does not host**: RDP Vault stores and protects your connections, then opens them in Microsoft Remote Desktop (or aRDP) through a standard Android `rdp://` intent. It contains no RDP protocol stack of its own, so it cannot — and never claims to — connect or disconnect a session itself. The in-app banner says "handed off", and tells you when the remote PC stops responding.
 - **Passwords stay inside the vault**: a saved remote password is visible only while you are editing that specific connection. Nothing else in the app can show, copy, export or share it, and it is never placed on the Android clipboard. Auto-Type (an optional accessibility service scoped to RDP client apps only) types it straight into Remote Desktop and wipes it from memory immediately; if that fails, the app tells you to read it under Edit and type it yourself.
 - **Locks like a vault should**: locks after a configurable idle timeout — on screen as well as in the background — and, by default, the instant the app leaves the screen. Screenshots, screen recording and the app-switcher preview are blocked by default. A running remote session never triggers a lock.
-- **Checks before it switches apps**: a one-second reachability check tells you "your PC is asleep" in plain words, instead of leaving Remote Desktop to spin for thirty seconds and emit `0x204`. Offers to send a Wake-on-LAN signal right there — and says so honestly when you are on mobile data, where Wake-on-LAN cannot work.
-- **Resolution & Multi-Monitor Protection**: global and per-connection presets (1080p, 720p, 900p, 1440p, 4K, phone-native, or custom), with a single-monitor lock that stops the remote Windows host rearranging desktop icons across secondary displays. "Keep native size" preserves the real desktop resolution and lets you scroll, rather than squashing it into the phone's aspect ratio.
+- **Checks before it switches apps**: a pre-flight reachability check tells you "your PC is asleep" in plain words, instead of leaving Remote Desktop to spin for thirty seconds and emit `0x204`. Offers to send a Wake-on-LAN signal right there — supporting both local subnet broadcast on Wi-Fi and unicast Wake-on-LAN across cellular/WAN.
+- **Stealth Port Knocking**: Built-in HTTP GET and dual-stack raw TCP SYN knock engine (configurable port and delay) to open dynamic perimeter firewall rules (e.g. MikroTik `action=add-src-to-address-list`) before RDP pre-flight checks and hand-off.
+- **Resolution & Multi-Monitor Desktop Protection**: streamlined resolution options (1080p Standard Landscape [Default], Multi-Monitor Spanning, or Custom Resolution), with single-monitor lock and automatic landscape pre-rotation that prevents external RDP clients from negotiating portrait viewport dimensions (e.g., 1080x1920). This guarantees the remote Windows host does not squash open windows or scramble multi-monitor desktop icons, while smart-scrolling (`smart sizing:i:1`) lets you pan and zoom across the full 1080p desktop from your phone. For complete protection in Microsoft Remote Desktop (Windows App), configure **Settings → Display → Orientation: Lock to landscape** and **Display resolution: 1920 x 1080**.
 - **Your vault lives only on the phone**: uninstalling the app deletes it. Settings has a one-tap **Share backup** (Quick Share, Drive, email) of the still-encrypted vault, and the app reminds you when there are unbacked-up changes.
 
 ## Android Installation & Zero-Clipboard Setup Guide
@@ -150,26 +152,41 @@ To verify the installed version details:
 adb shell dumpsys package com.rdpvault.app | findstr /C:"versionName" /C:"versionCode"
 ```
 
-#### Step 7: Grant Auto-Type Accessibility Service via ADB (Zero-Click Bypass)
-Android 13+ restricts accessibility services on sideloaded apps. You can bypass all restricted setting menus instantly via ADB:
+#### Step 7: Grant Auto-Type Accessibility & Notification Permissions (Zero-Click Bypass)
+Android 13+ restricts accessibility services on sideloaded apps, and Android 14/15/16 suspends accessibility services after in-place APK updates. Run these commands to register, bind, and authorize the service cleanly:
+
 ```cmd
-adb shell settings put secure enabled_accessibility_services com.rdpvault.app/com.rdpvault.app.services.RdpAutoTypeService
+rem 1. Reset any stale/crashed service binding after APK update
+adb shell settings delete secure enabled_accessibility_services
+
+rem 2. Enable accessibility subsystem
 adb shell settings put secure accessibility_enabled 1
+
+rem 3. Register and bind RDP Vault Auto-Type
+adb shell settings put secure enabled_accessibility_services com.rdpvault.app/com.rdpvault.app.services.RdpAutoTypeService
+
+rem 4. Grant runtime notification permissions for foreground status
+adb shell pm grant com.rdpvault.app android.permission.POST_NOTIFICATIONS
 ```
 
 **Verification Check:**
 Run:
 ```cmd
-adb shell settings get secure enabled_accessibility_services
+adb shell dumpsys accessibility | findstr /C:"Bound services" /C:"Crashed services"
 ```
-Confirm the output contains `com.rdpvault.app/com.rdpvault.app.services.RdpAutoTypeService`.
+Confirm `Bound services:` contains `com.rdpvault.app.services.RdpAutoTypeService` and `Crashed services:` is empty `{}`.
 
 #### Step 8: Launch App & Final Verification
 Launch RDP Vault directly from ADB:
 ```cmd
-adb shell monkey -p com.rdpvault.app -c android.intent.category.LAUNCHER 1
+adb shell am start -n com.rdpvault.app/com.rdpvault.app.MainActivity
 ```
 The app will open on the device. Create or unlock your vault, configure biometric unlock, and connect securely.
+
+To monitor live diagnostic logs during connection, port knocking, and password injection:
+```cmd
+adb logcat -v time -s RDPVault RdpAutoTypeService
+```
 
 ---
 

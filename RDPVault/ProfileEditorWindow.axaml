@@ -1,234 +1,259 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="RDPVault.ProfileEditorWindow"
-        Title="Edit Profile" Width="520" Height="820"
+        Title="Edit Profile" Width="540" Height="680" MinWidth="480" MinHeight="500"
         Icon="avares://RDPVault/Assets/icon.ico"
         WindowStartupLocation="CenterOwner" CanResize="True"
-        Background="#13283E" Foreground="#EDEDED" FontFamily="Inter, Arial">
+        Background="#0E0E10" Foreground="#EDEDED" FontFamily="Inter, Arial">
+
     <Window.Styles>
-        <!-- High-contrast Input Fields with distinct boundaries -->
         <Style Selector="TextBox">
-            <Setter Property="Background" Value="#1C1E24"/>
-            <Setter Property="BorderBrush" Value="#4E5262"/>
-            <Setter Property="BorderThickness" Value="1.5"/>
-            <Setter Property="Foreground" Value="#F3F4F6"/>
-            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="Background" Value="#141417"/>
+            <Setter Property="BorderBrush" Value="#2E2E35"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Foreground" Value="#EDEDED"/>
+            <Setter Property="CornerRadius" Value="4"/>
             <Setter Property="Padding" Value="10,8"/>
         </Style>
         <Style Selector="TextBox:focus /template/ Border">
-            <Setter Property="BorderBrush" Value="#0078D4"/>
-            <Setter Property="Background" Value="#22252D"/>
+            <Setter Property="BorderBrush" Value="#005FB8"/>
+            <Setter Property="Background" Value="#1A1A22"/>
         </Style>
 
-        <!-- Dropdowns with crisp borders and high-contrast background -->
         <Style Selector="ComboBox">
-            <Setter Property="Background" Value="#1C1E24"/>
-            <Setter Property="BorderBrush" Value="#4E5262"/>
-            <Setter Property="BorderThickness" Value="1.5"/>
-            <Setter Property="Foreground" Value="#F3F4F6"/>
-            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="Background" Value="#141417"/>
+            <Setter Property="BorderBrush" Value="#2E2E35"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Foreground" Value="#EDEDED"/>
+            <Setter Property="CornerRadius" Value="4"/>
             <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="Cursor" Value="Hand"/>
         </Style>
         <Style Selector="ComboBox:pointerover /template/ Border">
-            <Setter Property="BorderBrush" Value="#70768C"/>
-            <Setter Property="Background" Value="#252831"/>
+            <Setter Property="BorderBrush" Value="#454550"/>
+            <Setter Property="Background" Value="#1E1E24"/>
         </Style>
         <Style Selector="ComboBox:focus /template/ Border">
-            <Setter Property="BorderBrush" Value="#0078D4"/>
+            <Setter Property="BorderBrush" Value="#005FB8"/>
         </Style>
         <Style Selector="ComboBoxItem">
-            <Setter Property="Background" Value="#1C1E24"/>
-            <Setter Property="Foreground" Value="#F3F4F6"/>
+            <Setter Property="Background" Value="#141417"/>
+            <Setter Property="Foreground" Value="#EDEDED"/>
             <Setter Property="Padding" Value="10,8"/>
         </Style>
         <Style Selector="ComboBoxItem:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="#2E323D"/>
+            <Setter Property="Background" Value="#1E1E26"/>
             <Setter Property="Foreground" Value="#FFFFFF"/>
         </Style>
 
-        <!-- Buttons with distinct outlines and tactile feedback -->
         <Style Selector="Button">
-            <Setter Property="Background" Value="#282A34"/>
-            <Setter Property="Foreground" Value="#FFFFFF"/>
-            <Setter Property="BorderBrush" Value="#55596D"/>
-            <Setter Property="BorderThickness" Value="1.5"/>
-            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="Background" Value="#1A1A1E"/>
+            <Setter Property="Foreground" Value="#EDEDED"/>
+            <Setter Property="BorderBrush" Value="#2E2E35"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="4"/>
             <Setter Property="Padding" Value="16,8"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor" Value="Hand"/>
         </Style>
         <Style Selector="Button:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="#363946"/>
-            <Setter Property="BorderBrush" Value="#70758F"/>
+            <Setter Property="Background" Value="#2A2A30"/>
+            <Setter Property="BorderBrush" Value="#454550"/>
         </Style>
         <Style Selector="Button.Accent">
-            <Setter Property="Background" Value="#0066CC"/>
-            <Setter Property="BorderBrush" Value="#1A82E2"/>
+            <Setter Property="Background" Value="#005FB8"/>
+            <Setter Property="BorderBrush" Value="#006CD0"/>
             <Setter Property="Foreground" Value="#FFFFFF"/>
         </Style>
         <Style Selector="Button.Accent:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="#1075DC"/>
-            <Setter Property="BorderBrush" Value="#3894F0"/>
+            <Setter Property="Background" Value="#006CD0"/>
+            <Setter Property="BorderBrush" Value="#007AE8"/>
         </Style>
 
-        <!-- CheckBoxes with clear spacing and contrast -->
         <Style Selector="CheckBox">
-            <Setter Property="Foreground" Value="#F3F4F6"/>
+            <Setter Property="Foreground" Value="#EDEDED"/>
             <Setter Property="Padding" Value="8,4"/>
+            <Setter Property="Cursor" Value="Hand"/>
         </Style>
     </Window.Styles>
 
-    <ScrollViewer>
-    <StackPanel Margin="24" Spacing="10">
-        <TextBlock Text="PROFILE SETTINGS" FontSize="18" FontWeight="Bold" LetterSpacing="1" Margin="0,0,0,6"/>
+    <Grid RowDefinitions="*,Auto">
+        <ScrollViewer Grid.Row="0">
+            <StackPanel Margin="24" Spacing="10">
+                <TextBlock Text="PROFILE SETTINGS" FontSize="18" FontWeight="Bold" LetterSpacing="1" Margin="0,0,0,6"/>
 
-        <TextBlock Text="Display name" FontSize="13" Foreground="#9DA3AE"/>
-        <TextBox Name="TxtName" Watermark="e.g. Production Server"/>
+                <TextBlock Text="Display name *" FontSize="13" Foreground="#8A8A93"/>
+                <TextBox Name="TxtName" Watermark="e.g. Production Server" AutomationProperties.Name="Profile Display Name"/>
 
-        <Grid ColumnDefinitions="*,10,120">
-            <StackPanel Grid.Column="0" Spacing="4">
-                <TextBlock Text="Host / IP address" FontSize="13" Foreground="#9DA3AE"/>
-                <TextBox Name="TxtHost" Watermark="e.g. 192.168.1.100"/>
-            </StackPanel>
-            <StackPanel Grid.Column="2" Spacing="4">
-                <TextBlock Text="Port" FontSize="13" Foreground="#9DA3AE"/>
-                <TextBox Name="TxtPort" Watermark="3389"/>
-            </StackPanel>
-        </Grid>
-
-        <TextBlock Text="Username" FontSize="13" Foreground="#9DA3AE"/>
-        <TextBox Name="TxtUsername" Watermark="Administrator"/>
-
-        <TextBlock Text="Password (leave empty to be asked at connect time)" FontSize="13" Foreground="#9DA3AE"/>
-        <TextBox Name="TxtPassword" PasswordChar="•" Watermark="Password"/>
-        <CheckBox Name="ChkShowPassword" Content="Show password" FontSize="12" Click="ChkShowPassword_Click"/>
-
-        <TextBlock Text="RD Gateway host (optional)" FontSize="13" Foreground="#9DA3AE" Margin="0,6,0,0"/>
-        <TextBox Name="TxtGateway" Watermark="gateway.example.com"/>
-
-        <!-- Oversimplified Single Display & Monitor Mode -->
-        <TextBlock Text="Display &amp; Monitor Mode" FontSize="13" FontWeight="SemiBold" Foreground="#9DA3AE" Margin="0,8,0,0"/>
-        <ComboBox Name="CmbDisplayMode" HorizontalAlignment="Stretch">
-            <ComboBoxItem Content="Default (Follow Global Vault Settings)"/>
-            <ComboBoxItem Content="Use All Monitors (Multi-monitor Full Screen)"/>
-            <ComboBoxItem Content="Single Monitor (Full Screen)"/>
-            <ComboBoxItem Content="Windowed - 1920 x 1080"/>
-            <ComboBoxItem Content="Windowed - 1600 x 900"/>
-            <ComboBoxItem Content="Windowed - 1366 x 768"/>
-            <ComboBoxItem Content="Windowed - 1280 x 1024"/>
-            <ComboBoxItem Content="Windowed - 1280 x 800"/>
-            <ComboBoxItem Content="Windowed - 1024 x 768"/>
-            <ComboBoxItem Content="Windowed - 800 x 600"/>
-        </ComboBox>
-        <TextBlock Name="TxtDisplayModeDesc" Text="" FontSize="11" Foreground="#7D8392" TextWrapping="Wrap" Margin="2,2,0,0"/>
-
-        <!-- Certificate & Identity Warnings Override -->
-        <TextBlock Text="Certificate &amp; identity warnings override" FontSize="13" Foreground="#9DA3AE" Margin="0,6,0,0"/>
-        <ComboBox Name="CmbCertWarnings" HorizontalAlignment="Stretch">
-            <ComboBoxItem Content="Default (Follow Global Vault Settings)"/>
-            <ComboBoxItem Content="Always Suppress Warnings (Ignore untrusted certs)"/>
-            <ComboBoxItem Content="Always Show Warnings (Ask before connecting)"/>
-        </ComboBox>
-
-        <!-- Wake-on-LAN (WOL) -->
-        <Border Background="#16181F" BorderBrush="#3F4352" BorderThickness="1.5" CornerRadius="6"
-                Padding="12" Margin="0,10,0,0">
-            <StackPanel Spacing="8">
-                <TextBlock Text="WAKE-ON-LAN (WOL)" FontSize="13" FontWeight="Bold" Foreground="#F3F4F6"/>
-                <CheckBox Name="ChkEnableWol">
-                    <TextBlock Text="Send Wake-on-LAN magic packet before connecting" Foreground="#F3F4F6"/>
-                </CheckBox>
-                <StackPanel Name="PnlWolDetails" Spacing="8">
-                    <StackPanel Spacing="4">
-                        <TextBlock Text="Target MAC address (e.g. 00:11:22:33:44:55)" FontSize="12" Foreground="#9DA3AE"/>
-                        <TextBox Name="TxtWolMac" Watermark="00:11:22:33:44:55"
-                                 ToolTip.Tip="Accepts any MAC format. Automatically formatted on exit."/>
+                <Grid ColumnDefinitions="*,10,120">
+                    <StackPanel Grid.Column="0" Spacing="4">
+                        <TextBlock Text="Host / IP address *" FontSize="13" Foreground="#8A8A93"/>
+                        <TextBox Name="TxtHost" Watermark="e.g. 192.168.1.100" AutomationProperties.Name="Host or IP address"/>
                     </StackPanel>
-                    <Grid ColumnDefinitions="*,10,80,10,100">
-                        <StackPanel Grid.Column="0" Spacing="4">
-                            <TextBlock Text="Broadcast IP" FontSize="12" Foreground="#9DA3AE"/>
-                            <TextBox Name="TxtWolBroadcast" Watermark="Auto (Host &amp; all subnets)"
-                                     ToolTip.Tip="Target IP or broadcast. Default sends to remote Host IP/hostname, all local network adapters, and 255.255.255.255."/>
-                        </StackPanel>
-                        <StackPanel Grid.Column="2" Spacing="4">
-                            <TextBlock Text="Port" FontSize="12" Foreground="#9DA3AE"/>
-                            <TextBox Name="TxtWolPort" Watermark="9"
-                                     ToolTip.Tip="Primary UDP port (default: 9)."/>
-                        </StackPanel>
-                        <StackPanel Grid.Column="4" Spacing="4">
-                            <TextBlock Text="Wait delay (sec)" FontSize="12" Foreground="#9DA3AE"/>
-                            <TextBox Name="TxtWolWait" Watermark="5"
-                                     ToolTip.Tip="Seconds to wait after sending WOL magic packet before launching Remote Desktop (0-300)."/>
-                        </StackPanel>
-                    </Grid>
+                    <StackPanel Grid.Column="2" Spacing="4">
+                        <TextBlock Text="Port" FontSize="13" Foreground="#8A8A93"/>
+                        <TextBox Name="TxtPort" Watermark="3389" AutomationProperties.Name="RDP Port"/>
+                    </StackPanel>
+                </Grid>
+
+                <TextBlock Text="Username" FontSize="13" Foreground="#8A8A93"/>
+                <TextBox Name="TxtUsername" Watermark="Administrator" AutomationProperties.Name="Username"/>
+
+                <TextBlock Text="Password (leave empty to be asked at connect time)" FontSize="13" Foreground="#8A8A93"/>
+                <TextBox Name="TxtPassword" PasswordChar="•" Watermark="Password" AutomationProperties.Name="Password"/>
+                <CheckBox Name="ChkShowPassword" Content="Show password" FontSize="12" Click="ChkShowPassword_Click"
+                          AutomationProperties.Name="Show or hide password"/>
+
+                <!-- Advanced Network & Hardware Options (Collapsible) -->
+                <Expander Header="Advanced Network &amp; Display Options" IsExpanded="False" Margin="0,10,0,0">
+                    <StackPanel Spacing="10" Margin="0,8,0,0">
+                        <!-- RD Gateway host -->
+                        <TextBlock Text="RD Gateway host (optional)" FontSize="13" Foreground="#8A8A93"/>
+                        <TextBox Name="TxtGateway" Watermark="gateway.example.com" AutomationProperties.Name="RD Gateway host"/>
+
+                        <!-- Display & Monitor Mode -->
+                        <TextBlock Text="Display &amp; Monitor Mode" FontSize="13" FontWeight="SemiBold" Foreground="#8A8A93" Margin="0,4,0,0"/>
+                        <ComboBox Name="CmbDisplayMode" HorizontalAlignment="Stretch" AutomationProperties.Name="Display and Monitor Mode">
+                            <ComboBoxItem Content="1080p Standard (1920 x 1080 Full Screen) [Recommended]"/>
+                            <ComboBoxItem Content="Multi-Monitor Spanning (Use all physical displays)"/>
+                            <ComboBoxItem Content="Custom Resolution..."/>
+                        </ComboBox>
+                        <TextBlock Name="TxtDisplayModeDesc" Text="" FontSize="11" Foreground="#8A8A93" TextWrapping="Wrap" Margin="2,2,0,0"/>
+
+                        <!-- Custom Resolution Inputs -->
+                        <Grid Name="PnlCustomRes" ColumnDefinitions="*,10,*" IsVisible="False" Margin="0,4,0,0">
+                            <StackPanel Grid.Column="0" Spacing="4">
+                                <TextBlock Text="Custom Width (pixels)" FontSize="12" Foreground="#8A8A93"/>
+                                <TextBox Name="TxtCustomWidth" Watermark="1920" AutomationProperties.Name="Custom Width"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="2" Spacing="4">
+                                <TextBlock Text="Custom Height (pixels)" FontSize="12" Foreground="#8A8A93"/>
+                                <TextBox Name="TxtCustomHeight" Watermark="1080" AutomationProperties.Name="Custom Height"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <!-- Certificate & Identity Warnings Override -->
+                        <TextBlock Text="Certificate &amp; identity warnings override" FontSize="13" Foreground="#8A8A93" Margin="0,4,0,0"/>
+                        <ComboBox Name="CmbCertWarnings" HorizontalAlignment="Stretch" AutomationProperties.Name="Certificate warnings override">
+                            <ComboBoxItem Content="Default (Follow Global Vault Settings)"/>
+                            <ComboBoxItem Content="Always Suppress Warnings (Ignore untrusted certs)"/>
+                            <ComboBoxItem Content="Always Show Warnings (Ask before connecting)"/>
+                        </ComboBox>
+
+                        <!-- Wake-on-LAN (WOL) with collapsible details -->
+                        <Border Background="#141417" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="6"
+                                Padding="12" Margin="0,4,0,0">
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="WAKE-ON-LAN (WOL)" FontSize="13" FontWeight="Bold" Foreground="#EDEDED"/>
+                                <CheckBox Name="ChkEnableWol" AutomationProperties.Name="Enable Wake-on-LAN">
+                                    <TextBlock Text="Send Wake-on-LAN magic packet before connecting" Foreground="#EDEDED"/>
+                                </CheckBox>
+                                <StackPanel Name="PnlWolDetails" Spacing="8" IsVisible="False">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="Target MAC address (e.g. 00:11:22:33:44:55)" FontSize="12" Foreground="#8A8A93"/>
+                                        <TextBox Name="TxtWolMac" Watermark="00:11:22:33:44:55"
+                                                 ToolTip.Tip="Accepts any MAC format. Automatically formatted on exit."
+                                                 AutomationProperties.Name="WOL Target MAC address"/>
+                                    </StackPanel>
+                                    <Grid ColumnDefinitions="*,10,80,10,100">
+                                        <StackPanel Grid.Column="0" Spacing="4">
+                                            <TextBlock Text="Broadcast IP" FontSize="12" Foreground="#8A8A93"/>
+                                            <TextBox Name="TxtWolBroadcast" Watermark="Auto (Host &amp; all subnets)"
+                                                     ToolTip.Tip="Target IP or broadcast. Default sends to remote Host IP/hostname, all local network adapters, and 255.255.255.255."
+                                                     AutomationProperties.Name="WOL Broadcast IP"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2" Spacing="4">
+                                            <TextBlock Text="Port" FontSize="12" Foreground="#8A8A93"/>
+                                            <TextBox Name="TxtWolPort" Watermark="9"
+                                                     ToolTip.Tip="Primary UDP port (default: 9)."
+                                                     AutomationProperties.Name="WOL Port"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="4" Spacing="4">
+                                            <TextBlock Text="Wait delay (sec)" FontSize="12" Foreground="#8A8A93"/>
+                                            <TextBox Name="TxtWolWait" Watermark="5"
+                                                     ToolTip.Tip="Seconds to wait after sending WOL magic packet before launching Remote Desktop (0-300)."
+                                                     AutomationProperties.Name="WOL Wait delay"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Port Knocking with collapsible details -->
+                        <Border Background="#141417" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,4,0,0">
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="PORT KNOCKING" FontSize="13" FontWeight="Bold" Foreground="#EDEDED"/>
+                                <CheckBox Name="ChkEnableKnock" Content="Enable Port Knocking (send packet before connecting)"
+                                          AutomationProperties.Name="Enable Port Knocking"/>
+                                <StackPanel Name="PnlKnockDetails" Spacing="8" IsVisible="False">
+                                    <TextBlock Text="Knock Protocol" FontSize="12" Foreground="#8A8A93"/>
+                                    <ComboBox Name="CmbKnockProtocol" HorizontalAlignment="Stretch" AutomationProperties.Name="Knock Protocol">
+                                        <ComboBoxItem Content="ICMP (Magic Packet)"/>
+                                        <ComboBoxItem Content="TCP (Knock Port)"/>
+                                    </ComboBox>
+
+                                    <!-- ICMP Options -->
+                                    <StackPanel Name="PnlKnockIcmp" Spacing="6">
+                                        <TextBlock Text="ICMP Magic Packet Payload (Hex Bytes)" FontSize="12" Foreground="#8A8A93"/>
+                                        <TextBox Name="TxtIcmpSignature" Watermark="Generate or enter hexadecimal bytes" TextWrapping="Wrap"
+                                                 AutomationProperties.Name="ICMP Signature"/>
+                                        <Button Name="BtnGenerateIcmpSignature" Content="Generate unique signature"
+                                                AutomationProperties.Name="Generate unique ICMP signature"/>
+                                        <TextBlock Text="Sends an out-of-the-ordinary ICMP payload to the destination IP before connecting." FontSize="11" Foreground="#8A8A93" TextWrapping="Wrap"/>
+                                    </StackPanel>
+
+                                    <!-- TCP Options -->
+                                    <StackPanel Name="PnlKnockTcp" Spacing="6" IsVisible="False">
+                                        <TextBlock Text="TCP Knock Port" FontSize="12" Foreground="#8A8A93"/>
+                                        <TextBox Name="TxtKnockTcpPort" Watermark="7777" ToolTip.Tip="Custom TCP port to send a knock connection attempt to (1-65535)."
+                                                 AutomationProperties.Name="TCP Knock Port"/>
+                                        <TextBlock Text="Sends a TCP connection knock to destination IP on this port before connecting." FontSize="11" Foreground="#8A8A93" TextWrapping="Wrap"/>
+                                    </StackPanel>
+
+                                    <!-- Delay timer -->
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="Delay before RDP session (seconds)" FontSize="12" Foreground="#8A8A93"/>
+                                        <TextBox Name="TxtKnockDelay" Watermark="2" ToolTip.Tip="Seconds to wait after knock before initiating RDP session (default: 2)."
+                                                 AutomationProperties.Name="Knock Delay"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Local resources -->
+                        <TextBlock Text="Local resources to share with the remote PC" FontSize="13" FontWeight="Bold"
+                                   Foreground="#8A8A93" Margin="0,4,0,0"/>
+                        <WrapPanel Orientation="Horizontal" Margin="0,4,0,0">
+                            <CheckBox Name="ChkClipboard" Content="Clipboard" Margin="0,0,15,5"
+                                      ToolTip.Tip="Allow clipboard sharing (copy/paste) between local and remote PC."
+                                      AutomationProperties.Name="Share Clipboard"/>
+                            <CheckBox Name="ChkDrives" Content="Drives" Margin="0,0,15,5"
+                                      ToolTip.Tip="Share local drives with the remote PC."
+                                      AutomationProperties.Name="Share Drives"/>
+                            <CheckBox Name="ChkPrinters" Content="Printers" Margin="0,0,15,5"
+                                      ToolTip.Tip="Share local printers with the remote PC."
+                                      AutomationProperties.Name="Share Printers"/>
+                            <CheckBox Name="ChkSmartCards" Content="Smart cards" Margin="0,0,15,5"
+                                      ToolTip.Tip="Share smart cards and security keys with the remote PC."
+                                      AutomationProperties.Name="Share Smart Cards"/>
+                        </WrapPanel>
+                    </StackPanel>
+                </Expander>
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- Sticky Bottom Action Bar with always-visible error readout and keyboard shortcuts -->
+        <Border Grid.Row="1" Background="#141417" BorderBrush="#2E2E35" BorderThickness="0,1,0,0" Padding="20,12">
+            <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Grid.Column="0" Name="TxtError" Foreground="#FF6B6B" FontSize="12"
+                           IsVisible="False" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10" VerticalAlignment="Center">
+                    <Button Name="BtnCancel" Content="Cancel" Click="BtnCancel_Click" IsCancel="True"
+                            AutomationProperties.Name="Cancel profile changes"/>
+                    <Button Name="BtnSave" Content="Save Profile" Classes="Accent" Click="BtnSave_Click" IsDefault="True"
+                            AutomationProperties.Name="Save profile"/>
                 </StackPanel>
-            </StackPanel>
+            </Grid>
         </Border>
-
-        <!-- Port Knocking -->
-        <Border Background="#16181F" BorderBrush="#3F4352" BorderThickness="1.5" CornerRadius="6" Padding="12" Margin="0,10,0,0">
-            <StackPanel Spacing="8">
-                <TextBlock Text="PORT KNOCKING" FontSize="13" FontWeight="Bold" Foreground="#F3F4F6"/>
-                <CheckBox Name="ChkEnableKnock" Content="Enable Port Knocking (send packet before connecting)"/>
-                <StackPanel Name="PnlKnockDetails" Spacing="8" IsVisible="False">
-                    <TextBlock Text="Knock Protocol" FontSize="12" Foreground="#9DA3AE"/>
-                    <ComboBox Name="CmbKnockProtocol" HorizontalAlignment="Stretch">
-                        <ComboBoxItem Content="ICMP (Magic Packet)"/>
-                        <ComboBoxItem Content="TCP (Knock Port)"/>
-                    </ComboBox>
-
-                    <!-- ICMP Options -->
-                    <StackPanel Name="PnlKnockIcmp" Spacing="6">
-                        <TextBlock Text="ICMP Magic Packet Payload (Hex Bytes)" FontSize="12" Foreground="#9DA3AE"/>
-                        <TextBox Name="TxtIcmpSignature" Watermark="Generate or enter hexadecimal bytes" TextWrapping="Wrap"/>
-                        <Button Name="BtnGenerateIcmpSignature" Content="Generate unique signature"/>
-                        <TextBlock Text="Sends an out-of-the-ordinary ICMP payload to the destination IP before connecting." FontSize="11" Foreground="#7D8392" TextWrapping="Wrap"/>
-                    </StackPanel>
-
-                    <!-- TCP Options -->
-                    <StackPanel Name="PnlKnockTcp" Spacing="6" IsVisible="False">
-                        <TextBlock Text="TCP Knock Port" FontSize="12" Foreground="#9DA3AE"/>
-                        <TextBox Name="TxtKnockTcpPort" Watermark="7777" ToolTip.Tip="Custom TCP port to send a knock connection attempt to (1-65535)."/>
-                        <TextBlock Text="Sends a TCP connection knock to destination IP on this port before connecting." FontSize="11" Foreground="#7D8392" TextWrapping="Wrap"/>
-                    </StackPanel>
-
-                    <!-- Delay timer -->
-                    <StackPanel Spacing="4">
-                        <TextBlock Text="Delay before RDP session (seconds)" FontSize="12" Foreground="#9DA3AE"/>
-                        <TextBox Name="TxtKnockDelay" Watermark="2" ToolTip.Tip="Seconds to wait after knock before initiating RDP session (default: 2)."/>
-                    </StackPanel>
-                </StackPanel>
-            </StackPanel>
-        </Border>
-
-        <!-- Local resources -->
-        <TextBlock Text="Local resources to share with the remote PC" FontSize="13" FontWeight="Bold"
-                   Foreground="#9DA3AE" Margin="0,10,0,0"/>
-        <WrapPanel Orientation="Horizontal" Margin="0,4,0,0">
-            <CheckBox Name="ChkClipboard" Content="Clipboard" Margin="0,0,15,5"
-                      ToolTip.Tip="Allow clipboard sharing (copy/paste) between local and remote PC."/>
-            <CheckBox Name="ChkDrives" Content="Drives" Margin="0,0,15,5"/>
-            <CheckBox Name="ChkPrinters" Content="Printers" Margin="0,0,15,5"/>
-            <CheckBox Name="ChkSmartCards" Content="Smart cards" Margin="0,0,15,5"/>
-        </WrapPanel>
-
-        <Border Background="#16181F" BorderBrush="#3F4352" BorderThickness="1.5" CornerRadius="6"
-                Padding="10" Margin="0,8,0,0">
-            <StackPanel Spacing="4">
-                <CheckBox Name="ChkAllowUnverified">
-                    <TextBlock Text="Never check this server's identity (allow unverified server)"
-                               TextWrapping="Wrap" Foreground="#F3F4F6"/>
-                </CheckBox>
-                <TextBlock Text="When enabled, bypasses server identity checks entirely on connection."
-                           FontSize="11" Foreground="#7D8392" TextWrapping="Wrap"/>
-            </StackPanel>
-        </Border>
-
-        <TextBlock Name="TxtError" Foreground="#FF5555" FontSize="12" IsVisible="False" TextWrapping="Wrap"/>
-
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10" Margin="0,14,0,0">
-            <Button Name="BtnCancel" Content="Cancel" Click="BtnCancel_Click"/>
-            <Button Name="BtnSave" Content="Save Profile" Classes="Accent" Click="BtnSave_Click"/>
-        </StackPanel>
-    </StackPanel>
-    </ScrollViewer>
+    </Grid>
 </Window>

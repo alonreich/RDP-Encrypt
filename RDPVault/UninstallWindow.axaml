@@ -1,10 +1,10 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="RDPVault.UninstallWindow"
-        Title="RDP Vault Uninstaller" Width="600" Height="440"
+        Title="RDP Vault Uninstaller" Width="600" Height="450"
         Icon="avares://RDPVault/Assets/icon.ico"
         WindowStartupLocation="CenterScreen" CanResize="False"
-        Background="#13283E" Foreground="#EDEDED" FontFamily="Inter, Arial"
+        Background="#0E0E10" Foreground="#EDEDED" FontFamily="Inter, Arial"
         Topmost="True">
 
     <Window.Styles>
@@ -15,6 +15,7 @@
             <Setter Property="CornerRadius" Value="4"/>
             <Setter Property="Padding" Value="16,10"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor" Value="Hand"/>
         </Style>
         <Style Selector="Button:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="#2A2A30"/>
@@ -32,13 +33,14 @@
     <Grid Margin="30">
         <!-- CHOICE PANEL - issue #1 / #12 -->
         <StackPanel Name="PnlChoice" Spacing="14" VerticalAlignment="Center">
+            <TextBlock Text="STEP 1 OF 2: SELECT UNINSTALL OPTION" FontSize="11" FontWeight="Bold" Foreground="#005FB8" HorizontalAlignment="Center" LetterSpacing="1"/>
             <TextBlock Text="UNINSTALL RDP VAULT" FontSize="20" FontWeight="Bold"
                        HorizontalAlignment="Center" LetterSpacing="1"/>
             <TextBlock Name="TxtVaultNotice" FontSize="13" Foreground="#8A8A93" TextWrapping="Wrap"
                        TextAlignment="Center"/>
 
             <Button Name="BtnKeep" Classes="Accent" HorizontalAlignment="Stretch"
-                    HorizontalContentAlignment="Center" Click="BtnKeep_Click">
+                    HorizontalContentAlignment="Center" Click="BtnKeep_Click" AutomationProperties.Name="Uninstall and keep vault">
                 <StackPanel Spacing="4">
                     <TextBlock Text="Uninstall and keep my vault" FontSize="15" FontWeight="Bold"
                                HorizontalAlignment="Center"/>
@@ -48,7 +50,7 @@
             </Button>
 
             <Button Name="BtnErase" Classes="Danger" HorizontalAlignment="Stretch"
-                    HorizontalContentAlignment="Center" Click="BtnErase_Click">
+                    HorizontalContentAlignment="Center" Click="BtnErase_Click" AutomationProperties.Name="Uninstall and erase vault">
                 <StackPanel Spacing="4">
                     <TextBlock Text="Uninstall and erase my vault" FontSize="15" FontWeight="Bold"
                                HorizontalAlignment="Center"/>
@@ -58,22 +60,23 @@
                 </StackPanel>
             </Button>
 
-            <Button Name="BtnCancel" Content="Cancel" HorizontalAlignment="Center" Click="BtnCancel_Click"/>
+            <Button Name="BtnCancel" Content="Cancel" HorizontalAlignment="Center" Click="BtnCancel_Click" IsCancel="True" AutomationProperties.Name="Cancel"/>
         </StackPanel>
 
         <!-- PROGRESS PANEL -->
         <StackPanel Name="PnlProgress" Spacing="16" VerticalAlignment="Center" IsVisible="False">
+            <TextBlock Text="STEP 2 OF 2: REMOVAL PROGRESS" FontSize="11" FontWeight="Bold" Foreground="IndianRed" HorizontalAlignment="Center" LetterSpacing="1"/>
             <TextBlock Text="UNINSTALLING RDP VAULT" FontSize="18" FontWeight="Bold"
                        HorizontalAlignment="Center" LetterSpacing="1" Foreground="IndianRed"/>
             <Border Background="#121215" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="4"
-                    Height="210" Padding="10">
+                    Height="200" Padding="10">
                 <ScrollViewer Name="ScrollLog">
                     <TextBlock Name="TxtLog" FontSize="12" FontFamily="Consolas" Foreground="#8A8A93" TextWrapping="Wrap"/>
                 </ScrollViewer>
             </Border>
             <ProgressBar Name="ProgInstall" IsIndeterminate="True" Height="4" Margin="0,6,0,0" Foreground="IndianRed"/>
             <Button Name="BtnClose" Content="Close" Classes="Accent" HorizontalAlignment="Center"
-                    IsVisible="False" Click="BtnClose_Click"/>
+                    IsVisible="False" Click="BtnClose_Click" AutomationProperties.Name="Close"/>
         </StackPanel>
     </Grid>
 </Window>

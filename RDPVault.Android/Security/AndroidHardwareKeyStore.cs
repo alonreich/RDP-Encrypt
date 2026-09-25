@@ -201,6 +201,32 @@ public static class AndroidHardwareKeyStore
         return cipher;
     }
 
+    public static string GetExceptionDetails(Exception? ex)
+    {
+        if (ex == null) return "Unknown error";
+        for (Exception? e = ex; e != null; e = e.InnerException)
+        {
+            if (e is Java.Lang.Throwable jt)
+            {
+                string javaClass = jt.Class?.SimpleName ?? jt.Class?.Name ?? "";
+                string javaMsg = jt.LocalizedMessage ?? jt.Message ?? "";
+                if (!string.IsNullOrWhiteSpace(javaMsg))
+                {
+                    return !string.IsNullOrWhiteSpace(javaClass) ? $"{javaClass}: {javaMsg}" : javaMsg;
+                }
+                if (!string.IsNullOrWhiteSpace(javaClass))
+                {
+                    return javaClass;
+                }
+            }
+            if (!string.IsNullOrWhiteSpace(e.Message) && !e.Message.Contains("Exception of type", StringComparison.OrdinalIgnoreCase))
+            {
+                return e.Message;
+            }
+        }
+        return ex.Message;
+    }
+
     /// <summary>
     /// True when the exception means "this hardware key is gone forever" (new fingerprint
     /// enrolled, screen lock removed, Keymaster rotated by an OS update).
@@ -209,14 +235,36 @@ public static class AndroidHardwareKeyStore
     /// </summary>
     public static bool IsKeyInvalidated(Exception? ex)
     {
+        if (ex == null) return false;
+
         for (Exception? e = ex; e != null; e = e.InnerException)
         {
             string typeName = e.GetType().FullName ?? "";
             string msg = e.Message ?? "";
-            if (typeName.Contains("KeyPermanentlyInvalidated", StringComparison.OrdinalIgnoreCase)) return true;
-            if (typeName.Contains("UnrecoverableKey", StringComparison.OrdinalIgnoreCase)) return true;
-            if (msg.Contains("Key permanently invalidated", StringComparison.OrdinalIgnoreCase)) return true;
-            if (msg.Contains("KeyPermanentlyInvalidated", StringComparison.OrdinalIgnoreCase)) return true;
+            string str = e.ToString() ?? "";
+            string javaClass = (e is Java.Lang.Throwable jt) ? (jt.Class?.Name ?? "") : "";
+
+            if (typeName.Contains("KeyPermanentlyInvalidated", StringComparison.OrdinalIgnoreCase) ||
+                typeName.Contains("InvalidKey", StringComparison.OrdinalIgnoreCase) ||
+                typeName.Contains("UnrecoverableKey", StringComparison.OrdinalIgnoreCase) ||
+                typeName.Contains("CryptographicException", StringComparison.OrdinalIgnoreCase) ||
+                javaClass.Contains("KeyPermanentlyInvalidated", StringComparison.OrdinalIgnoreCase) ||
+                javaClass.Contains("UnrecoverableKey", StringComparison.OrdinalIgnoreCase) ||
+                javaClass.Contains("InvalidKeyException", StringComparison.OrdinalIgnoreCase) ||
+                javaClass.Contains("KeyStoreException", StringComparison.OrdinalIgnoreCase) ||
+                javaClass.Contains("AEADBadTagException", StringComparison.OrdinalIgnoreCase) ||
+                javaClass.Contains("BadPaddingException", StringComparison.OrdinalIgnoreCase) ||
+                javaClass.Contains("IllegalBlockSizeException", StringComparison.OrdinalIgnoreCase) ||
+                str.Contains("KeyPermanentlyInvalidated", StringComparison.OrdinalIgnoreCase) ||
+                str.Contains("Key permanently invalidated", StringComparison.OrdinalIgnoreCase) ||
+                str.Contains("UnrecoverableKey", StringComparison.OrdinalIgnoreCase) ||
+                str.Contains("InvalidKeyException", StringComparison.OrdinalIgnoreCase) ||
+                str.Contains("AEADBadTag", StringComparison.OrdinalIgnoreCase) ||
+                str.Contains("BadPadding", StringComparison.OrdinalIgnoreCase) ||
+                msg.Contains("Key permanently invalidated", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
         }
         return false;
     }
@@ -346,7 +394,7 @@ public static class AndroidHardwareKeyStore
         }
         catch (Exception ex)
         {
-            return (false, null, ex.Message, false, IsKeyInvalidated(ex));
+            return (false, null, GetExceptionDetails(ex), false, true);
         }
 
         var result = await AuthenticateWithCryptoAsync(activity, title, subtitle, negativeButtonText, cipher)
@@ -364,7 +412,7 @@ public static class AndroidHardwareKeyStore
         }
         catch (Exception ex)
         {
-            return (false, null, ex.Message, false, IsKeyInvalidated(ex));
+            return (false, null, GetExceptionDetails(ex), false, true);
         }
     }
 
@@ -422,8 +470,8 @@ public static class AndroidHardwareKeyStore
                 tcs.TrySetResult(new BiometricCryptoResult
                 {
                     Success = false,
-                    ErrorMessage = ex.Message,
-                    KeyPermanentlyInvalidated = IsKeyInvalidated(ex)
+                    ErrorMessage = GetExceptionDetails(ex),
+                    KeyPermanentlyInvalidated = true
                 });
             }
         });

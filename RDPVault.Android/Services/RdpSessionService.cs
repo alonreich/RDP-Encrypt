@@ -5,6 +5,7 @@ using Android.App;
 using Android.Content;
 using Android.OS;
 using AndroidX.Core.App;
+using RDPVault;
 using RDPVault.Android.Net;
 
 namespace RDPVault.Android.Services;
@@ -30,6 +31,8 @@ public class RdpSessionService : Service
     public const string ExtraProfileName = "com.rdpvault.extra.PROFILE_NAME";
     public const string ExtraProfileHost = "com.rdpvault.extra.PROFILE_HOST";
     public const string ExtraProfilePort = "com.rdpvault.extra.PROFILE_PORT";
+    public const string ExtraProfileGatewayHost = "com.rdpvault.extra.PROFILE_GATEWAY_HOST";
+    public const string ExtraProfileGatewayPort = "com.rdpvault.extra.PROFILE_GATEWAY_PORT";
 
     public const string ChannelId = "rdpvault_active_session";
     public const int NotificationId = 1001;
@@ -43,6 +46,8 @@ public class RdpSessionService : Service
     private string _sessionName = "";
     private string _sessionHost = "";
     private int _sessionPort = 3389;
+    private string _gatewayHost = "";
+    private int _gatewayPort = 443;
     private bool _isHandedOff;
     private bool _hostUnreachable;
     private bool _isStopping;
@@ -91,6 +96,8 @@ public class RdpSessionService : Service
             _sessionName = intent?.GetStringExtra(ExtraProfileName) ?? "Remote PC";
             _sessionHost = intent?.GetStringExtra(ExtraProfileHost) ?? "";
             _sessionPort = intent?.GetIntExtra(ExtraProfilePort, 3389) ?? 3389;
+            _gatewayHost = intent?.GetStringExtra(ExtraProfileGatewayHost) ?? "";
+            _gatewayPort = intent?.GetIntExtra(ExtraProfileGatewayPort, 443) ?? 443;
             BeginTracking();
             return StartCommandResult.Sticky;
         }
@@ -115,6 +122,17 @@ public class RdpSessionService : Service
         _sessionName = profile.Name;
         _sessionHost = profile.Host;
         _sessionPort = profile.Port > 0 ? profile.Port : 3389;
+        if (!string.IsNullOrWhiteSpace(profile.GatewayHost) &&
+            ConnectionEndpoint.TryParseGatewayAuthority(profile.GatewayHost, out var gwEp, out _))
+        {
+            _gatewayHost = gwEp.Host;
+            _gatewayPort = gwEp.Port;
+        }
+        else
+        {
+            _gatewayHost = "";
+            _gatewayPort = 443;
+        }
         BeginTracking();
     }
 
@@ -182,10 +200,34 @@ public class RdpSessionService : Service
         _probeCts = new CancellationTokenSource();
         var token = _probeCts.Token;
 
-        string? gateway = _activeProfile?.GatewayHost?.Trim();
-        bool useGateway = !string.IsNullOrEmpty(gateway);
-        string probeTarget = useGateway ? gateway! : _sessionHost;
-        int probePort = useGateway ? 443 : _sessionPort;
+        string probeTarget;
+        int probePort;
+
+        if (!string.IsNullOrWhiteSpace(_gatewayHost))
+        {
+            probeTarget = _gatewayHost;
+            probePort = _gatewayPort;
+        }
+        else if (_activeProfile != null && !string.IsNullOrWhiteSpace(_activeProfile.GatewayHost) &&
+                 ConnectionEndpoint.TryParseGatewayAuthority(_activeProfile.GatewayHost, out var parsedGw, out _))
+        {
+            probeTarget = parsedGw.Host;
+            probePort = parsedGw.Port;
+        }
+        else
+        {
+            if (ConnectionEndpoint.TryParse(_sessionHost, out var hostEp, out _, port: _sessionPort))
+            {
+                probeTarget = hostEp.Host;
+                probePort = hostEp.Port;
+            }
+            else
+            {
+                probeTarget = _sessionHost;
+                probePort = _sessionPort;
+            }
+        }
+
         if (string.IsNullOrWhiteSpace(probeTarget)) return;
 
         _ = Task.Run(async () =>

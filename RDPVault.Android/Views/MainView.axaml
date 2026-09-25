@@ -287,38 +287,30 @@
                            FontSize="12" Foreground="#2FBF71" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/>
             </Grid>
 
-            <!-- Remote Desktop hand-off banner. No dismiss control by design: while a
-                 hand-off is being tracked the user must always keep a one-tap route back. -->
-            <Border Grid.Row="1" Name="BannerActiveSession" Background="#162719" BorderBrush="#2FBF71" BorderThickness="1" CornerRadius="8" Padding="10,8" Margin="0,0,0,8" IsVisible="False">
-                <StackPanel Spacing="6">
-                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                        <TextBlock Name="TxtActiveSessionDot" Text="●" FontSize="12" Foreground="#2FBF71" VerticalAlignment="Center"/>
-                        <TextBlock Name="TxtActiveSessionHeading" Text="HANDED OFF TO REMOTE DESKTOP" FontSize="12" FontWeight="Bold" Foreground="#2FBF71" LetterSpacing="1" TextWrapping="Wrap"/>
+            <!-- Compact Active Session Bar -->
+            <Border Grid.Row="1" Name="BannerActiveSession" Background="#162719" BorderBrush="#2FBF71" BorderThickness="1" CornerRadius="6" Padding="10,6" Margin="0,0,0,8" IsVisible="False">
+                <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                    <TextBlock Grid.Column="0" Name="TxtActiveSessionDot" Text="● " FontSize="12" Foreground="#2FBF71" VerticalAlignment="Center"/>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock Name="TxtActiveSessionHeading" Text="Active Session" FontSize="11" FontWeight="Bold" Foreground="#2FBF71" IsVisible="False"/>
+                        <TextBlock Name="TxtActiveSessionDetails" Text="Connected to Remote PC" FontSize="13" Foreground="#FFFFFF" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Name="TxtActiveSessionSub" Text="" IsVisible="False"/>
                     </StackPanel>
-                    <TextBlock Name="TxtActiveSessionDetails" Text="Connected to Remote PC" FontSize="13" Foreground="#FFFFFF" TextWrapping="Wrap"/>
-                    <TextBlock Name="TxtActiveSessionSub" Text="Your session is running inside Microsoft Remote Desktop."
-                               FontSize="12" Foreground="#9FC7A6" TextWrapping="Wrap"/>
-                    <Grid ColumnDefinitions="*,8,*">
-                        <Button Grid.Column="0" Name="BtnReturnToRdp" Content="Return to Remote Desktop" Background="#005FB8" Foreground="White" CornerRadius="4"
-                                HorizontalAlignment="Stretch"/>
-                        <Button Grid.Column="2" Name="BtnEndActiveSession" Content="Stop tracking / Help" Background="#2E2E35" Foreground="#EDEDED" CornerRadius="4"
-                                HorizontalAlignment="Stretch"/>
-                    </Grid>
-                </StackPanel>
+                    <Button Grid.Column="2" Name="BtnReturnToRdp" Content="Resume" Background="#005FB8" Foreground="White" CornerRadius="4"
+                            MinHeight="32" Padding="12,4" Margin="8,0,0,0" FontSize="12" FontWeight="SemiBold"/>
+                    <Button Grid.Column="3" Name="BtnEndActiveSession" Content="✕" Background="#2E2E35" Foreground="#EDEDED" CornerRadius="4"
+                            MinHeight="32" MinWidth="32" Padding="6,4" Margin="6,0,0,0" FontSize="12"/>
+                </Grid>
             </Border>
 
-            <!-- Backup reminder: the vault lives in the app sandbox, so uninstalling the app
-                 destroys it permanently. Shown only when there are unbacked-up changes. -->
-            <Border Grid.Row="2" Name="BannerBackupReminder" Background="#241C0C" BorderBrush="#5A431A" BorderThickness="1" CornerRadius="8" Padding="10,8" Margin="0,0,0,8" IsVisible="False">
-                <StackPanel Spacing="6">
-                    <TextBlock Text="⚠ THIS VAULT EXISTS ONLY ON THIS PHONE" FontSize="12" FontWeight="Bold" Foreground="#E8A030" LetterSpacing="1" TextWrapping="Wrap"/>
-                    <TextBlock Text="Uninstalling RDP Vault, or resetting the phone, deletes your connections permanently. Export an encrypted backup now."
-                               FontSize="12" Foreground="#D8CDB8" TextWrapping="Wrap"/>
-                    <Grid ColumnDefinitions="*,8,Auto">
-                        <Button Grid.Column="0" Name="BtnBackupNow" Content="📤 Back up now" Background="#5A431A" Foreground="#FFE9C2" CornerRadius="4" HorizontalAlignment="Stretch"/>
-                        <Button Grid.Column="2" Name="BtnDismissBackupReminder" Content="Later" Background="Transparent" Foreground="#9A9AA3" FontSize="13"/>
-                    </Grid>
-                </StackPanel>
+            <!-- Compact Backup Reminder Strip -->
+            <Border Grid.Row="2" Name="BannerBackupReminder" Background="#241C0C" BorderBrush="#5A431A" BorderThickness="1" CornerRadius="6" Padding="10,6" Margin="0,0,0,8" IsVisible="False">
+                <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                    <TextBlock Grid.Column="0" Text="⚠ " FontSize="12" Foreground="#E8A030" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Text="Vault backup recommended (export encrypted backup)" FontSize="12" Foreground="#FFE9C2" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                    <Button Grid.Column="2" Name="BtnBackupNow" Content="Back up" Background="#5A431A" Foreground="#FFE9C2" CornerRadius="4" MinHeight="32" Padding="10,4" Margin="8,0,0,0" FontSize="12"/>
+                    <Button Grid.Column="3" Name="BtnDismissBackupReminder" Content="✕" Background="Transparent" Foreground="#9A9AA3" MinHeight="32" Padding="8,4" FontSize="12"/>
+                </Grid>
             </Border>
 
             <!-- Search / Filter Bar -->
@@ -407,14 +399,8 @@
                                 <TextBlock Text="REMOTE DISPLAY &amp; MONITOR PROTECTION" FontSize="12" FontWeight="Bold" Foreground="#9A9AA3" LetterSpacing="1"/>
                                 <TextBlock Text="Display Resolution Preset" FontSize="13" Foreground="#9A9AA3"/>
                                 <ComboBox Name="CmbProfileResolution" HorizontalAlignment="Stretch" Background="#1C1C21" BorderBrush="#2E2E35" Foreground="#EDEDED">
-                                    <ComboBoxItem Content="Default (Follow Global Vault Setting)"/>
-                                    <ComboBoxItem Content="1920 x 1080 (1080p Full HD - Safe for Desktop Monitors)"/>
-                                    <ComboBoxItem Content="1280 x 720 (720p HD - Bandwidth Saver)"/>
-                                    <ComboBoxItem Content="1600 x 900 (900p HD+)"/>
-                                    <ComboBoxItem Content="1366 x 768 (Standard Laptop)"/>
-                                    <ComboBoxItem Content="2560 x 1440 (1440p 2K QHD)"/>
-                                    <ComboBoxItem Content="3840 x 2160 (4K Ultra HD)"/>
-                                    <ComboBoxItem Content="Match Mobile Device Screen"/>
+                                    <ComboBoxItem Content="1920 x 1080 (1080p Landscape - Default &amp; Native)"/>
+                                    <ComboBoxItem Content="Span All Remote Displays (Multi-Monitor)"/>
                                     <ComboBoxItem Content="Custom Resolution..."/>
                                 </ComboBox>
 
@@ -436,9 +422,12 @@
                                     <ComboBoxItem Content="Span All Remote Monitors"/>
                                 </ComboBox>
 
-                                <!-- Label text is rewritten at runtime to name the resolution the
-                                     user actually picked (suggestion 2 / audit item 8). -->
-                                <CheckBox Name="ChkProfilePreserveNative" Content="Keep native size (never squash or distort - scroll to view)" Foreground="#EDEDED" IsChecked="True"/>
+                                <TextBlock Text="Screen Sizing / Panning (Client-Controlled)" FontSize="13" Foreground="#9A9AA3" Margin="0,4,0,0"/>
+                                <ComboBox Name="CmbProfileSmartSizing" HorizontalAlignment="Stretch" Background="#1C1C21" BorderBrush="#2E2E35" Foreground="#EDEDED">
+                                    <ComboBoxItem Content="Default (Follow Global Vault Setting)"/>
+                                    <ComboBoxItem Content="Fit Screen (Auto-scale desktop to phone)"/>
+                                    <ComboBoxItem Content="Scroll / Keep Native (Preserve PC aspect, client-controlled pan)"/>
+                                </ComboBox>
                                 <TextBlock Name="TxtProfilePreserveNativeHint" Text=""
                                            FontSize="12" Foreground="#2FBF71" TextWrapping="Wrap"/>
                             </StackPanel>
@@ -504,7 +493,12 @@
                         <Border Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16">
                             <StackPanel Spacing="8">
                                 <TextBlock Text="SECURITY &amp; CERTIFICATES" FontSize="12" FontWeight="Bold" Foreground="#9A9AA3" LetterSpacing="1"/>
-                                <CheckBox Name="ChkProfileSuppressCert" Content="Ignore certificate warnings (author default: connect directly without warning popups)" Foreground="#EDEDED" IsChecked="True"/>
+                                <TextBlock Text="Certificate Warnings" FontSize="13" Foreground="#9A9AA3"/>
+                                <ComboBox Name="CmbProfileSuppressCert" HorizontalAlignment="Stretch" Background="#1C1C21" BorderBrush="#2E2E35" Foreground="#EDEDED">
+                                    <ComboBoxItem Content="Default (Follow Global Vault Setting)"/>
+                                    <ComboBoxItem Content="Ignore Certificate Warnings (Connect directly)"/>
+                                    <ComboBoxItem Content="Verify Certificate (Show warning popups)"/>
+                                </ComboBox>
                             </StackPanel>
                         </Border>
 
@@ -783,8 +777,8 @@
                             </StackPanel>
                         </Border>
 
-                        <!-- Screen Scroll & Pan Guidance -->
-                        <Border Name="CardLaunchPanTip" Background="#141417" BorderBrush="#24242A" BorderThickness="1" CornerRadius="4" Padding="10,8">
+                        <!-- Screen Scroll & Pan Guidance (suppressed for minimal clean launch) -->
+                        <Border Name="CardLaunchPanTip" Background="#141417" BorderBrush="#24242A" BorderThickness="1" CornerRadius="4" Padding="10,8" IsVisible="False">
                             <Grid ColumnDefinitions="Auto,*">
                                 <TextBlock Text="💡 " FontSize="13" VerticalAlignment="Top"/>
                                 <TextBlock Grid.Column="1" Name="TxtLaunchPanTip" Text=""

@@ -37,24 +37,82 @@ public static class HostProbe
 
         try
         {
-            using var client = new TcpClient { NoDelay = true };
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeoutCts.CancelAfter(timeoutMs);
 
+            var addresses = new List<IPAddress>();
+            if (IPAddress.TryParse(host, out var directIp))
+            {
+                addresses.Add(directIp);
+            }
+
             try
             {
-                await client.ConnectAsync(host, port, timeoutCts.Token).ConfigureAwait(false);
-                return client.Connected;
+                var resolved = await Dns.GetHostAddressesAsync(host, timeoutCts.Token).ConfigureAwait(false);
+                foreach (var r in resolved)
+                {
+                    if (!addresses.Any(a => a.Equals(r)))
+                    {
+                        addresses.Add(r);
+                    }
+                }
             }
-            catch (OperationCanceledException)
+            catch
             {
-                return false;
+                // Ignore DNS resolution errors if direct IP already present
             }
+
+            foreach (var ip in addresses)
+            {
+                try
+                {
+                    using var socket = new Socket(ip.AddressFamily, System.Net.Sockets.SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+                    await socket.ConnectAsync(new IPEndPoint(ip, port), timeoutCts.Token).ConfigureAwait(false);
+                    if (socket.Connected) return true;
+                }
+                catch
+                {
+                    // Continue to next IP candidate
+                }
+            }
+
+            return false;
         }
         catch
         {
             return false;
         }
+    }
+
+    public static bool IsPrivateOrLocalHost(string host)
+    {
+        if (string.IsNullOrWhiteSpace(host)) return false;
+
+        if (IPAddress.TryParse(host, out var ip))
+        {
+            if (IPAddress.IsLoopback(ip)) return true;
+            if (ip.AddressFamily == AddressFamily.InterNetwork)
+            {
+                byte[] b = ip.GetAddressBytes();
+                if (b[0] == 10) return true;
+                if (b[0] == 172 && b[1] >= 16 && b[1] <= 31) return true;
+                if (b[0] == 192 && b[1] == 168) return true;
+                if (b[0] == 169 && b[1] == 254) return true;
+                return false;
+            }
+            if (ip.IsIPv6LinkLocal || ip.IsIPv6SiteLocal) return true;
+            return false;
+        }
+
+        if (host.EndsWith(".local", StringComparison.OrdinalIgnoreCase) ||
+            host.EndsWith(".lan", StringComparison.OrdinalIgnoreCase) ||
+            host.EndsWith(".home", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     public static NetworkKind GetActiveNetworkKind(Context? context)

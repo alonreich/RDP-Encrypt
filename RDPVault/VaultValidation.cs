@@ -65,6 +65,11 @@ public static class VaultValidation
                 throw new InvalidDataException("This vault contains an invalid connection.");
             try { _ = ConnectionEndpoint.FromProfile(p); }
             catch (Exception ex) { throw new InvalidDataException("A connection in this backup has an invalid computer address or port.", ex); }
+            if (!string.IsNullOrWhiteSpace(p.GatewayHost))
+            {
+                if (!ConnectionEndpoint.TryParseGatewayAuthority(p.GatewayHost, out _, out string gwErr))
+                    throw new InvalidDataException($"A connection in this backup has an invalid gateway address: {gwErr}");
+            }
         }
     }
 }

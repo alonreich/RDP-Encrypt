@@ -30,6 +30,9 @@ public static class AppPaths
     /// <summary>The vault of the *installed* copy (used by the installer/uninstaller only).</summary>
     public static string InstalledVaultPath => Path.Combine(InstallDir, VaultFileName);
 
+    /// <summary>Encrypted pending certificate pin updates awaiting vault unlock.</summary>
+    public static string PendingCertsPath => Path.Combine(InstallDir, "pending_certs.dat");
+
     /// <summary>
     /// Where the uninstaller rescues the vault to instead of deleting it (issue #1).
     /// </summary>

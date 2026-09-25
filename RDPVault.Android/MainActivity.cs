@@ -10,6 +10,7 @@ using AndroidX.Biometric;
 using AndroidX.Core.Content;
 using Avalonia;
 using Avalonia.Android;
+using RDPVault;
 using RDPVault.Android.Platform;
 using RDPVault.Android.Services;
 
@@ -374,6 +375,12 @@ public class MainActivity : AvaloniaMainActivity<App>
                 intent.PutExtra(RdpSessionService.ExtraProfileName, profile.Name);
                 intent.PutExtra(RdpSessionService.ExtraProfileHost, profile.Host);
                 intent.PutExtra(RdpSessionService.ExtraProfilePort, profile.Port);
+                if (!string.IsNullOrWhiteSpace(profile.GatewayHost) &&
+                    ConnectionEndpoint.TryParseGatewayAuthority(profile.GatewayHost, out var gwEp, out _))
+                {
+                    intent.PutExtra(RdpSessionService.ExtraProfileGatewayHost, gwEp.Host);
+                    intent.PutExtra(RdpSessionService.ExtraProfileGatewayPort, gwEp.Port);
+                }
                 if (OperatingSystem.IsAndroidVersionAtLeast(26))
                 {
                     StartForegroundService(intent);

@@ -340,6 +340,7 @@ public sealed class SessionManager : IDisposable
         Touch();
         ApplySweepConfig();
         _ = Task.Run(TraceCleaner.Sweep);
+        RdpLauncher.ApplyPendingCertUpdates(Payload);
         StartTimers();
         OnUi(() => Unlocked?.Invoke());
 
@@ -463,6 +464,9 @@ public sealed class SessionManager : IDisposable
     public void Lock(bool killSessions)
     {
         bool deep = Payload?.Settings.DeepSweep == true;   // issue #7: setting now honoured
+
+        // Snapshot certificate pins from active sessions before memory is cleared or sweep runs
+        RdpLauncher.SnapshotActiveCertPins();
 
         if (Master != null) CryptographicOperations.ZeroMemory(Master);
         Master = null;
@@ -650,6 +654,8 @@ public sealed class SessionManager : IDisposable
     {
         if (_exiting) return;
         _exiting = true;
+
+        RdpLauncher.SnapshotActiveCertPins();
 
         bool deep = Payload?.Settings.DeepSweep == true;
         if (Master != null) CryptographicOperations.ZeroMemory(Master);

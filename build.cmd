@@ -48,6 +48,8 @@ rem Self-contained single file. This is NOT a NativeAOT build - see
 rem project_structure.txt SECTION 2. The csproj sets PublishAot=false on purpose.
 set "PUBLISH_SF_ARGS=-p:PublishSingleFile=true -p:SelfContained=true"
 set "DOTNET_LOG_ARGS=-consoleLoggerParameters:Summary"
+set "ANDROID_BUILD_SUCCESS=0"
+set "ANDROID_BUILD_ATTEMPTED=0"
 
 echo ###########################################################
 echo PURGING PREVIOUS BUILD ARTIFACTS...
@@ -70,6 +72,7 @@ if exist "%LOCALAPPDATA%\RdpVaultBuildTools\android-sdk" (
   echo BUILDING RDP Vault: Android APK
   echo ###########################################################
   call :BUILD_ANDROID
+  if errorlevel 1 exit /b 1
 )
 
 call :VALIDATE_COMPILED_OUTPUT
@@ -138,7 +141,7 @@ if errorlevel 1 (
   echo [PUBLISH] STOPPED: uploading release asset failed.
   exit /b 1
 )
-if exist "%OUTPUT_DIR%\RDPVault.apk" (
+if "!ANDROID_BUILD_SUCCESS!"=="1" if exist "%OUTPUT_DIR%\RDPVault.apk" (
   echo [PUBLISH] Uploading %OUTPUT_DIR%\RDPVault.apk to GitHub release !TAG!...
   powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%developer_tools\UploadAsset.ps1" -Repo "!REPO!" -Tag "!TAG!" -FilePath "%OUTPUT_DIR%\RDPVault.apk"
 )
@@ -186,17 +189,31 @@ if exist "%FINAL_DIR%" rd /s /q "%FINAL_DIR%"
 exit /b 0
 
 :BUILD_ANDROID
+set "ANDROID_BUILD_ATTEMPTED=1"
+set "ANDROID_BUILD_SUCCESS=0"
 set "ANDROID_SDK=%LOCALAPPDATA%\RdpVaultBuildTools\android-sdk"
 set "JAVA_SDK=%LOCALAPPDATA%\RdpVaultBuildTools\jdk"
+
+if exist "%OUTPUT_DIR%\RDPVault.apk" del /f /q "%OUTPUT_DIR%\RDPVault.apk" 2>nul
+if exist "RDPVault.Android\bin\Release\net9.0-android\com.rdpvault.app-Signed.apk" del /f /q "RDPVault.Android\bin\Release\net9.0-android\com.rdpvault.app-Signed.apk" 2>nul
+
 dotnet build RDPVault.Android\RDPVault.Android.csproj -c Release /p:AndroidSdkDirectory="%ANDROID_SDK%" /p:JavaSdkDirectory="%JAVA_SDK%" %DOTNET_LOG_ARGS%
 if errorlevel 1 (
-  echo [WARN] Android build returned an error.
-  exit /b 0
+  echo [ERROR] Android APK build failed.
+  exit /b 1
 )
-if exist "RDPVault.Android\bin\Release\net9.0-android\com.rdpvault.app-Signed.apk" (
-  copy /y "RDPVault.Android\bin\Release\net9.0-android\com.rdpvault.app-Signed.apk" "%OUTPUT_DIR%\RDPVault.apk" >nul
-  echo [ANDROID] Freshly signed APK copied to %OUTPUT_DIR%\RDPVault.apk.
+if not exist "RDPVault.Android\bin\Release\net9.0-android\com.rdpvault.app-Signed.apk" (
+  echo [ERROR] Expected Android signed APK was not produced.
+  exit /b 1
 )
+
+copy /y "RDPVault.Android\bin\Release\net9.0-android\com.rdpvault.app-Signed.apk" "%OUTPUT_DIR%\RDPVault.apk" >nul
+if errorlevel 1 (
+  echo [ERROR] Failed to copy Android signed APK to compiled output directory.
+  exit /b 1
+)
+set "ANDROID_BUILD_SUCCESS=1"
+echo [ANDROID] Freshly signed APK copied to %OUTPUT_DIR%\RDPVault.apk.
 exit /b 0
 
 :PURGE_COMPILED_EXTRAS
@@ -231,5 +248,8 @@ exit /b 0
 :CLEAN_ALL
 if exist "RDPVault\bin" rd /s /q "RDPVault\bin" 2>nul
 if exist "RDPVault\obj" rd /s /q "RDPVault\obj" 2>nul
+if exist "RDPVault.Android\bin" rd /s /q "RDPVault.Android\bin" 2>nul
+if exist "RDPVault.Android\obj" rd /s /q "RDPVault.Android\obj" 2>nul
+if exist "%OUTPUT_DIR%\RDPVault.apk" del /f /q "%OUTPUT_DIR%\RDPVault.apk" 2>nul
 dotnet clean RDPVault\RDPVault.csproj -c Release -r win-x64 --nologo -v q >nul 2>&1
 exit /b 0

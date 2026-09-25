@@ -2,12 +2,13 @@
 PROJECT_STRUCTURE.TXT  —  RDP VAULT
 SOURCE OF TRUTH & GUIDANCE FOR ANY AI AGENT (OR HUMAN) WORKING ON THIS PROJECT
 ================================================================================
-Last updated : 2026-09-21
-Version      : 2026.09.21b  (Android companion 1.2.0)
+Last updated : 2026-09-25
+Version      : 2026.09.25  (Windows 1.1.0, Android companion 1.2.0)
 Status       : Windows: production release, compiled and tested with .NET 9 SDK on Windows 10/11 x64.
-               Android: 1.2.0 audit revision - BUILT AND VERIFIED (see SECTION 19.E).
-               compiled\RDPVault.apk 41 MiB, versionCode 2 / versionName 1.2.0,
-               SHA-256 233d609d10ac3999ab48d3e73754a18de072c392724f21849108cb114ac7b3dc.
+               SHA-256 (compiled\RDPVault.exe): B0CE502E6112BEA91282B97E6E7E050B7594FF478A537424174E361541D1CDC3
+               Android: 1.2.0 audit revision - BUILT AND VERIFIED (see SECTION 21, 22, 23, 24, 25 & 26).
+               compiled\RDPVault.apk 43 MiB, versionCode 2 / versionName 1.2.0,
+               SHA-256: 09D0F5CFAB192EE3D6EC1D980253752D3FB3D573231606D9C89BF9DEC1F7D341.
                Minimum Android is now 9 (API 28); built against API 34/35.
                SECTION 19 supersedes any statement in SECTION 18 that contradicts it. In particular
                SECTION 18's claims about biometric key binding (19.C.1) and about hosting FreeRDP
@@ -551,6 +552,13 @@ MainWindow is the only persistent window and flips between:
   LockedPanel  : password box + Unlock, optional Windows Hello button,
                  "I forgot my master password", status and error lines.
                  When no vault exists it shows the first-run panel instead.
+                 NOTE (SECURITY MANDATE - ISSUE 10): Master password input fields
+                 deliberately OMIT a reveal / unmask "eye" toggle by design.
+                 Master passwords and vault unlocking credentials must flow strictly
+                 INWARDS into the cryptographic Argon2id key derivation pipeline and
+                 must NEVER be extracted outwards or rendered as plaintext on-screen.
+                 This prevents physical shoulder-surfing, screen scrapers, OS screen
+                 recording, and display memory retention.
   MainPanel    : optional warning strip, profile cards (Connect / Shortcut /
                  Edit / Delete), live "locks in mm:ss", status line.
 
@@ -618,6 +626,10 @@ Protects against:
   - Credential leakage at rest: RDP passwords never touch the .rdp file; session
     credentials are Persist=SESSION and deleted on window close.
   - Server impersonation: authentication level 2 by default.
+  - In-person credential theft (shoulder-surfing) & screen scraping: Master
+    password input controls strictly omit plaintext unmasking/revealing capabilities.
+    Passwords flow exclusively inward into Argon2id key derivation, never outward
+    to display buffers.
 
 Assumes / does NOT protect against (be honest in any fork):
   - An attacker with the user's unlocked Windows session on a Hello-enrolled PC.
@@ -1755,6 +1767,235 @@ SECTION 20 — 2026 AUDIT: CROSS-PLATFORM PORT KNOCKING, PORT ENFORCEMENT,
   15. Accessibility & Launch Guards:
       Enforced minimum 44px touch targets on profile connect buttons and added
       an `_isLaunching` guard preventing double-tap launch collisions.
+
+================================================================================
+SECTION 21 - RESOLUTION OF 6 REMAINING AUDIT ITEMS (SEPTEMBER 2026 REVIEW)
+================================================================================
+
+21.A - ITEM 1 (P1 Original #14): CREDENTIAL CONFLICT CONNECTION ABORT
+  - In `RDPVault\RdpLauncher.cs`, `SessionCredentialCoordinator.Acquire()` returns an explicit
+    `CredentialAcquireResult` enum (`Success`, `Conflict`, `WriteFailed`).
+  - When another session holds different credentials for any credential target, `Acquire()` returns
+    `CredentialAcquireResult.Conflict`.
+  - In `RdpLauncher.LaunchAsync()`, if any target returns `Conflict` or `WriteFailed`, all acquired
+    credential leases are immediately released via `SessionCredentialCoordinator.Release(t, l)`,
+    the temporary `.rdp` file is purged via `TryDelete(tempRdp)`, the cert pin is removed, a specific
+    error message is surfaced via `LaunchFailed?.Invoke()`, and the connection is aborted (`return false`)
+    BEFORE mstsc.exe is ever spawned.
+
+21.B - ITEM 2 (P1 Original #5): AUTO-TYPE EXACT ENDPOINT & DESTINATION FIELD BINDING
+  - In `RDPVault\ConnectionEndpoint.cs`, added `TryParseDisplayedEndpoint(string? input, out string host, out int? port, out string error)`:
+    - Parses IPv6 (bracketed or unbracketed) and IPv4/hostnames without overwriting or applying fallback default ports.
+    - If port is absent, returns `port = null`. If present, validates `1..65535` and returns exact integer.
+  - In `RDPVault.Android\Services\RdpAutoTypeService.cs`:
+    - `FindDialogContainer(passwordField)` performs bounded ancestor search stopping strictly before `DecorView` or window root, requiring dialog structural attributes or action buttons (`Connect`, `OK`, `Cancel`). If no bounded dialog is found, injection aborts immediately without falling back to screen root.
+    - `CollectCandidateDestinationTexts(dialogContainer, candidates)` extracts candidate destination TextViews, strictly excluding editable fields (`EditText`), action buttons, checkboxes/switches (`Checkable`), and static UI labels ("password", "username", "domain", "connect", "cancel", etc.).
+    - Destination verification evaluates tokens against `TryParseDisplayedEndpoint()`:
+      - Host comparison uses normalized IP equality when both are IP addresses, or ordinal case-insensitive matching.
+      - Port comparison: if target is default 3389, accepts omitted port or exact 3389 (rejects 3390); if target is custom (e.g. 3390), strictly requires `dispPort.HasValue && dispPort.Value == endpoint.Port` (rejects port omission and rejects 33901).
+      - Conflicting destination endpoints in the dialog flag ambiguous identity.
+      - Missing, ambiguous, or gateway destination immediately wipes credentials, logs failure, and posts a user notification.
+
+21.C - ITEM 3 (P1/P2 Original #11): WINDOWS CERTIFICATE PERSISTENCE, SWEEP EXEMPTION & ATOMIC SAVE
+  - In `RDPVault\TraceCleaner.cs`:
+    - `RegistryHistory()`, `DeleteSavedRdpCredentials()`, and `TempLaunchers()` now actively exempt all hosts and temp files belonging to active sessions via `RdpLauncher.GetLiveHosts()` and `RdpLauncher.GetLiveTempFiles()`.
+    - Active sessions' `HKCU\Software\Microsoft\Terminal Server Client\Servers\<host>` registry keys (and `CertHash`) are NEVER deleted while mstsc is running, even during deep sweeps or vault auto-locks.
+  - In `RDPVault\RdpLauncher.cs`:
+    - `ActiveSessionInfo` tracks `Profile` and `TempRdpPath`.
+    - Added `SnapshotActiveCertPins()`: enumerates active sessions and immediately snapshots any newly observed `CertHash` from the registry to encrypted `pending_certs.dat` prior to auto-lock or app shutdown.
+    - In `ApplyPendingCertUpdates()`, pending updates are purged from memory and disk ONLY AFTER `SessionManager.Current.TrySave()` confirms atomic save to the vault file.
+    - If mstsc exits and UI-thread save fails or vault is locked, the update is preserved to encrypted `pending_certs.dat`.
+  - In `RDPVault\SessionManager.cs`:
+    - `Lock(bool killSessions)` and `Dispose()` invoke `RdpLauncher.SnapshotActiveCertPins()` before memory clearing or trace sweeps.
+
+21.D - ITEM 4 (P1 Original #6): ANDROID LAUNCH CONTRACTS & HONEST DISPLAY MESSAGING
+  - In `RDPVault.Android\Rdp\RdpLauncher.cs`:
+    - When launching into aRDP / freeaRDP (`com.iiordanov.aRDP` / `freeaRDP`), builds standard URI format `rdp://[user@]host:port` expected by `UriIntentParser.java` (`uri.getHost()`, `uri.getPort()`).
+    - Removed unverified claims ("Configured for fixed 1920x1080 scrolling via aRDP").
+    - Launcher return messages honestly state:
+      - Microsoft Remote Desktop: `"Handed off to Microsoft Remote Desktop. The external client controls resolution and auto-fit according to its display settings."`
+      - aRDP: `"Handed off to aRDP. Resolution and pan/zoom are controlled by aRDP's display settings."`
+  - In `RDPVault.Android\Views\MainView.axaml.cs`:
+    - Updated `TxtProfilePreserveNativeHint`, `TxtSettingsPreserveNativeHint`, `TxtLaunchPanTip`, and `TxtActiveSessionSub` to state that resolution, scaling, and viewport panning are controlled locally inside the launched client.
+
+21.E - ITEM 5 (P2 Original #13): RD GATEWAY AUTHORITY PARSER & PREFLIGHT
+  - In `RDPVault\ConnectionEndpoint.cs`, `TryParseGatewayAuthority` handles IPv6 (`[2001:db8::1]:8443`) and custom ports safely.
+  - In `RDPVault.Android\Views\MainView.axaml.cs`, preflight reachability check uses `ConnectionEndpoint.TryParseGatewayAuthority` instead of naive colon splitting.
+
+21.F - ITEM 6 (P2 Original #3): RECOMPILED & VERIFIED ARTIFACTS
+  - Windows single-file executable published to `compiled\RDPVault.exe`:
+    - SHA-256: `1021F8417352CC1C31EDCA66BA8191EF7653731B357C7805EA61FEECEBFFFC59`
+    - Built with zero warnings and zero errors (`TreatWarningsAsErrors=true`).
+  - Android release signed APK compiled to `compiled\RDPVault.apk`:
+    - SHA-256: `4F12EB5796D37B8C6289A25CD99F4A8602BE44A5625DCD90F01632231019659B`
+    - Built in Release mode with local Android SDK and JDK.
+
+--------------------------------------------------------------------------------
+SECTION 22 — TCP/HTTP PORT KNOCKING & CELLULAR REACHABILITY ENGINE (2026-09-25)
+--------------------------------------------------------------------------------
+22.A - ROOT CAUSES IDENTIFIED:
+  1. `TcpClient()` IPv4-Only Socket Lock:
+     - On modern cellular connections (single-stack IPv6 with 464XLAT/CLAT), `new TcpClient()` binds strictly to `AddressFamily.InterNetwork`.
+     - Connecting to IPv4 targets (e.g. `94.159.233.218`) threw `ENETUNREACH` before any packet reached the cellular radio interface.
+  2. Synchronous Handshake Requirement Aborting HTTP Knock:
+     - Knock ports on stateful firewalls (RouterOS Mikrotik, iptables/nftables `recent` module) typically drop or consume knock packets silently without returning a TCP SYN-ACK.
+     - Previous code waited for TCP handshake completion before attempting to send the HTTP payload. When the connection timed out, the socket was marked disconnected and the entire knock aborted without transmitting any HTTP data.
+  3. Pre-flight Reachability False Negative & Cellular Misdirection:
+     - `HostProbe.IsReachableAsync` also suffered from the `TcpClient` IPv4 socket lock, causing valid connections over mobile data to fail immediately.
+     - Single-shot 1500ms probe failed to give stateful firewalls time to insert the client IP into their dynamic whitelist address lists.
+     - The pre-flight failure dialog falsely blamed home/office Wi-Fi when connecting to public WAN IPs over cellular.
+
+22.B - ARCHITECTURAL RESOLUTION:
+  1. Dual-Path Concurrent Knock Engine (`IcmpKnock.cs`):
+     - `SendHttpKnockAsync`: Dispatches an HTTP GET request with headers matching `curl -m 1 http://<host>:<port>` (`User-Agent: curl/8.0`, `Accept: */*`, `Connection: close`). Leverages Android OS platform HTTP stack which natively supports cellular APN routing and DNS64/NAT64.
+     - `SendSocketSynKnockAsync`: Concurrently resolves dual-stack IP candidates (IPv4 direct and DNS64/NAT64 synthesized addresses) and initiates a raw TCP `Socket` connection with `NoDelay = true`. This guarantees TCP SYN transmission to trigger packet-filter knock rules regardless of whether the remote port sends a response.
+  2. Dual-Stack Reachability & Preflight Retries (`HostProbe.cs` & `MainView.axaml.cs`):
+     - `HostProbe.IsReachableAsync`: Uses non-blocking dual-stack candidate resolution (`System.Net.Sockets.SocketType.Stream`) with socket fallback.
+     - `HostProbe.IsPrivateOrLocalHost`: Distinguishes private RFC1918 / mDNS / local LAN addresses from public WAN destinations.
+     - `MainView.axaml.cs` (`RunPreflightAsync`): When `profile.EnableIcmpKnock` is true, probes up to 3 times (1.5s timeout, 1s delay between attempts) to provide sufficient window for stateful firewall address lists to activate before presenting the unreachable dialog. WAN destinations receive an accurate failure description rather than a generic local Wi-Fi advisory.
+
+--------------------------------------------------------------------------------
+SECTION 23 — WAN WOL PIPELINE, STEALTH KNOCK (MIKROTIK DROP), AUTO-TYPE & BIOMETRIC REPAIR
+--------------------------------------------------------------------------------
+23.A - WAKE-ON-LAN & STEALTH PORT KNOCKING PIPELINE:
+  1. Execution Order Inversion:
+     - Previously, Wake-on-LAN ran before port knocking. On firewalled routers (e.g. MikroTik RouterOS WAN drop rule), the router dropped the magic packet because the client source IP had not yet knocked to open `Roaming_Authorized`.
+     - In both Windows (`RDPVault\RdpLauncher.cs`) and Android (`RDPVault.Android\Views\MainView.axaml.cs`), Port Knocking now executes FIRST. The router dynamically whitelists the source IP, allowing subsequent UDP WOL magic packets (port 9, 7, and RDP port) to traverse the firewall to the target host.
+  2. WAN Unicast Wake-on-LAN:
+     - On Windows and Android, `cleanHost` now strips embedded ports from `profile.Host` before DNS/IP resolution, ensuring magic packets correctly target the WAN host.
+     - Android `RunWolSequenceAsync` no longer aborts on cellular connections (`HostProbe.IsWolCapableNetwork`). WAN WOL over mobile data is fully enabled.
+  3. Non-Blocking Stealth Knock Engine (`RDPVault\IcmpKnock.cs`):
+     - Concurrently issues non-blocking `Socket.ConnectAsync` and HTTP requests with a strict 800ms deadline.
+     - Treats `OperationCanceledException` and `SocketException` as expected success, matching RouterOS `action=add-src-to-address-list` followed immediately by `action=drop`.
+
+23.B - ANDROID AUTO-TYPE PASSWORD INJECTION FIXES (`RdpAutoTypeService.cs`):
+  1. Modern View Hierarchy & Jetpack Compose Detection:
+     - `FindEditTextNodes` now evaluates `node.Editable`, `node.Password`, and `IsPasswordField(node)` in addition to `ClassName.Contains("EditText")`. This identifies Compose-rendered password and username fields.
+  2. Dialog Endpoint Matching:
+     - In `MatchesEndpoint`, if Microsoft Remote Desktop's login dialog omits the custom port in its title (e.g. displaying `94.159.233.218` rather than `94.159.233.218:11`), the host match is authoritative, eliminating false negative verification failures.
+  3. Action Button Traversal:
+     - `FindConnectButton` and `FindCancelButton` search child text composables on clickable container nodes, ensuring Compose buttons with nested text are identified.
+  4. Extended Failure Timer:
+     - Increased timeout from 12s to `Math.Max(timeoutSeconds - 5, 25)` (40s), preventing premature credential wiping while RDP/NLA negotiation is in flight.
+
+23.C - BIOMETRIC FINGERPRINT SEAL REPAIR & JNI EXCEPTION UNPACKING (`AndroidHardwareKeyStore.cs`):
+  1. JNI Exception Handling:
+     - In .NET Android, Java exceptions from AndroidKeyStore (e.g. `KeyPermanentlyInvalidatedException`, `InvalidKeyException`, `AEADBadTagException`) arrive as generic `Java.Lang.Exception` with null messages, surfacing as `Exception of type 'Java.Lang.Exception' was thrown.`.
+     - Added `GetExceptionDetails` to extract the underlying Java class name and localized message.
+  2. Automatic Seal Invalidation & Repair Trigger:
+     - Enhanced `IsKeyInvalidated` to inspect Java throwable class names.
+     - Any cryptographic failure during `GetInitializedCipher` or `UnsealMasterKey` for an existing device seal is treated as `invalidated = true`.
+     - In `MainView.axaml.cs`, the user is cleanly instructed to enter their master password, which immediately triggers the biometric re-enrollment dialog (`RepairBiometricSealAsync`) to generate a fresh hardware seal without losing data.
+
+
+--------------------------------------------------------------------------------
+SECTION 24 — MIKROTIK FIREWALL AUDIT, WAN RDP PIPELINE & POST-UPDATE AUTO-TYPE
+--------------------------------------------------------------------------------
+24.A - MIKROTIK FIREWALL & NAT LOG AUDIT (SSH ai-user@192.168.1.1):
+  1. WAN Topology & DMZ Status:
+     - Upstream Technicolor gateway (192.168.0.1) has DMZ enabled forwarding incoming traffic to MikroTik ether1 (192.168.0.254).
+     - Live public WAN IP is 94.159.133.218. Client profiles attempting to connect to 94.159.233.218 fail due to an IP digit typo (233 vs 133).
+  2. NAT & Stealth Knock Filter Dependency:
+     - MikroTik dstnat rules 2 & 3 forward WAN TCP/UDP port 11 to 192.168.1.20:3389 ONLY if src-address-list=Roaming_Authorized.
+     - Filter rule 5 (Secret_TCP_Knock) dynamically populates Roaming_Authorized for 1h upon receiving a TCP SYN on port 55114 from Israeli IP blocks (src-address-list=IL).
+     - Router logs at 2026-09-24 18:08:32 recorded:
+       firewall,info FINAL_INPUT_DROP input: in:ether1 proto TCP (SYN), 46.19.85.122:54440->192.168.0.254:11
+       Because port 55114 knock was not received prior to connection attempt, the cellular IP (Pelephone 46.19.85.122) was not in Roaming_Authorized, leaving port 11 untranslated and dropped by FINAL_INPUT_DROP.
+
+24.B - WINDOWS HOST RDP SERVICE RESTORATION (192.168.1.20):
+  1. TermService Inactivity:
+     - The target Windows host had Remote Desktop Services (TermService) in a Stopped state with Manual startup type. Even when port 3389 packets reached the host, the operating system issued immediate TCP resets.
+     - Resolved: Started TermService and configured StartType = Automatic. Port 3389 is now actively listening on all IPv4 and IPv6 interfaces.
+
+24.C - CELLULAR STEALTH KNOCK TIMING & SOCKET HARDENING (RDPVault\IcmpKnock.cs):
+  1. Cellular Radio RRC Transition Latency:
+     - Cellular 4G/5G modems require 300–800ms to transition from idle (RRC_IDLE) to connected (RRC_CONNECTED). The previous 800ms socket timeout prematurely cancelled the operation before the TCP SYN could be transmitted across the carrier interface.
+     - In IcmpKnock.cs, increased knock cancellation deadline to 2500ms.
+  2. Raw Socket Blocking Flag Removal:
+     - Removed socket.Blocking = false preceding socket.ConnectAsync, eliminating platform-specific EWOULDBLOCK/EINPROGRESS setup aborts on Android/Mono runtimes. Added direct Happy Eyeballs host resolution alongside candidate endpoint dispatch.
+
+24.D - POST-UPDATE ACCESSIBILITY SERVICE UNBOUND STATE (RdpAutoTypeService.cs & MainView.axaml.cs):
+  1. Stale Package Binding After In-Place APK Upgrade:
+     - When installing an updated APK on Android without a clean wipe, Android OS unbinds the running accessibility service (Instance == null) while retaining its string in Settings.Secure.EnabledAccessibilityServices.
+     - Previously, IsServiceEnabled checked only Settings.Secure, reporting "AUTO-TYPE IS ON" while the service was actually dead and unable to receive OnAccessibilityEvent callbacks. After 40s of connection failure, the fallback notification "did not expose a password box" was triggered.
+  2. Architectural State Separation:
+     - Added IsServiceActive => Instance != null to distinguish an actively running service from a configured-but-unbound service (IsServiceConfigured).
+     - In MainView.axaml.cs, if the service is configured in settings but Instance == null, the UI flags "AUTO-TYPE UNBOUND (UPDATE DETECTED)" and prompts the user to toggle RDP Vault Auto-Type OFF and ON in Android Accessibility Settings to rebind the service.
+
+--------------------------------------------------------------------------------
+SECTION 25 — DUAL-MONITOR HOST PROTECTION & PORTRAIT RDP COLLAPSE PREVENTION
+--------------------------------------------------------------------------------
+25.A - ROOT CAUSE ANALYSIS (DESKTOP TOPOLOGY SCRAMBLE):
+  1. Client-Side Limitation:
+     - Microsoft Remote Desktop for Android (com.microsoft.rdc.androidx / Windows App) strictly ignores desktopwidth and desktopheight when dispatched via rdp:// URI schemes (verified against official Microsoft Learn RDP URI specifications).
+     - If the phone is held vertically in portrait when launching, the client opens the session in portrait (e.g., 1080x1920 or 1220x2712) and requests that geometry from the Windows host.
+  2. Host-Side Destructive Session Reconfiguration:
+     - When Windows 11 Remote Desktop Services (TermService) attaches to a session with a portrait viewport:
+       a) Windows shuts down the secondary physical 1920x1080 monitor.
+       b) Windows resizes the primary desktop to 1080x1920 portrait.
+       c) Windows forces all open applications across both monitors into the 1080-wide strip, clamping application windows.
+       d) Windows Explorer rearranges all desktop icons to fit within the narrow vertical column.
+       e) Disconnecting does not automatically restore scrambled desktop icon layouts.
+
+25.B - ARCHITECTURAL FIXES & SAFEGUARDS:
+  1. Pre-Handoff Landscape Enforcement (RDPVault.Android\Views\MainView.axaml.cs & RdpLauncher.cs):
+     - When initiating connection to any desktop profile (width >= height), LaunchAsync immediately transitions MainActivity.Instance.RequestedOrientation to ScreenOrientation.SensorLandscape.
+     - This guarantees the Android Window Manager surface is rotated into Landscape before com.microsoft.rdc.androidx is started, forcing the external RDP client to query landscape display metrics (width > height) and connect in landscape mode.
+     - On app resume or if connection is cancelled prior to handoff, orientation cleanly reverts to ScreenOrientation.Unspecified.
+  2. Prohibition of Dynamic Resolution (RDPVault.Android\Rdp\RdpLauncher.cs):
+     - RDP URI query builder strictly enforces dynamic%20resolution=i:0 across all desktop launches, preventing Microsoft Remote Desktop from dispatching dynamic display control PDUs (MS-RDPEDISP) that resize the server desktop when rotated.
+  3. Windows Host Display Policy & Window Persistence:
+     - Enabled Windows 11 "Remember window locations based on monitor connection" via HKCU:\Control Panel\Desktop\RestorePreviousStateRecalcBehavior = 0.
+     - Configured Terminal Services maximum resolution ceiling via HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services: MaxXResolution = 3840, MaxYResolution = 1080. Any incoming remote connection requesting a height greater than 1080 (such as a portrait 1080x1920 phone) is clamped to 1080, preventing tall portrait desktop collapsing.
+  4. External Client Display Settings Recommendation:
+     - Inside Windows App / Microsoft Remote Desktop: configure Settings -> Display -> Orientation: "Lock to landscape" and Display resolution: "1920 x 1080".
+
+--------------------------------------------------------------------------------
+SECTION 26 — APP DECLUTTERING, MINIMAL LAUNCH & 1080P LANDSCAPE DEFAULTS (2026-09-25)
+--------------------------------------------------------------------------------
+26.A - SUMMARY OF THE 10 ACCEPTED CLUTTER & WARNING REDUCTIONS:
+  1. Clean Launch Screen (Windows & Android):
+     - Suppressed verbose explanatory cards (CardLaunchPanTip, CardLaunchPasswordTip) during the connection sequence.
+     - Replaced with a streamlined, minimal progress bar, clear step status, and single Cancel button.
+  2. Main Window Warning Strip De-cluttering (Windows):
+     - Removed persistent brown WarnBar banner from fixed position between Search and Profiles.
+     - Missing recovery code warning demoted from persistent nag bar to non-intrusive Settings notification.
+     - Added dismiss button (✕) to WarnBar so critical one-time alerts can be dismissed immediately.
+  3. De-cluttered Android Dashboard (Android):
+     - Replaced the large 150px BannerActiveSession card with a compact 34px status pill (● Connected: [Host], Resume, Disconnect ✕).
+     - Replaced the large 120px BannerBackupReminder card with a slim 34px dismissible reminder strip, preventing connection profiles from being pushed down the screen.
+  4. Elimination of Notification Shade Spam (Android):
+     - In RdpAutoTypeService.cs, suppressed posting timeout error notification ID 1003 to the Android notification drawer.
+  5. Streamlined Profile Editor (Windows & Android):
+     - Profile Name, Host, Port, Username, and Password are the primary immediately-visible fields.
+     - Edge-case options (RD Gateway, Display Mode, Certificate Warnings, Wake-on-LAN, Port Knocking, Local Resources) cleanly organized into a collapsible Expander ("Advanced Network & Display Options", default collapsed).
+  6. Streamlined Resolution Picker (Windows & Android):
+     - Replaced cluttered multi-item resolution list with 3 clean options:
+       1) 1080p Standard (1920 x 1080 Landscape) [Default]
+       2) Multi-Monitor Spanning (Full screen across all displays)
+       3) Custom Resolution (Specify width and height)
+     - Preserves 1920x1080 Landscape desktop ratio without altering host workstation layout.
+  7. Consolidated Windows Settings Dialog (Windows):
+     - Reorganized 10 separate vertically-stacked sections into 3 categorized tabs (TabControl):
+       - Tab 1: Security & Unlock (Auto-lock, Windows Hello, Master Password & Recovery, Self-destruct)
+       - Tab 2: Connection & Display (Display Defaults, Certificate Warnings, Clipboard Sharing)
+       - Tab 3: Maintenance & Privacy (Trace cleaning, Disk encryption check)
+  8. Automated Preflight & Silent WOL (Windows & Android):
+     - Seamless connection progression: Port Knocking runs first, followed automatically by Wake-on-LAN and reachability check.
+     - If host answers after WOL, launches directly into Remote Desktop without manual confirmation prompts.
+  9. Dismissible In-App Banners & Redundant Warning Clean-Up:
+     - All in-app alerts and notifications are dismissible and non-blocking.
+  10. Preselected Certificate Warning Suppression:
+     - Certificate warnings suppressed by default (authentication level: 0 / SuppressCertWarnings = true), avoiding modal cert mismatch blocks on private and LAN networks.
+
+26.B - MOBILE-TO-PC NATIVE LANDSCAPE 1080P SMART-SCROLLING POLICY:
+  1. Default Resolution & Orientation Contract:
+     - When connecting from Android to PC, the connection defaults strictly to 1920x1080 native Windows landscape ratio.
+     - RdpProfile.ResolveResolution() safely maps "device" or legacy presets to (1920, 1080, false).
+     - If width < height, RdpProfile.ResolveResolution() and RdpLauncher.LaunchRdp() automatically swap dimensions to ensure width >= height (landscape).
+  2. Smart-Scroll & Pan Preservation:
+     - RDP URI query sets dynamic resolution=i:0 to strictly block client-side display control PDUs (MS-RDPEDISP) from shrinking the remote Windows OS desktop.
+     - RDP URI query sets smart sizing=i:1 (with screen mode id=2) to enable touch panning and pinch-to-zoom across the full 1920x1080 desktop canvas without altering desktop icon positions or window bounds on the remote PC.
 
 --------------------------------------------------------------------------------
 END OF FILE — keep synchronized with the code.

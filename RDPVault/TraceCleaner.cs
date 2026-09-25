@@ -132,14 +132,44 @@ public static class TraceCleaner
                 @"Software\Microsoft\Terminal Server Client", writable: true);
             if (key == null) return;
 
+            var liveHosts = RdpLauncher.GetLiveHosts();
+
             if (Everything && (explicitHosts == null || explicitHosts.Length == 0))
             {
                 foreach (var name in key.GetValueNames())
+                {
                     if (name.StartsWith("MRU", StringComparison.OrdinalIgnoreCase))
-                        key.DeleteValue(name, throwOnMissingValue: false);
+                    {
+                        string val = key.GetValue(name)?.ToString() ?? "";
+                        if (!liveHosts.Any(h => val.Contains(h, StringComparison.OrdinalIgnoreCase)))
+                            key.DeleteValue(name, throwOnMissingValue: false);
+                    }
+                }
 
-                key.DeleteSubKeyTree("Servers", throwOnMissingSubKey: false);
-                key.DeleteSubKeyTree("Default", throwOnMissingSubKey: false);
+                using (var def = key.OpenSubKey("Default", writable: true))
+                {
+                    if (def != null)
+                    {
+                        foreach (var name in def.GetValueNames())
+                        {
+                            string val = def.GetValue(name)?.ToString() ?? "";
+                            if (!liveHosts.Any(h => val.Contains(h, StringComparison.OrdinalIgnoreCase)))
+                                def.DeleteValue(name, throwOnMissingValue: false);
+                        }
+                    }
+                }
+
+                using (var servers = key.OpenSubKey("Servers", writable: true))
+                {
+                    if (servers != null)
+                    {
+                        foreach (string sub in servers.GetSubKeyNames())
+                        {
+                            if (!liveHosts.Any(h => sub.Contains(h, StringComparison.OrdinalIgnoreCase)))
+                                servers.DeleteSubKeyTree(sub, throwOnMissingSubKey: false);
+                        }
+                    }
+                }
                 return;
             }
 
@@ -147,7 +177,9 @@ public static class TraceCleaner
             foreach (var name in key.GetValueNames())
             {
                 if (!name.StartsWith("MRU", StringComparison.OrdinalIgnoreCase)) continue;
-                if (MentionsTargetHost(key.GetValue(name)?.ToString() ?? "", explicitHosts))
+                string val = key.GetValue(name)?.ToString() ?? "";
+                if (liveHosts.Any(h => val.Contains(h, StringComparison.OrdinalIgnoreCase))) continue;
+                if (MentionsTargetHost(val, explicitHosts))
                     key.DeleteValue(name, throwOnMissingValue: false);
             }
 
@@ -156,8 +188,12 @@ public static class TraceCleaner
             {
                 if (def != null)
                     foreach (var name in def.GetValueNames())
+                    {
+                        string val = def.GetValue(name)?.ToString() ?? "";
+                        if (liveHosts.Any(h => val.Contains(h, StringComparison.OrdinalIgnoreCase))) continue;
                         if (MentionsTargetHost(def.GetValue(name)?.ToString() ?? "", explicitHosts))
                             def.DeleteValue(name, throwOnMissingValue: false);
+                    }
             }
 
             // Modern mstsc: one subkey per host, holding UsernameHint etc.
@@ -165,8 +201,11 @@ public static class TraceCleaner
             {
                 if (servers != null)
                     foreach (string sub in servers.GetSubKeyNames())
+                    {
+                        if (liveHosts.Any(h => sub.Contains(h, StringComparison.OrdinalIgnoreCase))) continue;
                         if (MentionsTargetHost(sub, explicitHosts))
                             servers.DeleteSubKeyTree(sub, throwOnMissingSubKey: false);
+                    }
             }
         });
     }
@@ -236,13 +275,15 @@ public static class TraceCleaner
         });
     }
 
-    /// <summary>Our own temporary launcher files (%TEMP%\rdpv_*.rdp). Always removed.</summary>
+    /// <summary>Our own temporary launcher files (%TEMP%\rdpv_*.rdp). Active sessions are preserved until exit.</summary>
     public static void TempLaunchers()
     {
         TryRun(() =>
         {
+            var liveTempFiles = RdpLauncher.GetLiveTempFiles();
             foreach (string file in Directory.GetFiles(Path.GetTempPath(), "rdpv_*.rdp"))
             {
+                if (liveTempFiles.Contains(file)) continue;
                 TryDeleteFile(file);
             }
         });
@@ -309,6 +350,7 @@ public static class TraceCleaner
             if (!CredEnumerateW(null, 0, out int count, out IntPtr pCreds)) return;
             try
             {
+                var liveHosts = RdpLauncher.GetLiveHosts();
                 IntPtr[] creds = new IntPtr[count];
                 Marshal.Copy(pCreds, creds, 0, count);
 
@@ -318,6 +360,7 @@ public static class TraceCleaner
                     string? target = Marshal.PtrToStringUni(c.TargetName);
                     if (target == null) continue;
                     if (!target.StartsWith("TERMSRV/", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (liveHosts.Any(h => target.Contains(h, StringComparison.OrdinalIgnoreCase))) continue;
                     if (!Everything && !MentionsTargetHost(target, explicitHosts)) continue;
                     _ = CredDeleteW(target, c.Type, 0);
                 }

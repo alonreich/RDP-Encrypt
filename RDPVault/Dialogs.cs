@@ -91,6 +91,7 @@ public static class Dialogs
             Foreground = Text,
             BorderBrush = Border,
             BorderThickness = new Avalonia.Thickness(1),
+            Cursor = new Cursor(StandardCursorType.Hand),
             Background = danger ? Danger : accent ? Accent : new SolidColorBrush(Color.Parse("#1A1A1E"))
         };
 
@@ -118,11 +119,17 @@ public static class Dialogs
         var cancel = Btn("Cancel");
         var typed = Field($"Type {typeToConfirm} to confirm");
 
+        confirm.IsDefault = typeToConfirm == null;
+        cancel.IsCancel = true;
         confirm.IsEnabled = typeToConfirm == null;
         if (typeToConfirm != null)
         {
             typed.TextChanged += (_, _) =>
-                confirm.IsEnabled = string.Equals(typed.Text?.Trim(), typeToConfirm, StringComparison.OrdinalIgnoreCase);
+            {
+                bool matches = string.Equals(typed.Text?.Trim(), typeToConfirm, StringComparison.OrdinalIgnoreCase);
+                confirm.IsEnabled = matches;
+                confirm.IsDefault = matches;
+            };
         }
 
         var body = new StackPanel { Spacing = 14 };
@@ -149,6 +156,8 @@ public static class Dialogs
     {
         var w = Shell(title, 460, 240);
         var close = Btn("OK", accent: true);
+        close.IsDefault = true;
+        close.IsCancel = true;
         var body = new StackPanel { Spacing = 14 };
         body.Children.Add(Label(title, 17, isError ? Danger : Text, bold: true));
         body.Children.Add(Label(message, 13, Dim));
@@ -175,6 +184,8 @@ public static class Dialogs
         var create = Btn("Create vault", accent: true);
         var cancel = Btn("Cancel");
         create.IsEnabled = false;
+        create.IsDefault = true;
+        cancel.IsCancel = true;
 
         void Validate()
         {
@@ -190,7 +201,9 @@ public static class Dialogs
 
         pw1.TextChanged += (_, _) => Validate();
         pw2.TextChanged += (_, _) => Validate();
+        pw1.KeyDown += (_, e) => { if (e.Key == Key.Enter) pw2.Focus(); };
         pw2.KeyDown += (_, e) => { if (e.Key == Key.Enter && create.IsEnabled) w.Close(pw1.Text); };
+        w.Opened += (_, _) => pw1.Focus();
 
         var body = new StackPanel { Spacing = 12 };
         body.Children.Add(Label("CREATE YOUR VAULT", 18, Text, bold: true));
@@ -292,7 +305,7 @@ public static class Dialogs
             clipTimer = null;
             try
             {
-                var clip = TopLevel.GetTopLevel(w)?.Clipboard;
+                var clip = TopLevel.GetTopLevel(owner)?.Clipboard ?? TopLevel.GetTopLevel(w)?.Clipboard;
                 if (clip != null) _ = clip.SetTextAsync("");
             }
             catch { }
@@ -302,7 +315,7 @@ public static class Dialogs
         {
             try
             {
-                var clip = TopLevel.GetTopLevel(w)?.Clipboard;
+                var clip = TopLevel.GetTopLevel(w)?.Clipboard ?? TopLevel.GetTopLevel(owner)?.Clipboard;
                 if (clip == null) { status.Text = "Could not access the clipboard."; return; }
                 await clip.SetTextAsync(code);
                 status.Text = "Copied. The clipboard is cleared again in 60 seconds - paste it somewhere safe now. " +
@@ -320,8 +333,6 @@ public static class Dialogs
             catch { status.Text = "Could not access the clipboard."; }
         };
 
-        w.Closed += (_, _) => ClearClipboard();
-
         var body = new StackPanel { Spacing = 12 };
         body.Children.Add(Label("YOUR RECOVERY CODE", 18, Text, bold: true));
         body.Children.Add(Label(
@@ -336,6 +347,8 @@ public static class Dialogs
         body.Children.Add(tools);
         body.Children.Add(status);
         body.Children.Add(ack);
+
+        done.IsDefault = true;
 
         var row = new StackPanel
         {
@@ -359,6 +372,8 @@ public static class Dialogs
         var unlock = Btn("Unlock", accent: true);
         var cancel = Btn("Cancel");
         unlock.IsEnabled = false;
+        unlock.IsDefault = true;
+        cancel.IsCancel = true;
 
         box.TextChanged += (_, _) =>
         {
@@ -369,6 +384,7 @@ public static class Dialogs
             hint.Foreground = ok ? Ok : Dim;
         };
         box.KeyDown += (_, e) => { if (e.Key == Key.Enter && unlock.IsEnabled) w.Close(box.Text); };
+        w.Opened += (_, _) => box.Focus();
 
         var body = new StackPanel { Spacing = 12 };
         body.Children.Add(Label("UNLOCK WITH A RECOVERY CODE", 17, Text, bold: true));
@@ -406,6 +422,8 @@ public static class Dialogs
         var save = Btn("Change password", accent: true);
         var cancel = Btn("Cancel");
         save.IsEnabled = false;
+        save.IsDefault = true;
+        cancel.IsCancel = true;
 
         void Validate()
         {
@@ -419,6 +437,10 @@ public static class Dialogs
         oldPw.TextChanged += (_, _) => Validate();
         new1.TextChanged += (_, _) => Validate();
         new2.TextChanged += (_, _) => Validate();
+        oldPw.KeyDown += (_, e) => { if (e.Key == Key.Enter) new1.Focus(); };
+        new1.KeyDown += (_, e) => { if (e.Key == Key.Enter) new2.Focus(); };
+        new2.KeyDown += (_, e) => { if (e.Key == Key.Enter && save.IsEnabled) w.Close(((string, string)?)(oldPw.Text ?? "", new1.Text ?? "")); };
+        w.Opened += (_, _) => { if (requireOldPassword) oldPw.Focus(); else new1.Focus(); };
 
         var body = new StackPanel { Spacing = 12 };
         body.Children.Add(Label("CHANGE MASTER PASSWORD", 17, Text, bold: true));

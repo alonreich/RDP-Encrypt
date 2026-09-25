@@ -57,11 +57,26 @@ echo ###########################################################
 if exist "%FINAL_DIR%" rd /s /q "%FINAL_DIR%"
 if not exist "%OUTPUT_DIR%" mkdir "%OUTPUT_DIR%"
 
+if not defined ANDROID_HOME (
+  if exist "%LOCALAPPDATA%\RdpVaultBuildTools\android-sdk" set "ANDROID_HOME=%LOCALAPPDATA%\RdpVaultBuildTools\android-sdk"
+  if exist "%LOCALAPPDATA%\Android\Sdk" set "ANDROID_HOME=%LOCALAPPDATA%\Android\Sdk"
+)
+if not defined ANDROID_SDK_ROOT if defined ANDROID_HOME set "ANDROID_SDK_ROOT=!ANDROID_HOME!"
+
+if not defined JAVA_HOME (
+  if exist "%LOCALAPPDATA%\RdpVaultBuildTools\jdk" set "JAVA_HOME=%LOCALAPPDATA%\RdpVaultBuildTools\jdk"
+  if exist "C:\Program Files\Microsoft\jdk-17" set "JAVA_HOME=C:\Program Files\Microsoft\jdk-17"
+)
+
+set "SDK_PARAM="
+if defined ANDROID_HOME set "SDK_PARAM=-p:AndroidSdkDirectory="!ANDROID_HOME!""
+if defined JAVA_HOME set "SDK_PARAM=!SDK_PARAM! -p:JavaSdkDirectory="!JAVA_HOME!""
+
 echo.
 echo ###########################################################
 echo BUILDING RDP Vault: Android APK Release (ARM64 / x86_64)
 echo ###########################################################
-dotnet publish "%PROJECT_FILE%" -c Release -p:AndroidPackageFormat=apk -o "%FINAL_DIR%" -consoleLoggerParameters:Summary
+dotnet publish "%PROJECT_FILE%" -c Release -p:AndroidPackageFormat=apk !SDK_PARAM! -o "%FINAL_DIR%" -consoleLoggerParameters:Summary
 if errorlevel 1 exit /b 1
 
 for /r "%FINAL_DIR%" %%F in (*-Signed.apk) do (

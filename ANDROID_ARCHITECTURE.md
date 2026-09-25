@@ -36,6 +36,7 @@ RDP Vault Android is a parallel distribution branch providing zero-compromise en
 - **Target Clients**: Microsoft Remote Desktop / Windows App (`com.microsoft.rdc.androidx`, `com.microsoft.rdc.android`), Free aRDP (`com.iiordanov.freeaRDP`), and aRDP Pro (`com.iiordanov.aRDP`).
 - **Store Fallback**: Direct one-tap redirect to Google Play Store if no client is installed.
 - **Zero Clipboard Exposure**: Passwords NEVER touch the system clipboard, eliminating credential leakage to predictive keyboards, clipboard logging services, or cloud sync.
+- **Multi-Monitor Desktop Protection**: Pre-rotates device into Landscape orientation before hand-off, forces `dynamic resolution=i:0`, and sets fixed target desktop width/height parameters. This prevents Microsoft Remote Desktop from querying portrait mobile metrics (1080x1920) and sending an RDP PDU that forces Windows into a vertical single-monitor session (which squashes open windows and scrambles multi-monitor desktop icons).
 - **Certificate Warning Suppression**: Automatically configures `authentication level=i:0` and `promptcredentialonce=i:1` to suppress untrusted certificate and server identity warnings.
 - **Network Resilience**: Dynamic DNS resolution and dual-endpoint WOL (broadcast + unicast across WOL port and custom RDP port).
 
@@ -180,9 +181,9 @@ now declares no types at all; do not reintroduce P/Invoke bindings there.
 - **Pre-flight reachability**: a 1.5s TCP connect before hand-off, so an asleep PC is
   reported in plain words instead of Remote Desktop spinning into `0x204`. Offers
   *Send Wake-on-LAN* / *Check again* / *Connect anyway*.
-- **Wake-on-LAN** now targets the subnet-directed broadcast address (many OEM builds drop
-  `255.255.255.255`), no longer fires meaningless packets at the host's RDP port, and
-  refuses — out loud — to pretend it can wake a PC over mobile data.
+- **Wake-on-LAN** targets the subnet-directed broadcast address on Wi-Fi (many OEM builds drop
+  `255.255.255.255`) and unicast multi-port dispatch across cellular/WAN (see §6.2), with
+  stealth port knocking sequenced first so the router's perimeter firewall accepts the packet.
 - **Import validation**: candidate bytes are parsed as a `VaultFile` with a KDF salt and
   Wrap/Data blobs before anything overwrites a live vault. The old check was "longer than
   16 bytes".
@@ -245,3 +246,33 @@ Three defects the build caught, all fixed and in the shipped APK:
 6. Re-arming the Auto-Type prompt on every connect with no way to opt out.
 7. Removing `FLAG_SECURE` without an explicit user opt-out.
 8. Overwriting `vault.rdpv` with bytes that have not been parsed as a `VaultFile`.
+
+---
+
+## 6. September 2026 Audit (Release 1.2.0 — Post-Audit Hardening)
+
+Authoritative implementation details recorded in `project_structure.txt` **SECTIONS 22, 23 & 24**.
+
+### 6.1 Stealth Port Knocking & Perimeter Firewall Inversion (`IcmpKnock.cs`)
+- **Pipeline Inversion**: Port Knocking runs **first**, dynamically adding the mobile client source IP to the router's whitelist address list (e.g. MikroTik `action=add-src-to-address-list address-list=Roaming_Authorized`) before any Wake-on-LAN packets or RDP reachability probes are dispatched.
+- **Stealth Drop Handling**: When firewalls follow address-list registration with an immediate `action=drop`, no TCP SYN-ACK is returned. `SendSocketSynKnockAsync` treats `OperationCanceledException` and `SocketException` as expected success.
+- **Cellular Latency Tolerance**: Increased knock cancellation timeout to 2500ms to allow mobile baseband modems sufficient time for RRC radio state transitions (`RRC_IDLE` to `RRC_CONNECTED`).
+- **Concurrent Dual-Stack Engine**: Concurrently dispatches an HTTP GET request via `HttpClient` (matching `curl -m 1 http://<host>:<port>`) and raw dual-stack TCP SYN attempts to handle carrier NAT64/CLAT translation seamlessly.
+
+### 6.2 Full WAN / Cellular Wake-on-LAN (`MainView.axaml.cs` & `RdpLauncher.cs`)
+- **Port Stripping**: Automatically removes port colons and brackets from `profile.Host` before DNS/IP resolution.
+- **Multi-Port Dispatch**: Sends magic packets (6x `0xFF` + 16x MAC address) across WOL port 9, echo port 7, and custom RDP ports.
+- **Unrestricted Mobile WOL**: Cellular data checks no longer abort WAN WOL magic packet delivery.
+
+### 6.3 Post-APK-Upgrade Accessibility Service Recovery (`RdpAutoTypeService.cs`)
+- **Stale Package Unbind State**: On in-place APK upgrades, Android OS marks accessibility services as `Crashed services:{}` until re-registered.
+- **Active State Check**: `IsServiceActive => Instance != null` verifies that the service is physically bound and receiving events, while `IsServiceConfigured` queries `Settings.Secure`.
+- **UI Diagnostics**: If configured in settings but `Instance == null`, the UI warns `AUTO-TYPE UNBOUND (UPDATE DETECTED)` and provides a direct shortcut to Android Accessibility Settings.
+- **ADB Rebind Protocol**:
+  ```cmd
+  adb shell settings delete secure enabled_accessibility_services
+  adb shell settings put secure accessibility_enabled 1
+  adb shell settings put secure enabled_accessibility_services com.rdpvault.app/com.rdpvault.app.services.RdpAutoTypeService
+  adb shell pm grant com.rdpvault.app android.permission.POST_NOTIFICATIONS
+  ```
+

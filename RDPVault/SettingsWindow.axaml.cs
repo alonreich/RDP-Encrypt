@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Threading.Tasks;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Threading;
@@ -13,6 +14,11 @@ public partial class SettingsWindow : Window
     public SettingsWindow()
     {
         InitializeComponent();
+
+        AddHandler(InputElement.PointerPressedEvent, (_, _) => SessionManager.Current.Touch(),
+                   RoutingStrategies.Tunnel, handledEventsToo: true);
+        AddHandler(InputElement.KeyDownEvent, (_, _) => SessionManager.Current.Touch(),
+                   RoutingStrategies.Tunnel, handledEventsToo: true);
 
         var settings = SessionManager.Current.Payload?.Settings;
         var policy = SessionManager.Current.File?.Policy ?? new VaultPolicy();

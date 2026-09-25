@@ -1,10 +1,10 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="RDPVault.SettingsWindow"
-        Title="Settings" Width="560" Height="760"
+        Title="Settings" Width="560" Height="650" MinWidth="480" MinHeight="500"
         Icon="avares://RDPVault/Assets/icon.ico"
-        WindowStartupLocation="CenterOwner" CanResize="False"
-        Background="#13283E" Foreground="#EDEDED" FontFamily="Inter, Arial">
+        WindowStartupLocation="CenterOwner" CanResize="True"
+        Background="#0E0E10" Foreground="#EDEDED" FontFamily="Inter, Arial">
     <Window.Styles>
         <Style Selector="TextBox">
             <Setter Property="Background" Value="#141417"/>
@@ -23,6 +23,7 @@
             <Setter Property="CornerRadius" Value="4"/>
             <Setter Property="Padding" Value="14,8"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor" Value="Hand"/>
         </Style>
         <Style Selector="Button:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="#2A2A30"/>
@@ -49,153 +50,175 @@
         </Style>
     </Window.Styles>
 
-    <Grid RowDefinitions="*,Auto">
-        <ScrollViewer Grid.Row="0">
-            <StackPanel Margin="24" Spacing="14">
-                <TextBlock Text="VAULT SETTINGS" FontSize="18" FontWeight="Bold" LetterSpacing="1"/>
+    <Grid RowDefinitions="Auto,*,Auto">
+        <TextBlock Grid.Row="0" Text="VAULT SETTINGS" FontSize="18" FontWeight="Bold" LetterSpacing="1" Margin="24,20,24,10"/>
 
-                <!-- ============ auto lock ============ -->
-                <StackPanel Spacing="6">
-                    <TextBlock Classes="h" Text="Auto-lock"/>
-                    <TextBlock Classes="hint" Text="Minutes of inactivity before the vault locks itself (1-1440). Open Remote Desktop windows are never closed by this."/>
-                    <TextBox Name="TxtLockMinutes" Width="120" HorizontalAlignment="Left" Watermark="60"/>
-                </StackPanel>
+        <TabControl Grid.Row="1" Margin="16,0,16,10">
+            <!-- ============ TAB 1: SECURITY & UNLOCK ============ -->
+            <TabItem Header="Security &amp; Unlock">
+                <ScrollViewer Margin="8,12,8,0">
+                    <StackPanel Spacing="16">
+                        <!-- Auto-lock -->
+                        <StackPanel Spacing="6">
+                            <TextBlock Classes="h" Text="Auto-lock"/>
+                            <TextBlock Classes="hint" Text="Minutes of inactivity before the vault locks itself (1-1440). Open Remote Desktop windows are never closed by this."/>
+                            <TextBox Name="TxtLockMinutes" Width="120" HorizontalAlignment="Left" Watermark="60"/>
+                        </StackPanel>
 
-                <Border Height="1" Background="#1A1A1E"/>
+                        <Border Height="1" Background="#1A1A1E"/>
 
-                <!-- ============ master password / recovery ============ -->
-                <StackPanel Spacing="8">
-                    <TextBlock Classes="h" Text="Master password and recovery"/>
-                    <TextBlock Name="TxtRecoveryStatus" Classes="hint" Text=""/>
-                    <StackPanel Orientation="Horizontal" Spacing="10">
-                        <Button Name="BtnChangePassword" Content="Change master password" Click="BtnChangePassword_Click"/>
-                        <Button Name="BtnRecoveryCode" Content="Create Recovery Code" Click="BtnRecoveryCode_Click"/>
-                    </StackPanel>
-                </StackPanel>
-
-                <Border Height="1" Background="#1A1A1E"/>
-
-                <!-- ============ windows hello ============ -->
-                <StackPanel Spacing="6">
-                    <TextBlock Classes="h" Text="Windows Hello quick unlock"/>
-                    <TextBlock Classes="hint" Text="Binds this PC so you can unlock with fingerprint, face or PIN instead of typing the master password. The key never leaves this machine's TPM."/>
-                    <StackPanel Orientation="Horizontal" Spacing="10">
-                        <Button Name="BtnToggleHello" Content="Enable quick unlock" Click="BtnToggleHello_Click"/>
-                        <TextBlock Name="TxtHelloStatus" VerticalAlignment="Center" FontSize="12" TextWrapping="Wrap"/>
-                    </StackPanel>
-                </StackPanel>
-
-                <Border Height="1" Background="#1A1A1E"/>
-
-                <!-- ============ trace cleaning ============ -->
-                <StackPanel Spacing="6">
-                    <TextBlock Classes="h" Text="Trace cleaning"/>
-                    <TextBlock Classes="hint" Text="What gets erased after every Remote Desktop session, and when the vault locks."/>
-                    <ComboBox Name="CmbSweepScope" HorizontalAlignment="Stretch" Background="#141417"
-                              BorderBrush="#2E2E35" Foreground="#EDEDED">
-                        <ComboBoxItem Content="Only traces of hosts stored in this vault (recommended)"/>
-                        <ComboBoxItem Content="Every Remote Desktop trace on this PC"/>
-                    </ComboBox>
-                    <TextBlock Name="TxtScopeHint" Classes="hint" Text=""/>
-                    <CheckBox Name="ChkDeepSweep">
-                        <TextBlock Text="Also delete saved Remote Desktop passwords from Windows Credential Manager when locking"
-                                   TextWrapping="Wrap" Foreground="#EDEDED"/>
-                    </CheckBox>
-                    <CheckBox Name="ChkKillSessions">
-                        <TextBlock Text="Close open Remote Desktop windows if the drive holding RDP Vault is removed"
-                                   TextWrapping="Wrap" Foreground="#EDEDED"/>
-                    </CheckBox>
-                </StackPanel>
-
-                <Border Height="1" Background="#1A1A1E"/>
-
-                <!-- ============ certificate & identity warnings ============ -->
-                <StackPanel Spacing="6">
-                    <TextBlock Classes="h" Text="Certificate &amp; Identity Warnings"/>
-                    <CheckBox Name="ChkSuppressCertWarnings">
-                        <TextBlock Text="Ignore and suppress certificate &amp; identity warnings (authentication level: 0)"
-                                   TextWrapping="Wrap" Foreground="#EDEDED"/>
-                    </CheckBox>
-                    <TextBlock Classes="hint"
-                               Text="Default: unchecked (secure). Requires server certificate verification and securely pins accepted thumbprints in vault.rdpv. Check to bypass verification and suppress warnings."/>
-                </StackPanel>
-
-                <Border Height="1" Background="#1A1A1E"/>
-
-                <!-- ============ display defaults ============ -->
-                <StackPanel Spacing="6">
-                    <TextBlock Classes="h" Text="Display Defaults"/>
-                    <CheckBox Name="ChkDefaultFullScreen">
-                        <TextBlock Text="Launch sessions in full screen by default"
-                                   TextWrapping="Wrap" Foreground="#EDEDED"/>
-                    </CheckBox>
-                    <CheckBox Name="ChkDefaultMultiMon">
-                        <TextBlock Text="Use all monitors by default (multi-monitor spanning)"
-                                   TextWrapping="Wrap" Foreground="#EDEDED"/>
-                    </CheckBox>
-                    <TextBlock Classes="hint"
-                               Text="Default: both checked. Can be overridden on individual connection profiles."/>
-                </StackPanel>
-
-                <Border Height="1" Background="#1A1A1E"/>
-
-                <!-- ============ clipboard defaults ============ -->
-                <StackPanel Spacing="6">
-                    <TextBlock Classes="h" Text="Clipboard Sharing Default"/>
-                    <CheckBox Name="ChkDefaultAllowClipboard">
-                        <TextBlock Text="Share local clipboard with remote sessions by default"
-                                   TextWrapping="Wrap" Foreground="#EDEDED"/>
-                    </CheckBox>
-                    <TextBlock Classes="hint"
-                               Text="Default: checked (enabled). Allows copying and pasting between the local machine and remote desktop. Can be changed or unchecked per connection profile."/>
-                </StackPanel>
-
-                <Border Height="1" Background="#1A1A1E"/>
-
-                <!-- ============ disk encryption ============ -->
-                <StackPanel Spacing="6">
-                    <TextBlock Classes="h" Text="Disk encryption check"/>
-                    <CheckBox Name="ChkWarnBitLocker">
-                        <TextBlock Text="Warn me when the drive holding the vault is not encrypted"
-                                   TextWrapping="Wrap" Foreground="#EDEDED"/>
-                    </CheckBox>
-                    <TextBlock Name="TxtBitLockerStatus" Classes="hint" Text="Checking..."/>
-                </StackPanel>
-
-                <Border Height="1" Background="#1A1A1E"/>
-
-                <!-- ============ self destruct ============ -->
-                <Border Background="#1A0A0A" BorderBrush="#4A1A1A" BorderThickness="1" CornerRadius="4" Padding="14">
-                    <StackPanel Spacing="8">
-                        <TextBlock Classes="h" Text="Self-destruct (dangerous)" Foreground="#E86060"/>
-                        <TextBlock Classes="hint"
-                                   Text="Wrong-password attempts are always slowed down automatically. Self-destruct goes further: after the limit is reached the vault file is erased and cannot be recovered without a backup. Leave this off unless you truly need it."/>
-                        <CheckBox Name="ChkSelfDestruct" Click="ChkSelfDestruct_Click">
-                            <TextBlock Text="Erase the vault after too many wrong attempts" TextWrapping="Wrap" Foreground="#EDEDED"/>
-                        </CheckBox>
-                        <Grid ColumnDefinitions="*,12,*">
-                            <StackPanel Grid.Column="0" Spacing="4">
-                                <TextBlock Classes="hint" Text="Attempts allowed (5-500)"/>
-                                <TextBox Name="TxtSelfDestructAttempts" Watermark="25"/>
+                        <!-- Windows Hello -->
+                        <StackPanel Spacing="6">
+                            <TextBlock Classes="h" Text="Windows Hello quick unlock"/>
+                            <TextBlock Classes="hint" Text="Binds this PC so you can unlock with fingerprint, face or PIN instead of typing the master password. The key never leaves this machine's TPM."/>
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <Button Name="BtnToggleHello" Content="Enable quick unlock" Click="BtnToggleHello_Click"
+                                        AutomationProperties.Name="Toggle Windows Hello quick unlock"/>
+                                <TextBlock Name="TxtHelloStatus" VerticalAlignment="Center" FontSize="12" TextWrapping="Wrap"/>
                             </StackPanel>
-                            <StackPanel Grid.Column="2" Spacing="4">
-                                <TextBlock Classes="hint" Text="Counting window in minutes"/>
-                                <TextBox Name="TxtSelfDestructWindow" Watermark="60"/>
+                        </StackPanel>
+
+                        <Border Height="1" Background="#1A1A1E"/>
+
+                        <!-- Master Password & Recovery -->
+                        <StackPanel Spacing="8">
+                            <TextBlock Classes="h" Text="Master password and emergency recovery"/>
+                            <TextBlock Name="TxtRecoveryStatus" Classes="hint" Text=""/>
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <Button Name="BtnChangePassword" Content="Change master password" Click="BtnChangePassword_Click"
+                                        AutomationProperties.Name="Change master password"/>
+                                <Button Name="BtnRecoveryCode" Content="Create Recovery Code" Click="BtnRecoveryCode_Click"
+                                        AutomationProperties.Name="Create or replace Recovery Code"/>
                             </StackPanel>
-                        </Grid>
-                        <TextBlock Name="TxtSelfDestructNote" Classes="hint" Text=""/>
+                        </StackPanel>
+
+                        <Border Height="1" Background="#1A1A1E"/>
+
+                        <!-- Self-destruct -->
+                        <Border Background="#1A0A0A" BorderBrush="#4A1A1A" BorderThickness="1" CornerRadius="4" Padding="14">
+                            <StackPanel Spacing="8">
+                                <TextBlock Classes="h" Text="Self-destruct (dangerous)" Foreground="#E86060"/>
+                                <TextBlock Classes="hint"
+                                           Text="Wrong-password attempts are always slowed down automatically. Self-destruct goes further: after the limit is reached the vault file is erased and cannot be recovered without a backup. Leave this off unless you truly need it."/>
+                                <CheckBox Name="ChkSelfDestruct" Click="ChkSelfDestruct_Click">
+                                    <TextBlock Text="Erase the vault after too many wrong attempts" TextWrapping="Wrap" Foreground="#EDEDED"/>
+                                </CheckBox>
+                                <Grid ColumnDefinitions="*,12,*">
+                                    <StackPanel Grid.Column="0" Spacing="4">
+                                        <TextBlock Classes="hint" Text="Attempts allowed (5-500)"/>
+                                        <TextBox Name="TxtSelfDestructAttempts" Watermark="25"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2" Spacing="4">
+                                        <TextBlock Classes="hint" Text="Counting window in minutes"/>
+                                        <TextBox Name="TxtSelfDestructWindow" Watermark="60"/>
+                                    </StackPanel>
+                                </Grid>
+                                <TextBlock Name="TxtSelfDestructNote" Classes="hint" Text=""/>
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
-                </Border>
+                </ScrollViewer>
+            </TabItem>
 
-                <TextBlock Name="TxtError" Foreground="#E83030" FontSize="12" IsVisible="False" TextWrapping="Wrap"/>
-            </StackPanel>
-        </ScrollViewer>
+            <!-- ============ TAB 2: CONNECTION & DISPLAY DEFAULTS ============ -->
+            <TabItem Header="Connection &amp; Display">
+                <ScrollViewer Margin="8,12,8,0">
+                    <StackPanel Spacing="16">
+                        <!-- Display Defaults -->
+                        <StackPanel Spacing="6">
+                            <TextBlock Classes="h" Text="Display Defaults"/>
+                            <CheckBox Name="ChkDefaultFullScreen">
+                                <TextBlock Text="Launch sessions in full screen by default"
+                                           TextWrapping="Wrap" Foreground="#EDEDED"/>
+                            </CheckBox>
+                            <CheckBox Name="ChkDefaultMultiMon">
+                                <TextBlock Text="Use all monitors by default (multi-monitor spanning)"
+                                           TextWrapping="Wrap" Foreground="#EDEDED"/>
+                            </CheckBox>
+                            <TextBlock Classes="hint"
+                                       Text="Default: both checked. Can be overridden on individual connection profiles."/>
+                        </StackPanel>
 
-        <Border Grid.Row="1" Background="#0E1D2D" BorderBrush="#0A1521" BorderThickness="0,1,0,0" Padding="24,14">
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10">
-                <Button Name="BtnCancel" Content="Cancel" Click="BtnCancel_Click"/>
-                <Button Name="BtnSave" Content="Save settings" Classes="Accent" Click="BtnSave_Click"/>
-            </StackPanel>
+                        <Border Height="1" Background="#1A1A1E"/>
+
+                        <!-- Certificate & Identity Warnings -->
+                        <StackPanel Spacing="6">
+                            <TextBlock Classes="h" Text="Certificate &amp; Identity Warnings"/>
+                            <CheckBox Name="ChkSuppressCertWarnings">
+                                <TextBlock Text="Ignore and suppress certificate &amp; identity warnings (authentication level: 0)"
+                                           TextWrapping="Wrap" Foreground="#EDEDED"/>
+                            </CheckBox>
+                            <TextBlock Classes="hint"
+                                       Text="Default: checked (streamlined). Bypasses cert mismatch warnings on trusted private/LAN networks."/>
+                        </StackPanel>
+
+                        <Border Height="1" Background="#1A1A1E"/>
+
+                        <!-- Clipboard Defaults -->
+                        <StackPanel Spacing="6">
+                            <TextBlock Classes="h" Text="Clipboard Sharing Default"/>
+                            <CheckBox Name="ChkDefaultAllowClipboard">
+                                <TextBlock Text="Share local clipboard with remote sessions by default"
+                                           TextWrapping="Wrap" Foreground="#EDEDED"/>
+                            </CheckBox>
+                            <TextBlock Classes="hint"
+                                       Text="Default: checked (enabled). Allows copying and pasting between local PC and remote desktop."/>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- ============ TAB 3: MAINTENANCE & PRIVACY ============ -->
+            <TabItem Header="Maintenance &amp; Privacy">
+                <ScrollViewer Margin="8,12,8,0">
+                    <StackPanel Spacing="16">
+                        <!-- Trace cleaning -->
+                        <StackPanel Spacing="6">
+                            <TextBlock Classes="h" Text="Trace cleaning"/>
+                            <TextBlock Classes="hint" Text="What gets erased after every Remote Desktop session, and when the vault locks."/>
+                            <ComboBox Name="CmbSweepScope" HorizontalAlignment="Stretch" Background="#141417"
+                                      BorderBrush="#2E2E35" Foreground="#EDEDED">
+                                <ComboBoxItem Content="Only traces of hosts stored in this vault (recommended)"/>
+                                <ComboBoxItem Content="Every Remote Desktop trace on this PC"/>
+                            </ComboBox>
+                            <TextBlock Name="TxtScopeHint" Classes="hint" Text=""/>
+                            <CheckBox Name="ChkDeepSweep">
+                                <TextBlock Text="Also delete saved Remote Desktop passwords from Windows Credential Manager when locking"
+                                           TextWrapping="Wrap" Foreground="#EDEDED"/>
+                            </CheckBox>
+                            <CheckBox Name="ChkKillSessions">
+                                <TextBlock Text="Close open Remote Desktop windows if the drive holding RDP Vault is removed"
+                                           TextWrapping="Wrap" Foreground="#EDEDED"/>
+                            </CheckBox>
+                        </StackPanel>
+
+                        <Border Height="1" Background="#1A1A1E"/>
+
+                        <!-- Disk encryption check -->
+                        <StackPanel Spacing="6">
+                            <TextBlock Classes="h" Text="Disk encryption check"/>
+                            <CheckBox Name="ChkWarnBitLocker">
+                                <TextBlock Text="Warn me when the drive holding the vault is not encrypted"
+                                           TextWrapping="Wrap" Foreground="#EDEDED"/>
+                            </CheckBox>
+                            <TextBlock Name="TxtBitLockerStatus" Classes="hint" Text="Checking..."/>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+
+        <Border Grid.Row="2" Background="#141417" BorderBrush="#2E2E35" BorderThickness="0,1,0,0" Padding="24,14">
+            <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Grid.Column="0" Name="TxtError" Foreground="#E83030" FontSize="12" IsVisible="False"
+                           TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10">
+                    <Button Name="BtnCancel" Content="Cancel" Click="BtnCancel_Click" IsCancel="True"
+                            AutomationProperties.Name="Cancel settings changes"/>
+                    <Button Name="BtnSave" Content="Save settings" Classes="Accent" Click="BtnSave_Click" IsDefault="True"
+                            AutomationProperties.Name="Save settings"/>
+                </StackPanel>
+            </Grid>
         </Border>
     </Grid>
 </Window>

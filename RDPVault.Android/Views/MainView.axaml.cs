@@ -83,7 +83,7 @@ public partial class MainView : UserControl
         public string CustomWidth;
         public string CustomHeight;
         public int MultiMonIndex;
-        public bool PreserveNative;
+        public int SmartSizingIndex;
         public bool EnableWol;
         public string WolMac;
         public string WolPort;
@@ -93,7 +93,7 @@ public partial class MainView : UserControl
         public string KnockTcpPort;
         public string KnockDelay;
         public string KnockSignature;
-        public bool SuppressCert;
+        public int SuppressCertIndex;
         public string Notes;
     }
     private ProfileEditorState _editorInitialState;
@@ -385,16 +385,12 @@ public partial class MainView : UserControl
         CmbProfileResolution.SelectionChanged += (_, _) =>
         {
             int idx = CmbProfileResolution.SelectedIndex;
-            PnlProfileCustomRes.IsVisible = idx == 8;
-            if (idx == 7) // Match Mobile Device Screen
-            {
-                ChkProfilePreserveNative.IsChecked = false;
-            }
+            PnlProfileCustomRes.IsVisible = idx == 2;
             UpdateProfilePreserveNativeHint();
         };
         TxtProfileCustomWidth.TextChanged += (_, _) => UpdateProfilePreserveNativeHint();
         TxtProfileCustomHeight.TextChanged += (_, _) => UpdateProfilePreserveNativeHint();
-        ChkProfilePreserveNative.IsCheckedChanged += (_, _) => UpdateProfilePreserveNativeHint();
+        CmbProfileSmartSizing.SelectionChanged += (_, _) => UpdateProfilePreserveNativeHint();
 
         // Suggestion 8: no hardcoded pixel jumps. Whatever gains focus scrolls itself into
         // view above the soft keyboard, on any screen size or keyboard height.
@@ -517,6 +513,14 @@ public partial class MainView : UserControl
             PersistAccessibilityPromptChoice();
             OverlayEnableAccessibility.IsVisible = false;
         };
+        CardLaunchPasswordTip.PointerPressed += (_, _) =>
+        {
+            if (!RdpAutoTypeService.IsServiceActive)
+            {
+                MainActivity.Instance?.BeginExternalActivity();
+                RdpAutoTypeService.OpenAccessibilitySettings(AndroidContext);
+            }
+        };
 
         // 11. Launch overlay controls
         BtnSkipWolWait.Click += (_, _) => SkipWolWait();
@@ -563,55 +567,33 @@ public partial class MainView : UserControl
     //  RESOLUTION LABELS (suggestion 2 / audit item 8)
     // ==================================================================
 
-    /// <summary>
-    /// The resolution the profile editor is currently configured for, as a human string.
-    /// The old UI hardcoded "1920x1080" into the checkbox label no matter what the user
-    /// picked, which read as "the app ignored my choice".
-    /// </summary>
+    // Returns the current editor resolution label
     private string CurrentEditorResolutionLabel()
     {
         int idx = CmbProfileResolution.SelectedIndex;
-        switch (idx)
+        return idx switch
         {
-            case 1: return "1920x1080";
-            case 2: return "1280x720";
-            case 3: return "1600x900";
-            case 4: return "1366x768";
-            case 5: return "2560x1440";
-            case 6: return "3840x2160";
-            case 7: return "your phone's screen size";
-            case 8:
-                string w = string.IsNullOrWhiteSpace(TxtProfileCustomWidth.Text) ? "1920" : TxtProfileCustomWidth.Text!.Trim();
-                string h = string.IsNullOrWhiteSpace(TxtProfileCustomHeight.Text) ? "1080" : TxtProfileCustomHeight.Text!.Trim();
-                return $"{w}x{h}";
-            default:
-                string global = _payload?.Settings?.DefaultResolution ?? "1920x1080";
-                return global.Equals("Device", StringComparison.OrdinalIgnoreCase) ? "your phone's screen size" : global;
-        }
+            1 => "Multi-Monitor (Spanned)",
+            2 => $"{(string.IsNullOrWhiteSpace(TxtProfileCustomWidth.Text) ? "1920" : TxtProfileCustomWidth.Text.Trim())}x{(string.IsNullOrWhiteSpace(TxtProfileCustomHeight.Text) ? "1080" : TxtProfileCustomHeight.Text.Trim())}",
+            _ => "1920x1080 Landscape"
+        };
     }
 
     private void UpdateProfilePreserveNativeHint()
     {
         string res = CurrentEditorResolutionLabel();
-        bool deviceNative = CmbProfileResolution.SelectedIndex == 7;
+        int mode = CmbProfileSmartSizing.SelectedIndex;
+        bool effectiveScroll = mode == 2 || (mode == 0 && !(_payload?.Settings?.DefaultSmartSizing ?? false));
 
-        ChkProfilePreserveNative.Content = deviceNative
-            ? "Keep native size (not applicable when matching the phone screen)"
-            : $"Keep native {res} (never squash or distort - scroll to view)";
-
-        if (ChkProfilePreserveNative.IsChecked == true)
+        if (effectiveScroll)
         {
-            TxtProfilePreserveNativeHint.Text = deviceNative
-                ? "The remote desktop is resized to fit your phone, so there is nothing to preserve."
-                : $"Recommended: the Windows desktop stays at full {res} in both portrait and landscape. Nothing is squashed. You scroll side-to-side and up/down to reach the rest of the screen.";
+            TxtProfilePreserveNativeHint.Text = $"Native {res} desktop (1:1 scrollable landscape without squashing remote monitors).";
             TxtProfilePreserveNativeHint.Foreground = new SolidColorBrush(Color.Parse("#2FBF71"));
         }
         else
         {
-            TxtProfilePreserveNativeHint.Text = deviceNative
-                ? "The remote desktop is resized to match your phone screen."
-                : $"Warning: squeezes the whole {res} desktop into your phone screen. Apps and icons look squashed, especially in portrait.";
-            TxtProfilePreserveNativeHint.Foreground = new SolidColorBrush(Color.Parse("#E5A93C"));
+            TxtProfilePreserveNativeHint.Text = $"Native {res} desktop with client-side zoom & pan.";
+            TxtProfilePreserveNativeHint.Foreground = new SolidColorBrush(Color.Parse("#2FBF71"));
         }
     }
 
@@ -642,14 +624,14 @@ public partial class MainView : UserControl
         {
             TxtSettingsPreserveNativeHint.Text = deviceNative
                 ? "The remote desktop is resized to fit your phone, so there is nothing to preserve."
-                : $"Recommended: remote sessions stay at full {res}. Prevents remote apps and desktop icons from being squashed.";
+                : $"Requests native {res} desktop. Note: External RDP clients control resolution, scaling, and panning according to their own display settings.";
             TxtSettingsPreserveNativeHint.Foreground = new SolidColorBrush(Color.Parse("#2FBF71"));
         }
         else
         {
             TxtSettingsPreserveNativeHint.Text = deviceNative
                 ? "The remote desktop is resized to match your phone screen."
-                : $"Warning: squeezes {res} remote desktops into your phone screen. Apps and icons look squashed in portrait.";
+                : $"Auto-fit: scales {res} remote desktop to fit phone screen. Apps and icons will appear smaller.";
             TxtSettingsPreserveNativeHint.Foreground = new SolidColorBrush(Color.Parse("#E5A93C"));
         }
     }
@@ -1709,7 +1691,7 @@ public partial class MainView : UserControl
             CustomWidth = TxtProfileCustomWidth.Text ?? "1920",
             CustomHeight = TxtProfileCustomHeight.Text ?? "1080",
             MultiMonIndex = CmbProfileMultiMon.SelectedIndex,
-            PreserveNative = ChkProfilePreserveNative.IsChecked == true,
+            SmartSizingIndex = CmbProfileSmartSizing.SelectedIndex,
             EnableWol = ChkProfileEnableWol.IsChecked == true,
             WolMac = TxtProfileWolMac.Text ?? "",
             WolPort = TxtProfileWolPort.Text ?? "9",
@@ -1719,7 +1701,7 @@ public partial class MainView : UserControl
             KnockTcpPort = TxtProfileKnockTcpPort.Text ?? "7777",
             KnockDelay = TxtProfileKnockDelay.Text ?? "2",
             KnockSignature = TxtProfileKnockSignature.Text ?? "",
-            SuppressCert = ChkProfileSuppressCert.IsChecked == true,
+            SuppressCertIndex = CmbProfileSuppressCert.SelectedIndex,
             Notes = TxtProfileNotes.Text ?? ""
         };
     }
@@ -1737,7 +1719,7 @@ public partial class MainView : UserControl
             || (TxtProfileCustomWidth.Text ?? "") != _editorInitialState.CustomWidth
             || (TxtProfileCustomHeight.Text ?? "") != _editorInitialState.CustomHeight
             || CmbProfileMultiMon.SelectedIndex != _editorInitialState.MultiMonIndex
-            || (ChkProfilePreserveNative.IsChecked == true) != _editorInitialState.PreserveNative
+            || CmbProfileSmartSizing.SelectedIndex != _editorInitialState.SmartSizingIndex
             || (ChkProfileEnableWol.IsChecked == true) != _editorInitialState.EnableWol
             || (TxtProfileWolMac.Text ?? "") != _editorInitialState.WolMac
             || (TxtProfileWolPort.Text ?? "") != _editorInitialState.WolPort
@@ -1747,7 +1729,7 @@ public partial class MainView : UserControl
             || (TxtProfileKnockTcpPort.Text ?? "") != _editorInitialState.KnockTcpPort
             || (TxtProfileKnockDelay.Text ?? "") != _editorInitialState.KnockDelay
             || (TxtProfileKnockSignature.Text ?? "") != _editorInitialState.KnockSignature
-            || (ChkProfileSuppressCert.IsChecked == true) != _editorInitialState.SuppressCert
+            || CmbProfileSuppressCert.SelectedIndex != _editorInitialState.SuppressCertIndex
             || (TxtProfileNotes.Text ?? "") != _editorInitialState.Notes;
     }
 
@@ -1787,7 +1769,7 @@ public partial class MainView : UserControl
             TxtProfileCustomWidth.Text = "1920";
             TxtProfileCustomHeight.Text = "1080";
             CmbProfileMultiMon.SelectedIndex = 0;
-            ChkProfilePreserveNative.IsChecked = true;
+            CmbProfileSmartSizing.SelectedIndex = 0;
 
             ChkProfileEnableWol.IsChecked = false;
             PnlWolDetails.IsVisible = false;
@@ -1803,7 +1785,7 @@ public partial class MainView : UserControl
             TxtProfileKnockTcpPort.Text = "7777";
             TxtProfileKnockDelay.Text = "2";
             TxtProfileNotes.Text = "";
-            ChkProfileSuppressCert.IsChecked = _payload?.Settings?.SuppressCertWarnings ?? true;
+            CmbProfileSuppressCert.SelectedIndex = 0;
             BtnDeleteProfile.IsVisible = false;
             SetAdvancedVisible(false);
         }
@@ -1818,19 +1800,19 @@ public partial class MainView : UserControl
             TxtProfileGateway.Text = profile.GatewayHost;
 
             string preset = profile.ResolutionPreset ?? "InheritGlobal";
-            CmbProfileResolution.SelectedIndex = preset.ToLowerInvariant() switch
+            if (profile.MultiMonOverride == TriStateOverride.Enabled || profile.UseMultiMon || string.Equals(preset, "MultiMon", StringComparison.OrdinalIgnoreCase))
             {
-                "1920x1080" => 1,
-                "1280x720" => 2,
-                "1600x900" => 3,
-                "1366x768" => 4,
-                "2560x1440" => 5,
-                "3840x2160" => 6,
-                "device" => 7,
-                "custom" => 8,
-                _ => 0
-            };
-            PnlProfileCustomRes.IsVisible = CmbProfileResolution.SelectedIndex == 8;
+                CmbProfileResolution.SelectedIndex = 1;
+            }
+            else if (string.Equals(preset, "Custom", StringComparison.OrdinalIgnoreCase) || (profile.Width > 0 && profile.Height > 0 && (profile.Width != 1920 || profile.Height != 1080)))
+            {
+                CmbProfileResolution.SelectedIndex = 2;
+            }
+            else
+            {
+                CmbProfileResolution.SelectedIndex = 0;
+            }
+            PnlProfileCustomRes.IsVisible = CmbProfileResolution.SelectedIndex == 2;
             TxtProfileCustomWidth.Text = (profile.Width > 0 ? profile.Width : 1920).ToString();
             TxtProfileCustomHeight.Text = (profile.Height > 0 ? profile.Height : 1080).ToString();
 
@@ -1841,10 +1823,11 @@ public partial class MainView : UserControl
                 _ => 0
             };
 
-            ChkProfilePreserveNative.IsChecked = profile.SmartSizingOverride switch
+            CmbProfileSmartSizing.SelectedIndex = profile.SmartSizingOverride switch
             {
-                TriStateOverride.Enabled => false,
-                _ => true
+                TriStateOverride.Enabled => 1,
+                TriStateOverride.Disabled => 2,
+                _ => 0
             };
 
             ChkProfileEnableWol.IsChecked = profile.EnableWol;
@@ -1862,11 +1845,11 @@ public partial class MainView : UserControl
             TxtProfileKnockTcpPort.Text = profile.KnockTcpPort > 0 ? profile.KnockTcpPort.ToString() : "7777";
             TxtProfileKnockDelay.Text = profile.KnockDelaySeconds >= 0 ? profile.KnockDelaySeconds.ToString() : "2";
             TxtProfileNotes.Text = profile.Notes;
-            ChkProfileSuppressCert.IsChecked = profile.SuppressCertWarningsOverride switch
+            CmbProfileSuppressCert.SelectedIndex = profile.SuppressCertWarningsOverride switch
             {
-                TriStateOverride.Enabled => true,
-                TriStateOverride.Disabled => false,
-                _ => _payload?.Settings?.SuppressCertWarnings ?? true
+                TriStateOverride.Enabled => 1,
+                TriStateOverride.Disabled => 2,
+                _ => 0
             };
             BtnDeleteProfile.IsVisible = true;
 
@@ -1983,55 +1966,45 @@ public partial class MainView : UserControl
             }
         }
 
-        string resPreset = CmbProfileResolution.SelectedIndex switch
+        int resIdx = CmbProfileResolution.SelectedIndex;
+        string resPreset;
+        TriStateOverride multiMonOverride;
+        int customWidth = 1920;
+        int customHeight = 1080;
+
+        if (resIdx == 1) // Multi-Mon Spanning
         {
-            1 => "1920x1080",
-            2 => "1280x720",
-            3 => "1600x900",
-            4 => "1366x768",
-            5 => "2560x1440",
-            6 => "3840x2160",
-            7 => "Device",
-            8 => "Custom",
-            _ => "InheritGlobal"
-        };
-
-        int.TryParse(TxtProfileCustomWidth.Text, out int customWidth);
-        if (customWidth <= 0) customWidth = 1920;
-
-        int.TryParse(TxtProfileCustomHeight.Text, out int customHeight);
-        if (customHeight <= 0) customHeight = 1080;
-
-        TriStateOverride multiMonOverride = CmbProfileMultiMon.SelectedIndex switch
+            resPreset = "MultiMon";
+            multiMonOverride = TriStateOverride.Enabled;
+        }
+        else if (resIdx == 2) // Custom
         {
-            1 => TriStateOverride.Disabled,
-            2 => TriStateOverride.Enabled,
+            resPreset = "Custom";
+            multiMonOverride = TriStateOverride.Disabled;
+            int.TryParse(TxtProfileCustomWidth.Text, out customWidth);
+            if (customWidth <= 0) customWidth = 1920;
+            int.TryParse(TxtProfileCustomHeight.Text, out customHeight);
+            if (customHeight <= 0) customHeight = 1080;
+        }
+        else // 1080p Standard Landscape [Default]
+        {
+            resPreset = "1920x1080";
+            multiMonOverride = TriStateOverride.Disabled;
+        }
+
+        TriStateOverride smartSizingOverride = CmbProfileSmartSizing.SelectedIndex switch
+        {
+            1 => TriStateOverride.Enabled,
+            2 => TriStateOverride.Disabled,
             _ => TriStateOverride.InheritGlobal
         };
 
-        TriStateOverride smartSizingOverride;
-        if (_editingProfile != null && _editingProfile.SmartSizingOverride == TriStateOverride.InheritGlobal &&
-            ChkProfilePreserveNative.IsChecked == true)
+        TriStateOverride certOverride = CmbProfileSuppressCert.SelectedIndex switch
         {
-            smartSizingOverride = TriStateOverride.InheritGlobal;
-        }
-        else
-        {
-            smartSizingOverride = ChkProfilePreserveNative.IsChecked == true
-                ? TriStateOverride.Disabled
-                : TriStateOverride.Enabled;
-        }
-
-        TriStateOverride certOverride;
-        if (_editingProfile != null && _editingProfile.SuppressCertWarningsOverride == TriStateOverride.InheritGlobal &&
-            ChkProfileSuppressCert.IsChecked == (_payload?.Settings?.SuppressCertWarnings ?? true))
-        {
-            certOverride = TriStateOverride.InheritGlobal;
-        }
-        else
-        {
-            certOverride = ChkProfileSuppressCert.IsChecked == true ? TriStateOverride.Enabled : TriStateOverride.Disabled;
-        }
+            1 => TriStateOverride.Enabled,
+            2 => TriStateOverride.Disabled,
+            _ => TriStateOverride.InheritGlobal
+        };
 
         if (_payload == null || _vaultFile == null || _masterKey == null) return;
 
@@ -2542,10 +2515,11 @@ public partial class MainView : UserControl
         _activeLaunchProfile = profile;
 
         bool promptSuppressed = AppPrefs.GetBool(AppPrefs.KeyAutoTypePromptSuppressed, false);
+        bool isConfigured = RdpAutoTypeService.IsServiceConfigured(AndroidContext);
+        bool isActive = RdpAutoTypeService.IsServiceActive;
 
-        // Suggestion 3: ask once, remember the answer. The old build showed this wall of
-        // text on EVERY connect, forever, with no way to opt out.
-        if (profile.HasPassword && !promptSuppressed && !RdpAutoTypeService.IsServiceEnabled(AndroidContext))
+        // If the service is not active (or unbound post-update), prompt the user
+        if (profile.HasPassword && !promptSuppressed && !isActive)
         {
             ChkDontAskAccessibilityAgain.IsChecked = false;
             OverlayEnableAccessibility.IsVisible = true;
@@ -2578,19 +2552,23 @@ public partial class MainView : UserControl
         CardLaunchUnreachable.IsVisible = false;
 
         var (w, h, isDevice) = profile.ResolveResolution(_payload?.Settings);
-        bool preserveNative = profile.SmartSizingOverride != TriStateOverride.Enabled;
-        CardLaunchPanTip.IsVisible = preserveNative && !isDevice;
-        TxtLaunchPanTip.Text = $"Your PC stays at full {w}x{h}. In Remote Desktop, tap the top bar and turn on the 🔍 pan/zoom control to scroll around the screen without squashing it.";
-
-        CardLaunchPasswordTip.IsVisible = profile.HasPassword;
+        CardLaunchPanTip.IsVisible = false;
+        CardLaunchPasswordTip.IsVisible = false;
         if (profile.HasPassword)
         {
-            bool autoTypeReady = RdpAutoTypeService.IsServiceEnabled(AndroidContext);
-            if (autoTypeReady)
+            bool isConfigured = RdpAutoTypeService.IsServiceConfigured(AndroidContext);
+            bool isActive = RdpAutoTypeService.IsServiceActive;
+            if (isActive)
             {
-                TxtLaunchPasswordTipTitle.Text = "AUTO-TYPE IS ON";
+                TxtLaunchPasswordTipTitle.Text = "AUTO-TYPE IS ACTIVE";
                 TxtLaunchPasswordTipBody.Text = "Your password will be typed straight into Remote Desktop. It never touches the clipboard.";
                 TxtLaunchPasswordTipBody.Foreground = new SolidColorBrush(Color.Parse("#2FBF71"));
+            }
+            else if (isConfigured)
+            {
+                TxtLaunchPasswordTipTitle.Text = "AUTO-TYPE UNBOUND (UPDATE DETECTED)";
+                TxtLaunchPasswordTipBody.Text = "Android suspended the service after update. Tap here to toggle RDP Vault Auto-Type OFF and ON in Accessibility Settings.";
+                TxtLaunchPasswordTipBody.Foreground = new SolidColorBrush(Color.Parse("#E5A93C"));
             }
             else
             {
@@ -2605,19 +2583,24 @@ public partial class MainView : UserControl
         BtnCancelLaunch.IsEnabled = true;
         OverlayLaunch.IsVisible = true;
 
+        bool handedOff = false;
+        var (targetWidth, targetHeight, _) = profile.ResolveResolution(_payload?.Settings);
+        bool shouldEnforceLandscape = targetWidth >= targetHeight && targetWidth > 0;
+        if (shouldEnforceLandscape && MainActivity.Instance != null)
+        {
+            // Desktop Protection: Rotate to Landscape during connection sequence so that
+            // Android Window Manager and Microsoft Remote Desktop / aRDP initialize in Landscape.
+            // This prevents the external client from querying portrait metrics (1080x1920)
+            // and sending an RDP PDU that forces Windows into a vertical single-monitor session,
+            // which squashes open windows and scrambles multi-monitor desktop icons.
+            MainActivity.Instance.RequestedOrientation = global::Android.Content.PM.ScreenOrientation.SensorLandscape;
+        }
+
         try
         {
             await Task.Delay(150, ct);
 
-            // 1. Wake-on-LAN
-            if (profile.EnableWol && !string.IsNullOrWhiteSpace(profile.WolMacAddress))
-            {
-                await RunWolSequenceAsync(profile, host, ct);
-            }
-
-            if (ct.IsCancellationRequested) return;
-
-            // 2. Port Knocking (Issue 31)
+            // 1. Port Knocking (Issue 31) - opens router dynamic address list before WOL and preflight
             if (profile.EnableIcmpKnock)
             {
                 bool isTcp = string.Equals(profile.KnockProtocol, "TCP", StringComparison.OrdinalIgnoreCase);
@@ -2637,6 +2620,14 @@ public partial class MainView : UserControl
                     TxtLaunchStep.Text = $"Knock packet warning: {ex.Message}";
                     await Task.Delay(1000, ct);
                 }
+            }
+
+            if (ct.IsCancellationRequested) return;
+
+            // 2. Wake-on-LAN (Magic packet can now pass through the opened router firewall)
+            if (profile.EnableWol && !string.IsNullOrWhiteSpace(profile.WolMacAddress))
+            {
+                await RunWolSequenceAsync(profile, host, ct);
             }
 
             if (ct.IsCancellationRequested) return;
@@ -2666,8 +2657,9 @@ public partial class MainView : UserControl
 
             if (result == RdpLaunchStatus.Success)
             {
+                handedOff = true;
                 MainActivity.Instance?.StartForegroundSession(profile);
-                UpdateSessionBanner(profile.Name, host, port, unreachable: false);
+                UpdateSessionBanner(profile.Name, host, port, unreachable: false, profile);
                 OverlayLaunch.IsVisible = false;
             }
             else if (result == RdpLaunchStatus.RedirectedToStore)
@@ -2702,6 +2694,11 @@ public partial class MainView : UserControl
             _unreachableChoiceTcs = null;
             _connectCts?.Dispose();
             _connectCts = null;
+
+            if (!handedOff && MainActivity.Instance != null)
+            {
+                MainActivity.Instance.RequestedOrientation = global::Android.Content.PM.ScreenOrientation.Unspecified;
+            }
         }
     }
 
@@ -2719,16 +2716,6 @@ public partial class MainView : UserControl
     private async Task RunWolSequenceAsync(RdpProfile profile, string host, CancellationToken ct)
     {
         TxtLaunchSubStatus.Text = "Sending wake signal";
-
-        if (!HostProbe.IsWolCapableNetwork(AndroidContext))
-        {
-            // Finding 6: WOL is link-local. Silently "sending" it over mobile data and then
-            // making the user sit out a 25 second countdown is a lie with a wait attached.
-            TxtLaunchStep.Text = "This phone is not on Wi-Fi, so the wake-up signal cannot reach your PC. Skipping the wake step.";
-            try { await Task.Delay(2200, ct); } catch (OperationCanceledException) { throw; }
-            return;
-        }
-
         TxtLaunchStep.Text = $"Sending wake-up signal to {profile.WolMacAddress}...";
         await DispatchWolAsync(profile, host);
 
@@ -2770,17 +2757,13 @@ public partial class MainView : UserControl
 
             if (!string.IsNullOrWhiteSpace(profile.GatewayHost))
             {
-                string gwHost = profile.GatewayHost.Trim();
-                int gwPort = 443;
-                if (gwHost.Contains(':'))
+                if (!ConnectionEndpoint.TryParseGatewayAuthority(profile.GatewayHost, out var gwEp, out _))
                 {
-                    var parts = gwHost.Split(':');
-                    gwHost = parts[0];
-                    if (parts.Length > 1 && int.TryParse(parts[1], out int p)) gwPort = p;
+                    gwEp = new ConnectionEndpoint(profile.GatewayHost.Trim(), 443);
                 }
 
-                TxtLaunchStep.Text = $"Checking RD Gateway ({gwHost}:{gwPort})...";
-                bool gwReachable = await HostProbe.IsReachableAsync(gwHost, gwPort, 1500, ct);
+                TxtLaunchStep.Text = $"Checking RD Gateway ({gwEp.Address})...";
+                bool gwReachable = await HostProbe.IsReachableAsync(gwEp.Host, gwEp.Port, 1500, ct);
                 if (gwReachable)
                 {
                     TxtLaunchStep.Text = "RD Gateway answered. Connecting...";
@@ -2802,7 +2785,24 @@ public partial class MainView : UserControl
             {
                 TxtLaunchStep.Text = $"Checking that {host}:{port} is awake...";
 
-                bool reachable = await HostProbe.IsReachableAsync(host, port, 1500, ct);
+                bool reachable = false;
+                int maxAttempts = profile.EnableIcmpKnock ? 3 : 1;
+                for (int attempt = 1; attempt <= maxAttempts; attempt++)
+                {
+                    if (profile.EnableIcmpKnock && maxAttempts > 1)
+                    {
+                        TxtLaunchStep.Text = $"Checking that {host}:{port} is awake (attempt {attempt}/{maxAttempts})...";
+                    }
+
+                    reachable = await HostProbe.IsReachableAsync(host, port, 1500, ct);
+                    if (reachable) break;
+
+                    if (attempt < maxAttempts && !ct.IsCancellationRequested)
+                    {
+                        await Task.Delay(1000, ct);
+                    }
+                }
+
                 if (reachable)
                 {
                     TxtLaunchStep.Text = $"{host}:{port} answered. Opening Remote Desktop...";
@@ -2812,14 +2812,21 @@ public partial class MainView : UserControl
                 if (ct.IsCancellationRequested) return false;
 
                 var kind = HostProbe.GetActiveNetworkKind(AndroidContext);
+                bool isLocal = HostProbe.IsPrivateOrLocalHost(host);
                 string reason = kind switch
                 {
                     NetworkKind.None => "This phone has no network connection right now.",
-                    NetworkKind.Cellular => "You are on mobile data. If this is a home or office PC, it is probably only reachable from its own Wi-Fi network or through a VPN.",
+                    NetworkKind.Cellular when isLocal => "You are on mobile data. If this is a home or office PC, it is probably only reachable from its own Wi-Fi network or through a VPN.",
+                    NetworkKind.Cellular => $"The remote computer did not answer on port {port}. It may be offline, asleep, or blocked by a firewall.",
                     _ => "The computer did not answer. It is most likely asleep, switched off, or not on this network."
                 };
 
-                bool canWol = !string.IsNullOrWhiteSpace(profile.WolMacAddress) && HostProbe.IsWolCapableNetwork(AndroidContext);
+                if (profile.EnableIcmpKnock)
+                {
+                    reason += " (Port knocking was sent, but the port is not yet accepting connections).";
+                }
+
+                bool canWol = !string.IsNullOrWhiteSpace(profile.WolMacAddress);
 
                 TxtLaunchUnreachableTitle.Text = $"{host} DID NOT ANSWER";
                 TxtLaunchUnreachableBody.Text = reason + " Opening Remote Desktop now would just spin for about 30 seconds and then show error 0x204.";
@@ -2898,22 +2905,39 @@ public partial class MainView : UserControl
             for (int i = 1; i <= 16; i++) Buffer.BlockCopy(macBytes, 0, packet, i * 6, 6);
 
             using var client = new UdpClient { EnableBroadcast = true };
+            try { client.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.Broadcast, 1); } catch { }
+
             int wolPort = profile.WolPort > 0 ? profile.WolPort : 9;
+            var ports = new HashSet<int> { wolPort, 7 };
+            if (profile.Port > 0 && profile.Port != 3389)
+            {
+                ports.Add(profile.Port);
+            }
 
             var targets = new List<IPAddress> { IPAddress.Broadcast };
             targets.AddRange(HostProbe.GetDirectedBroadcastAddresses());
 
-            // Unicast to the host's last known address as well: it works on switches that
-            // still hold the ARP entry, and costs one datagram.
-            if (IPAddress.TryParse(host, out var hostIp))
+            string cleanHost = host.Trim();
+            if (cleanHost.Contains(':') && !cleanHost.Contains('['))
+            {
+                var parts = cleanHost.Split(':');
+                cleanHost = parts[0];
+            }
+            else if (cleanHost.StartsWith('[') && cleanHost.Contains(']'))
+            {
+                int end = cleanHost.IndexOf(']');
+                cleanHost = cleanHost[1..end];
+            }
+
+            if (IPAddress.TryParse(cleanHost, out var hostIp))
             {
                 targets.Add(hostIp);
             }
-            else if (!string.IsNullOrWhiteSpace(host))
+            else if (!string.IsNullOrWhiteSpace(cleanHost))
             {
                 try
                 {
-                    var addresses = await Dns.GetHostAddressesAsync(host);
+                    var addresses = await Dns.GetHostAddressesAsync(cleanHost);
                     targets.AddRange(addresses.Where(a => a.AddressFamily == AddressFamily.InterNetwork));
                 }
                 catch { }
@@ -2921,11 +2945,14 @@ public partial class MainView : UserControl
 
             foreach (var ip in targets.Distinct())
             {
-                try
+                foreach (int port in ports)
                 {
-                    await client.SendAsync(packet, packet.Length, new IPEndPoint(ip, wolPort));
+                    try
+                    {
+                        await client.SendAsync(packet, packet.Length, new IPEndPoint(ip, port));
+                    }
+                    catch { }
                 }
-                catch { }
             }
         }
         catch
@@ -2945,7 +2972,7 @@ public partial class MainView : UserControl
     //  SESSION BANNER
     // ==================================================================
 
-    private void UpdateSessionBanner(string name, string host, int port, bool unreachable)
+    private void UpdateSessionBanner(string name, string host, int port, bool unreachable, RdpProfile? profile = null)
     {
         BannerActiveSession.IsVisible = true;
         TxtActiveSessionDetails.Text = $"{name}  •  {host}:{port}";
@@ -2967,7 +2994,32 @@ public partial class MainView : UserControl
             TxtActiveSessionDot.Foreground = new SolidColorBrush(Color.Parse("#2FBF71"));
             TxtActiveSessionHeading.Foreground = new SolidColorBrush(Color.Parse("#2FBF71"));
             TxtActiveSessionHeading.Text = "HANDED OFF TO REMOTE DESKTOP";
-            TxtActiveSessionSub.Text = "Your session is running inside Microsoft Remote Desktop.";
+
+            if (profile != null)
+            {
+                var (width, height, isDeviceNative) = profile.ResolveResolution(_payload?.Settings);
+                bool smartSizing = profile.ResolveSmartSizing(_payload?.Settings);
+                bool effectiveSmartSizing = profile.SmartSizingOverride switch
+                {
+                    TriStateOverride.Enabled => true,
+                    TriStateOverride.Disabled => false,
+                    _ => smartSizing
+                };
+
+                if (!isDeviceNative && width > 0 && height > 0 && !effectiveSmartSizing)
+                {
+                    TxtActiveSessionSub.Text = "Remote session active inside external RDP client.";
+                }
+                else
+                {
+                    TxtActiveSessionSub.Text = "Remote session active inside external RDP client.";
+                }
+            }
+            else
+            {
+                TxtActiveSessionSub.Text = "Your session is running inside Remote Desktop.";
+            }
+
             TxtActiveSessionSub.Foreground = new SolidColorBrush(Color.Parse("#9FC7A6"));
         }
     }
@@ -2999,7 +3051,7 @@ public partial class MainView : UserControl
             string name = p?.Name ?? "Remote PC";
             string host = p?.Host ?? "";
             int port = p?.Port ?? 3389;
-            UpdateSessionBanner(name, host, port, activity.ActiveSessionHostUnreachable);
+            UpdateSessionBanner(name, host, port, activity.ActiveSessionHostUnreachable, p);
         }
         else
         {

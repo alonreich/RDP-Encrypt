@@ -1230,11 +1230,23 @@ public partial class MainView : UserControl
 
         if (enroll.Success && enroll.Seal != null && enroll.KeyId != null)
         {
-            var seals = (_vaultFile.Seals ?? new List<SealEntry>()).Where(s => s.MachineId != machineId).ToList();
-            seals.Add(new SealEntry { MachineId = machineId, KeyId = enroll.KeyId, TpmBlob = enroll.Seal });
-            VaultCrypto.Save(_vaultFile, _masterKey, _payload, VaultPath, newSeals: seals);
-            _vaultFile.Seals = seals;
-            TxtUnlockedStatus.Text = "Vault Unlocked (Fingerprint / Face Protected)";
+            try
+            {
+                var seals = (_vaultFile.Seals ?? new List<SealEntry>()).Where(s => s.MachineId != machineId).ToList();
+                seals.Add(new SealEntry { MachineId = machineId, KeyId = enroll.KeyId, TpmBlob = enroll.Seal });
+                VaultCrypto.Save(_vaultFile, _masterKey, _payload, VaultPath, newSeals: seals);
+                _vaultFile.Seals = seals;
+                TxtUnlockedStatus.Text = "Vault Unlocked (Fingerprint / Face Protected)";
+                global::Android.Util.Log.Info("RDPVault", $"[Biometrics] Successfully repaired biometric seal for machineId {machineId}, keyId {enroll.KeyId}");
+            }
+            catch (Exception ex)
+            {
+                global::Android.Util.Log.Error("RDPVault", $"[Biometrics] Failed to save repaired seal: {ex}");
+            }
+        }
+        else
+        {
+            global::Android.Util.Log.Warn("RDPVault", $"[Biometrics] Re-seal cancelled or failed: {enroll.Error}");
         }
     }
 

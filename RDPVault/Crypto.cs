@@ -315,12 +315,13 @@ public static class VaultCrypto
                     File.WriteAllText(tmp, json);
                     if (File.Exists(vaultPath))
                     {
-                        File.Replace(tmp, vaultPath, bak, true);
+                        try
+                        {
+                            File.Copy(vaultPath, bak, overwrite: true);
+                        }
+                        catch { }
                     }
-                    else
-                    {
-                        File.Move(tmp, vaultPath, overwrite: true);
-                    }
+                    File.Move(tmp, vaultPath, overwrite: true);
                     break;
                 }
                 catch (IOException) when (attempt < maxRetries)

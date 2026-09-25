@@ -103,23 +103,9 @@ public static class AndroidHardwareKeyStore
             builder.SetInvalidatedByBiometricEnrollment(false);
         }
 
-        // Attempt StrongBox backing (dedicated HSM chip), fallback to TEE Keymaster if unsupported.
-        if (OperatingSystem.IsAndroidVersionAtLeast(28) && HasStrongBoxSupport(context))
-        {
-            try
-            {
-                builder.SetIsStrongBoxBacked(true);
-                keyGenerator.Init(builder.Build());
-                keyGenerator.GenerateKey();
-                return;
-            }
-            catch
-            {
-                // StrongBox refused (common on 256-bit AES on some OEM HSMs): fall back to TEE.
-                builder.SetIsStrongBoxBacked(false);
-            }
-        }
-
+        // Use hardware-isolated ARM TrustZone TEE Keymaster (KeyMint).
+        // Avoid StrongBox dedicated chip as Qualcomm/OEM implementations suffer from known
+        // AEADBadTagException / -30 VERIFICATION_FAILED driver bugs during Cipher.doFinal.
         keyGenerator.Init(builder.Build());
         keyGenerator.GenerateKey();
     }
@@ -248,22 +234,12 @@ public static class AndroidHardwareKeyStore
             string javaClass = (e is Java.Lang.Throwable jt) ? (jt.Class?.Name ?? "") : "";
 
             if (typeName.Contains("KeyPermanentlyInvalidated", StringComparison.OrdinalIgnoreCase) ||
-                typeName.Contains("InvalidKey", StringComparison.OrdinalIgnoreCase) ||
                 typeName.Contains("UnrecoverableKey", StringComparison.OrdinalIgnoreCase) ||
-                typeName.Contains("CryptographicException", StringComparison.OrdinalIgnoreCase) ||
                 javaClass.Contains("KeyPermanentlyInvalidated", StringComparison.OrdinalIgnoreCase) ||
                 javaClass.Contains("UnrecoverableKey", StringComparison.OrdinalIgnoreCase) ||
-                javaClass.Contains("InvalidKeyException", StringComparison.OrdinalIgnoreCase) ||
-                javaClass.Contains("KeyStoreException", StringComparison.OrdinalIgnoreCase) ||
-                javaClass.Contains("AEADBadTagException", StringComparison.OrdinalIgnoreCase) ||
-                javaClass.Contains("BadPaddingException", StringComparison.OrdinalIgnoreCase) ||
-                javaClass.Contains("IllegalBlockSizeException", StringComparison.OrdinalIgnoreCase) ||
                 str.Contains("KeyPermanentlyInvalidated", StringComparison.OrdinalIgnoreCase) ||
                 str.Contains("Key permanently invalidated", StringComparison.OrdinalIgnoreCase) ||
                 str.Contains("UnrecoverableKey", StringComparison.OrdinalIgnoreCase) ||
-                str.Contains("InvalidKeyException", StringComparison.OrdinalIgnoreCase) ||
-                str.Contains("AEADBadTag", StringComparison.OrdinalIgnoreCase) ||
-                str.Contains("BadPadding", StringComparison.OrdinalIgnoreCase) ||
                 msg.Contains("Key permanently invalidated", StringComparison.OrdinalIgnoreCase))
             {
                 return true;

@@ -82,16 +82,16 @@ This method sideloads the application directly and activates the secure Auto-Typ
 #### Step 1: Prepare the APK File & Working Directory
 1. Build or download `RDPVault.apk`:
    - If building from source: run `build-apk.cmd` (or `build.cmd`). The output artifact is generated at `compiled\RDPVault.apk`.
-   - If downloading from GitHub Releases: place `RDPVault.apk` into your project directory or into a known folder (e.g., `C:\Full_Control\RDP_Encrypt\compiled\RDPVault.apk`).
-2. Verify ADB is installed on your Windows PC:
+   - If downloading from GitHub Releases: place `RDPVault.apk` into `compiled\RDPVault.apk`.
+2. ADB is bundled directly in the repository under `.\adb\`:
 <div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); border-radius: 6px; margin: 6px 0 14px 0;">
 
 ```cmd
-adb version
+.\adb\adb.exe version
 ```
 
 </div>
-   *If ADB is not recognized, install it via Windows Package Manager: `winget install Google.PlatformTools`, or download Android SDK Platform-Tools and add it to your PATH.*
+   *(Alternatively, add `.\adb` to your PATH or use system-wide ADB).*
 
 #### Step 2: Enable Developer Options & USB Debugging on Your Phone
 1. Open phone **Settings** → **About phone** (or **About device** → **Software information**).
@@ -111,7 +111,7 @@ Confirm your phone is authorized and recognized:
 <div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
 
 ```cmd
-adb devices
+.\adb\adb.exe devices
 ```
 
 </div>
@@ -121,7 +121,7 @@ Install the freshly built package with update and downgrade flags:
 <div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
 
 ```cmd
-adb install -r -d compiled\RDPVault.apk
+.\adb\adb.exe install -r -d compiled\RDPVault.apk
 ```
 
 </div>
@@ -131,7 +131,7 @@ Clear any crashed or suspended accessibility state from prior versions:
 <div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
 
 ```cmd
-adb shell settings delete secure enabled_accessibility_services
+.\adb\adb.exe shell settings delete secure enabled_accessibility_services
 ```
 
 </div>
@@ -141,7 +141,7 @@ Activate the Android accessibility subsystem:
 <div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
 
 ```cmd
-adb shell settings put secure accessibility_enabled 1
+.\adb\adb.exe shell settings put secure accessibility_enabled 1
 ```
 
 </div>
@@ -151,7 +151,7 @@ Bypass Android restricted settings and bind the service immediately:
 <div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
 
 ```cmd
-adb shell settings put secure enabled_accessibility_services com.rdpvault.app/com.rdpvault.app.services.RdpAutoTypeService
+.\adb\adb.exe shell settings put secure enabled_accessibility_services com.rdpvault.app/com.rdpvault.app.services.RdpAutoTypeService
 ```
 
 </div>
@@ -161,7 +161,7 @@ Authorize session foreground notifications without runtime prompts:
 <div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
 
 ```cmd
-adb shell pm grant com.rdpvault.app android.permission.POST_NOTIFICATIONS
+.\adb\adb.exe shell pm grant com.rdpvault.app android.permission.POST_NOTIFICATIONS
 ```
 
 </div>
@@ -171,7 +171,7 @@ Start the application on the phone:
 <div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
 
 ```cmd
-adb shell am start -n com.rdpvault.app/com.rdpvault.app.MainActivity
+.\adb\adb.exe shell am start -n com.rdpvault.app/com.rdpvault.app.MainActivity
 ```
 
 </div>
@@ -182,7 +182,7 @@ Verify that the Auto-Type accessibility service is bound:
 <div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
 
 ```cmd
-adb shell dumpsys accessibility | findstr /C:"Bound services"
+.\adb\adb.exe shell dumpsys accessibility | findstr /C:"Bound services"
 ```
 
 </div>
@@ -191,7 +191,7 @@ Stream real-time connection, port knocking, and password injection logs:
 <div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
 
 ```cmd
-adb logcat -v time -s RDPVault RdpAutoTypeService
+.\adb\adb.exe logcat -v time -s RDPVault RdpAutoTypeService
 ```
 
 </div>

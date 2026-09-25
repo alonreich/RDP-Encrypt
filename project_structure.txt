@@ -142,7 +142,7 @@ need Windows 10/11 only or Android 14+ — the builds are self-contained. See SE
 --------------------------------------------------------------------------------
 SECTION 3 — REPOSITORY / FILE MAP
 --------------------------------------------------------------------------------
-RDP_Encrypt\                       (repo root, c:\Full_Control\RDP_Encrypt)
+RDP_Encrypt\                       (repository root)
 ├── project_structure.txt          ← THIS FILE. Update it when reality changes.
 ├── README.md                      ← End-user manual + official download links.
 ├── ANDROID_ARCHITECTURE.md        ← Android companion architecture & design spec.
@@ -155,6 +155,7 @@ RDP_Encrypt\                       (repo root, c:\Full_Control\RDP_Encrypt)
 │   └── RDPVault.apk               ← Android mobile APK (aligned & v1/v2/v3 signed).
 ├── .github\workflows\
 │   └── build-and-release.yml      ← Automated dual-target CI/CD release workflow.
+├── adb\                           ← Bundled Android Platform Tools (adb.exe, fastboot, DLLs tracked via Git LFS).
 ├── developer_tools\
 │   ├── Find_and_Remove_Comments.py ← C# comment stripper, syntax checker & duplicate analyzer.
 │   ├── Pull_Code_files.py          ← Code aggregator & staging tool (<=10 files for AI chat).

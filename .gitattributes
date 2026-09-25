@@ -1,0 +1,2 @@
+adb/*.dll filter=lfs diff=lfs merge=lfs -text
+adb/*.exe filter=lfs diff=lfs merge=lfs -text

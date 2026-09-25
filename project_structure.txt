@@ -5,10 +5,10 @@ SOURCE OF TRUTH & GUIDANCE FOR ANY AI AGENT (OR HUMAN) WORKING ON THIS PROJECT
 Last updated : 2026-09-25
 Version      : 2026.09.25  (Windows 1.1.0, Android companion 1.2.0)
 Status       : Windows: production release, compiled and tested with .NET 9 SDK on Windows 10/11 x64.
-               SHA-256 (compiled\RDPVault.exe): B0CE502E6112BEA91282B97E6E7E050B7594FF478A537424174E361541D1CDC3
+               SHA-256 (compiled\RDPVault.exe): 374957D9961DFCBA405BFD2F75AB972ADF047395B2AF34CF2D9BD5863E9F131C
                Android: 1.2.0 audit revision - BUILT AND VERIFIED (see SECTION 21, 22, 23, 24, 25 & 26).
                compiled\RDPVault.apk 43 MiB, versionCode 2 / versionName 1.2.0,
-               SHA-256: 09D0F5CFAB192EE3D6EC1D980253752D3FB3D573231606D9C89BF9DEC1F7D341.
+               SHA-256: 0B9F9CFC5CA7959A38B0997DDEF3A329F683EA31B01527D7345B3B2F83D7BB9C.
                Minimum Android is now 9 (API 28); built against API 34/35.
                SECTION 19 supersedes any statement in SECTION 18 that contradicts it. In particular
                SECTION 18's claims about biometric key binding (19.C.1) and about hosting FreeRDP

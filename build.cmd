@@ -7,7 +7,24 @@ pushd "%SCRIPT_DIR%" >nul || exit /b 1
 
 if "%~1"=="--internal-log" goto :run_logged
 if exist build.log del /f /q build.log
-powershell -NoProfile -Command "& { & '%~f0' --internal-log %* 2>&1 | Tee-Object -FilePath build.log; $code = $LASTEXITCODE; if (Test-Path build.log) { (Get-Content -Path build.log) | Set-Content -Path build.log -Encoding utf8 }; exit $code }"
+
+powershell -NoProfile -Command ^
+  "$sw = [System.Diagnostics.Stopwatch]::StartNew();" ^
+  "& '%~f0' --internal-log %* 2>&1 | Tee-Object -FilePath build.log;" ^
+  "$code = $LASTEXITCODE;" ^
+  "$sw.Stop();" ^
+  "if (Test-Path build.log) {" ^
+  "  $lines = Get-Content -Path build.log;" ^
+  "  $warnCount = ($lines | Select-String -Pattern '(?i)\b(warning CS|warning XA|warning\b|\d+ Warning\(s\))' -AllMatches).Matches.Count;" ^
+  "  $duration = '{0}m{1:D2}s' -f [int]$sw.Elapsed.TotalMinutes, $sw.Elapsed.Seconds;" ^
+  "  $timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss');" ^
+  "  $label = if ($code -ne 0) { 'FAIL' } elseif ($warnCount -gt 0) { 'WARN' } else { 'OK' };" ^
+  "  $detail = if ($code -ne 0) { \"- exit code $code\" } elseif ($warnCount -gt 0) { \"- $warnCount warning line(s)\" } else { '- clean success' };" ^
+  "  $firstLine = \"$label $detail - RDP Vault build $timestamp ($duration)\";" ^
+  "  $body = $lines -join [Environment]::NewLine;" ^
+  "  Set-Content -Path build.log -Value ($firstLine + [Environment]::NewLine + $body) -Encoding utf8;" ^
+  "};" ^
+  "exit $code"
 set "RC=%ERRORLEVEL%"
 
 if "%RC%"=="1" (
@@ -25,9 +42,9 @@ if "%RC%"=="2" (
   echo ###########################################################
 )
 
-  popd >nul
+popd >nul
 
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%developer_tools\SetConsoleFont.ps1" <nul
+powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%developer_tools\SetConsoleFont.ps1" <nul 2>nul
 
 exit /b %RC%
 
@@ -51,6 +68,15 @@ set "DOTNET_LOG_ARGS=-consoleLoggerParameters:Summary"
 set "ANDROID_BUILD_SUCCESS=0"
 set "ANDROID_BUILD_ATTEMPTED=0"
 
+for /f "usebackq delims=" %%D in (`powershell -NoProfile -Command "Get-Date -Format yyyy.MM.dd"`) do set "BUILD_VERSION=%%D"
+set "TAG=v!BUILD_VERSION!"
+
+echo ###########################################################
+echo SYNCHRONIZING PROJECT VERSIONS: !BUILD_VERSION! ^(tag !TAG!^)
+echo ###########################################################
+echo !BUILD_VERSION!> "%SCRIPT_DIR%version.txt"
+
+echo.
 echo ###########################################################
 echo PURGING PREVIOUS BUILD ARTIFACTS...
 echo ###########################################################
@@ -83,7 +109,10 @@ echo ###########################################################
 echo SUCCESS: Build completed successfully.
 echo.
 echo Single EXE: %OUTPUT_DIR%\%OUTPUT_EXE%
-echo Log file:   .\build.log
+if "!ANDROID_BUILD_SUCCESS!"=="1" (
+  echo Android APK: %OUTPUT_DIR%\RDPVault.apk
+)
+echo Log file:   .\build.log  ^(first line: OK / WARN / FAIL verdict^)
 echo ###########################################################
 
 if "!DO_PUBLISH!"=="0" (
@@ -113,7 +142,14 @@ if errorlevel 1 (
   exit /b 1
 )
 
-set "REPO=alonreich/RDP-Encrypt"
+set "DYNAMIC_REPO="
+for /f "usebackq delims=" %%R in (`gh repo view --json nameWithOwner --jq .nameWithOwner 2^>nul`) do set "DYNAMIC_REPO=%%R"
+if defined DYNAMIC_REPO (
+  set "REPO=!DYNAMIC_REPO!"
+) else (
+  set "REPO=alonreich/RDP-Encrypt"
+)
+echo [PUBLISH] 1/6 Target repository: !REPO!
 
 set "LOCALHASH="
 for /f "skip=1 delims=" %%H in ('certutil -hashfile "%OUTPUT_DIR%\%OUTPUT_EXE%" SHA256') do (
@@ -124,33 +160,56 @@ if not defined LOCALHASH (
   echo [PUBLISH] STOPPED: could not fingerprint the freshly built exe.
   exit /b 1
 )
-for /f "usebackq delims=" %%D in (`powershell -NoProfile -Command "Get-Date -Format yyyy.MM.dd"`) do set "TAG=v%%D"
+echo [PUBLISH] 2/6 Built exe fingerprint ready ^(!LOCALHASH!^).
 
-rem Every previous release and tag is removed, so the repository always offers
-rem exactly ONE download and the /releases/latest/download/ URL in README.md
-rem can never resolve to a stale installer.
+echo [PUBLISH] 3/6 Purging previous releases and remote/local git tags...
 set "REMOVED=0"
 for /f "usebackq delims=" %%T in (`gh release list --repo !REPO! --json tagName --jq ".[].tagName" 2^>nul`) do (
   gh release delete %%T --repo !REPO! --cleanup-tag --yes >nul 2>&1 || gh release delete %%T --repo !REPO! --yes >nul 2>&1
   set /a REMOVED+=1
 )
-echo [PUBLISH] Removed !REMOVED! previous release^(s^).
-echo [PUBLISH] Uploading %OUTPUT_DIR%\%OUTPUT_EXE% to GitHub release !TAG!...
+git fetch --tags --prune --prune-tags >nul 2>&1
+for /f "usebackq delims=" %%L in (`git tag --list 2^>nul`) do (
+  git push origin --delete %%L >nul 2>&1
+  git tag -d %%L >nul 2>&1
+)
+
+set "SURVIVORS=0"
+for /f "usebackq delims=" %%S in (`gh release list --repo !REPO! --json tagName --jq ".[].tagName" 2^>nul`) do set /a SURVIVORS+=1
+if not "!SURVIVORS!"=="0" (
+  echo [PUBLISH] STOPPED: !SURVIVORS! previous release^(s^) could not be removed.
+  exit /b 1
+)
+echo [PUBLISH] Removed !REMOVED! previous release^(s^) and purged all tags.
+
+echo [PUBLISH] 4/6 Uploading %OUTPUT_DIR%\%OUTPUT_EXE% to GitHub release !TAG!...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%developer_tools\UploadAsset.ps1" -Repo "!REPO!" -Tag "!TAG!" -FilePath "%OUTPUT_DIR%\%OUTPUT_EXE%" -LocalHash "!LOCALHASH!"
 if errorlevel 1 (
   echo [PUBLISH] STOPPED: uploading release asset failed.
   exit /b 1
 )
 if "!ANDROID_BUILD_SUCCESS!"=="1" if exist "%OUTPUT_DIR%\RDPVault.apk" (
-  echo [PUBLISH] Uploading %OUTPUT_DIR%\RDPVault.apk to GitHub release !TAG!...
+  echo [PUBLISH] 5/6 Uploading %OUTPUT_DIR%\RDPVault.apk to GitHub release !TAG!...
   powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%developer_tools\UploadAsset.ps1" -Repo "!REPO!" -Tag "!TAG!" -FilePath "%OUTPUT_DIR%\RDPVault.apk"
+  if errorlevel 1 (
+    echo [PUBLISH] STOPPED: uploading Android APK failed.
+    exit /b 1
+  )
 )
 
-rem Guarantee expected assets are present on release.
-set "ASSETCOUNT=0"
-for /f "usebackq delims=" %%A in (`gh release view !TAG! --repo !REPO! --json assets --jq ".assets[].name" 2^>nul`) do set /a ASSETCOUNT+=1
-if !ASSETCOUNT! LSS 1 (
-  echo [PUBLISH] STOPPED: release !TAG! carries no assets.
+echo [PUBLISH] 6/6 Verifying published assets on GitHub...
+set "EXE_VERIFIED=0"
+set "APK_VERIFIED=0"
+for /f "usebackq delims=" %%A in (`gh release view !TAG! --repo !REPO! --json assets --jq ".assets[].name" 2^>nul`) do (
+  if /I "%%A"=="%OUTPUT_EXE%" set "EXE_VERIFIED=1"
+  if /I "%%A"=="RDPVault.apk" set "APK_VERIFIED=1"
+)
+if "!EXE_VERIFIED!"=="0" (
+  echo [PUBLISH] STOPPED: %OUTPUT_EXE% was not found on remote release !TAG!.
+  exit /b 1
+)
+if "!ANDROID_BUILD_SUCCESS!"=="1" if "!APK_VERIFIED!"=="0" (
+  echo [PUBLISH] STOPPED: RDPVault.apk was not found on remote release !TAG!.
   exit /b 1
 )
 
@@ -162,9 +221,12 @@ if not "!RELEASECOUNT!"=="1" (
 
 echo.
 echo ###########################################################
-echo SUCCESS: release !TAG! is live and is the only release.
-echo Download: https://github.com/!REPO!/releases/latest/download/%OUTPUT_EXE%
-echo SHA256:   !LOCALHASH!
+echo SUCCESS: release !TAG! is live and verified on GitHub.
+echo Windows EXE: https://github.com/!REPO!/releases/latest/download/%OUTPUT_EXE%
+if "!ANDROID_BUILD_SUCCESS!"=="1" (
+  echo Android APK: https://github.com/!REPO!/releases/latest/download/RDPVault.apk
+)
+echo SHA256:      !LOCALHASH!
 echo ###########################################################
 exit /b 0
 
@@ -180,7 +242,7 @@ if not exist "%FINAL_DIR%\%PROJECT_EXE%" (
   exit /b 1
 )
 
-move /y "%FINAL_DIR%\%PROJECT_EXE%" "%OUTPUT_DIR%\%OUTPUT_EXE%"
+move /y "%FINAL_DIR%\%PROJECT_EXE%" "%OUTPUT_DIR%\%OUTPUT_EXE%" >nul
 if errorlevel 1 exit /b 1
 
 call :PURGE_COMPILED_EXTRAS
@@ -237,8 +299,6 @@ if not "!EXTRA!"=="0" (
   exit /b 1
 )
 exit /b 0
-
-
 
 :TERMINATE_PROCESSES
 taskkill /F /IM RDPVault.exe /T 2>nul

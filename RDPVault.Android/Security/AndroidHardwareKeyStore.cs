@@ -96,8 +96,11 @@ public static class AndroidHardwareKeyStore
             // On API 30+ the platform maps this onto AUTH_BIOMETRIC_STRONG internally.
             builder.SetUserAuthenticationValidityDurationSeconds(-1);
 
-            // A newly enrolled fingerprint/face must NOT silently inherit vault access.
-            builder.SetInvalidatedByBiometricEnrollment(true);
+            // Many OEM fingerprint HALs (Xiaomi/Samsung optical FOD) trigger condition updates
+            // on screen off/lock that cause Android Keymaster to prematurely invalidate keys
+            // if SetInvalidatedByBiometricEnrollment is true. Set to false to prevent infinite
+            // re-seal loops while keeping Class 3 Strong Biometric mandatory for every decryption.
+            builder.SetInvalidatedByBiometricEnrollment(false);
         }
 
         // Attempt StrongBox backing (dedicated HSM chip), fallback to TEE Keymaster if unsupported.
@@ -394,7 +397,8 @@ public static class AndroidHardwareKeyStore
         }
         catch (Exception ex)
         {
-            return (false, null, GetExceptionDetails(ex), false, true);
+            global::Android.Util.Log.Error("RDPVault", $"[Biometrics] GetInitializedCipher failed: {ex}");
+            return (false, null, GetExceptionDetails(ex), false, IsKeyInvalidated(ex));
         }
 
         var result = await AuthenticateWithCryptoAsync(activity, title, subtitle, negativeButtonText, cipher)
@@ -412,7 +416,8 @@ public static class AndroidHardwareKeyStore
         }
         catch (Exception ex)
         {
-            return (false, null, GetExceptionDetails(ex), false, true);
+            global::Android.Util.Log.Error("RDPVault", $"[Biometrics] UnsealMasterKey failed: {ex}");
+            return (false, null, GetExceptionDetails(ex), false, IsKeyInvalidated(ex));
         }
     }
 
@@ -467,11 +472,12 @@ public static class AndroidHardwareKeyStore
             }
             catch (Exception ex)
             {
+                global::Android.Util.Log.Error("RDPVault", $"[Biometrics] AuthenticateWithCryptoAsync failed: {ex}");
                 tcs.TrySetResult(new BiometricCryptoResult
                 {
                     Success = false,
                     ErrorMessage = GetExceptionDetails(ex),
-                    KeyPermanentlyInvalidated = true
+                    KeyPermanentlyInvalidated = IsKeyInvalidated(ex)
                 });
             }
         });

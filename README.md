@@ -136,7 +136,17 @@ Terminate running instances so Android flushes any dead binder tokens from prior
 
 </div>
 
-#### Step 7: Reset Stale Accessibility State
+#### Step 7: Clear Floating Shortcut Buttons
+Ensure Android/MIUI floating accessibility overlay buttons are removed:
+<div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
+
+```cmd
+.\adb\adb.exe shell settings delete secure accessibility_button_targets
+```
+
+</div>
+
+#### Step 8: Reset Stale Accessibility State
 Clear any crashed or suspended accessibility state from prior versions:
 <div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
 
@@ -146,7 +156,7 @@ Clear any crashed or suspended accessibility state from prior versions:
 
 </div>
 
-#### Step 8: Enable Accessibility Subsystem
+#### Step 9: Enable Accessibility Subsystem
 Activate the Android accessibility subsystem:
 <div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
 
@@ -156,7 +166,7 @@ Activate the Android accessibility subsystem:
 
 </div>
 
-#### Step 9: Register & Bind RDP Vault Auto-Type
+#### Step 10: Register & Bind RDP Vault Auto-Type
 Bypass Android restricted settings and bind the service immediately:
 <div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
 
@@ -166,7 +176,7 @@ Bypass Android restricted settings and bind the service immediately:
 
 </div>
 
-#### Step 10: Grant Foreground Notification Permission
+#### Step 11: Grant Foreground Notification Permission
 Authorize session foreground notifications without runtime prompts:
 <div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
 
@@ -176,7 +186,7 @@ Authorize session foreground notifications without runtime prompts:
 
 </div>
 
-#### Step 11: Launch RDP Vault
+#### Step 12: Launch RDP Vault
 Start the application on the phone:
 <div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
 

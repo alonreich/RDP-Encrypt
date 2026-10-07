@@ -38,33 +38,20 @@ if (-not $release) {
 $releaseId = $release.id
 Write-Host "Target Release ID: $releaseId"
 
-# Clean any existing or stale assets
-$assets = gh api "repos/$Repo/releases/$releaseId/assets" | ConvertFrom-Json
-foreach ($a in $assets) {
-    if ($a.name -eq $fileName -or $a.name -like "test*") {
-        Write-Host "Deleting old asset: $($a.name) ($($a.id))..."
-        gh api -X DELETE "repos/$Repo/releases/assets/$($a.id)" | Out-Null
-    }
+$fileLength = ([System.IO.FileInfo]$FilePath).Length
+Write-Host "Uploading $fileName ($fileLength bytes) via gh release upload..."
+gh release upload "$Tag" "$FilePath" --repo "$Repo" --clobber
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "gh release upload failed with exit code $LASTEXITCODE"
+    exit 1
 }
 
-$fileLength = ([System.IO.FileInfo]$FilePath).Length
-Write-Host "Uploading $fileName ($fileLength bytes) via curl..."
-$uploadUrl = "https://uploads.github.com/repos/$Repo/releases/$releaseId/assets?name=$fileName"
-$authHeader = "Authorization: Bearer $token"
-
-& curl.exe -sS --fail -X POST -H $authHeader -H "Content-Type: application/octet-stream" --data-binary "@$FilePath" $uploadUrl -o upload_result.json
-
-if (Test-Path "upload_result.json") {
-    $res = Get-Content "upload_result.json" -Raw | ConvertFrom-Json
-    Remove-Item "upload_result.json" -Force -ErrorAction SilentlyContinue
-    if ($res.size -eq $fileLength) {
-        Write-Host "SUCCESS: $fileName verified ($($res.size) bytes, state: $($res.state))."
-        exit 0
-    } else {
-        Write-Error "Uploaded size ($($res.size)) did not match local size ($fileLength)."
-        exit 1
-    }
+$assets = gh api "repos/$Repo/releases/$releaseId/assets" | ConvertFrom-Json
+$uploaded = $assets | Where-Object { $_.name -eq $fileName } | Select-Object -First 1
+if ($uploaded -and $uploaded.size -eq $fileLength) {
+    Write-Host "SUCCESS: $fileName verified ($($uploaded.size) bytes, state: $($uploaded.state))."
+    exit 0
 } else {
-    Write-Error "Upload output file missing."
+    Write-Error "Uploaded size mismatch or asset not found for $fileName."
     exit 1
 }

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
@@ -16,7 +16,6 @@ public static class VaultCrypto
     private const int TagBytes = 16;
     private const int SaltBytes = 32;
 
-    // ---------------------------------------------------------------- KDF
 
     /// <summary>
     /// Issue #19: the Argon2 instance is now disposed and the UTF-8 copy of the
@@ -30,8 +29,8 @@ public static class VaultCrypto
         {
             var config = new Argon2Config
             {
-                Type = Argon2Type.HybridAddressing,   // == Argon2id
-                Version = Argon2Version.Nineteen,     // v1.3
+                Type = Argon2Type.HybridAddressing,
+                Version = Argon2Version.Nineteen,
                 MemoryCost = memKiB,
                 TimeCost = iterations,
                 Lanes = lanes,
@@ -93,7 +92,6 @@ public static class VaultCrypto
         }
     }
 
-    // ---------------------------------------------------------------- AEAD
 
     private static (byte[] nonce, byte[] ct) AeadSeal(byte[] key, byte[] plaintext)
     {
@@ -122,7 +120,6 @@ public static class VaultCrypto
     private static byte[] OpenBlob(byte[] key, VaultFile.WrappedBlob blob)
         => AeadOpen(key, Convert.FromBase64String(blob.Nonce), Convert.FromBase64String(blob.Ct));
 
-    // ---------------------------------------------------------------- create / open
 
     /// <summary>
     /// Creates a brand new vault. Issue #2: a Recovery Code is generated and bound
@@ -177,13 +174,12 @@ public static class VaultCrypto
 
             VaultPayload payload = OpenPayloadOrThrow(file, master);
             byte[] owned = master;
-            master = null; // ownership transferred to the caller
+            master = null;
             return (owned, payload);
         }
         finally
         {
             CryptographicOperations.ZeroMemory(passwordKey);
-            // Issue #19: if payload decoding threw, the master key no longer leaks.
             if (master != null) CryptographicOperations.ZeroMemory(master);
         }
     }
@@ -246,7 +242,6 @@ public static class VaultCrypto
         }
     }
 
-    // ---------------------------------------------------------------- save
 
     public static void Save(VaultFile file, byte[] master, VaultPayload payload, string vaultPath,
                             string? newPassword = null, List<SealEntry>? newSeals = null,
@@ -258,8 +253,6 @@ public static class VaultCrypto
         if (newPassword != null)
         {
             file.Seals = new List<SealEntry>();
-            // Re-salt on every password change, and drop all quick-unlock seals:
-            // a password change is treated as a possible compromise.
             file.Kdf.Salt = Convert.ToBase64String(RandomNumberGenerator.GetBytes(SaltBytes));
             byte[] passwordKey = DerivePasswordKey(newPassword, file.Kdf);
             try { file.Wrap = SealToBlob(passwordKey, master); }
@@ -332,7 +325,6 @@ public static class VaultCrypto
         }
     }
 
-    // ---------------------------------------------------------------- machine binding
 
     public static string CurrentMachineId()
     {
@@ -409,7 +401,6 @@ public static class VaultCrypto
         }
     }
 
-    // ---------------------------------------------------------------- json
 
     private static byte[] Serialize(VaultPayload p)
         => JsonSerializer.SerializeToUtf8Bytes(p, VaultJsonContext.Default.VaultPayload);

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -128,7 +128,6 @@ public static class RdpLauncher
         }
     }
 
-    // ---------------- Wake-on-LAN (WOL) ----------------
 
     public struct WolDispatchReport
     {
@@ -187,7 +186,6 @@ public static class RdpLauncher
             for (int i = 0; i < 16; i++)
                 Buffer.BlockCopy(macBytes, 0, packet, 6 + i * 6, 6);
 
-            // Target ports: configured WOL port (9), echo port (7), and custom RDP port (e.g. 11)
             var ports = new HashSet<int> { wolPort > 0 ? wolPort : 9, 7 };
             if (rdpPort > 0 && rdpPort != 3389 && rdpPort != wolPort && rdpPort != 7)
             {
@@ -197,10 +195,8 @@ public static class RdpLauncher
 
             var targetIps = new HashSet<IPAddress>();
 
-            // 1. Global broadcast
             targetIps.Add(IPAddress.Broadcast);
 
-            // 2. User-configured broadcast IP
             if (!string.IsNullOrWhiteSpace(broadcastIp) &&
                 !string.Equals(broadcastIp.Trim(), "255.255.255.255", StringComparison.OrdinalIgnoreCase) &&
                 IPAddress.TryParse(broadcastIp.Trim(), out var customBcast))
@@ -208,7 +204,6 @@ public static class RdpLauncher
                 targetIps.Add(customBcast);
             }
 
-            // 3. Target Host IP or Hostname (Unicast WOL)
             if (!string.IsNullOrWhiteSpace(host))
             {
                 string cleanHost = host.Trim();
@@ -241,7 +236,6 @@ public static class RdpLauncher
                 }
             }
 
-            // 4. Local subnet directed broadcasts
             var localInterfaces = new List<(IPAddress LocalIp, IPAddress? SubnetBroadcast)>();
             try
             {
@@ -272,7 +266,6 @@ public static class RdpLauncher
 
             int sentCount = 0;
 
-            // Strategy A: Transmit from bound sockets on each local interface to ensure packets physical exit
             foreach (var (localIp, subnetBcast) in localInterfaces)
             {
                 try
@@ -301,7 +294,6 @@ public static class RdpLauncher
                 catch { }
             }
 
-            // Strategy B: Standard unbound socket sending to all collected targets (including Host unicast)
             try
             {
                 using var generalClient = new UdpClient();
@@ -342,7 +334,6 @@ public static class RdpLauncher
         catch { return null; }
     }
 
-    // ---------------- Launch ----------------
 
     /// <summary>Start one RDP session for the profile synchronously.</summary>
     public static bool Launch(RdpProfile p)
@@ -360,8 +351,7 @@ public static class RdpLauncher
         Action<LaunchProgressUpdate>? progress,
         System.Threading.CancellationToken ct = default)
     {
-        SessionManager.Current.Touch();   // issue #11: connecting is activity
-        // Work on a snapshot. The Port field always wins over a stale port pasted in Host.
+        SessionManager.Current.Touch();
         p = p.Clone();
         try
         {
@@ -371,7 +361,6 @@ public static class RdpLauncher
         }
         catch (ArgumentException ex) { LaunchFailed?.Invoke(ex.Message); return false; }
 
-        // 1. Port Knocking handling (Stealth knock opens firewall address list before WOL and RDP)
         if (p.EnableIcmpKnock)
         {
             bool isTcp = string.Equals(p.KnockProtocol, "TCP", StringComparison.OrdinalIgnoreCase);
@@ -395,7 +384,6 @@ public static class RdpLauncher
             return false;
         }
 
-        // 2. Wake-on-LAN handling (Magic packet can now pass through the opened firewall)
         if (p.EnableWol && !string.IsNullOrWhiteSpace(p.WolMacAddress))
         {
             SessionStarted?.Invoke($"{p.Name} (Sending Wake-on-LAN magic packet...)");
@@ -489,7 +477,6 @@ public static class RdpLauncher
             return false;
         }
 
-        // Reference-counted session credentials with isolated leases to avoid cross-session collisions
         var credLeases = new List<(string Target, string LeaseId)>();
         if (p.HasPassword && !string.IsNullOrEmpty(p.Username))
         {
@@ -508,7 +495,6 @@ public static class RdpLauncher
                 }
                 else
                 {
-                    // Full rollback and immediate connection abort
                     foreach (var (t, l) in credLeases) SessionCredentialCoordinator.Release(t, l);
                     TryDelete(tempRdp);
 
@@ -525,7 +511,6 @@ public static class RdpLauncher
             }
         }
 
-        // Certificate pinning replay if warnings are enabled
         RestoreCertPin(p);
 
         progress?.Invoke(new LaunchProgressUpdate
@@ -581,14 +566,12 @@ public static class RdpLauncher
         string profileName = p.Name;
         string targetHost = p.Host;
 
-        // Issue #2: Asynchronous process wait eliminates ThreadPool starvation
         _ = Task.Run(async () =>
         {
             try
             {
                 if (proc.HasExited && proc.ExitCode != 0)
                 {
-                    // Some Windows builds relaunch mstsc; give a short grace period.
                     await Task.Delay(3000);
                 }
                 else
@@ -602,7 +585,6 @@ public static class RdpLauncher
             TryDelete(tempRdp);
             foreach (var (t, l) in credLeases) SessionCredentialCoordinator.Release(t, l);
 
-            // Issue #1: deterministic host cleanup even if vault locked during session
             var report = TraceCleaner.SweepHosts(new[] { targetHost });
             TraceCleaner.Sweep();
 
@@ -642,15 +624,12 @@ public static class RdpLauncher
                 await tcp.ConnectAsync(host, port, linkedCts.Token).ConfigureAwait(false);
                 if (tcp.Connected)
                 {
-                    // Destination port is accepting connections.
-                    // Wait a short moment to ensure mstsc doesn't exit immediately on auth/cert failure
                     await Task.Delay(1200, ct).ConfigureAwait(false);
                     return !proc.HasExited;
                 }
             }
             catch
             {
-                // Port probe attempt did not connect yet
             }
 
             try { await Task.Delay(350, ct).ConfigureAwait(false); } catch { break; }
@@ -685,7 +664,6 @@ public static class RdpLauncher
 
     public static bool AnyLive() => LiveCount() > 0;
 
-    // ---------------- .rdp generation ----------------
 
     private static string BuildRdpFile(RdpProfile p)
     {
@@ -693,7 +671,6 @@ public static class RdpLauncher
         bool useMulti = p.ResolveUseMultiMon(settings);
         bool fullScreen = p.ResolveFullScreen(settings);
 
-        // Certificate warning suppression: default is to verify (authLevel 2), can be suppressed globally or overridden per-profile
         bool suppressWarnings = p.ResolveSuppressCertWarnings(settings);
         int authLevel = suppressWarnings ? 0 : 2;
 
@@ -758,7 +735,7 @@ public static class RdpLauncher
         sb.AppendLine("use redirection server name:i:0");
         if (!string.IsNullOrEmpty(p.Username))
         {
-            sb.AppendLine("username:s:" + p.Username);   // password is NEVER written here
+            sb.AppendLine("username:s:" + p.Username);
             sb.AppendLine("domain:s:");
         }
 
@@ -772,37 +749,21 @@ public static class RdpLauncher
             sb.AppendLine("redirectdrives:i:0");
         }
 
-        sb.AppendLine("pcb:s:");            // no connection bookkeeping id
+        sb.AppendLine("pcb:s:");
         sb.AppendLine("disableremoteappcapscheck:i:1");
         return sb.ToString();
     }
 
     private static string FullAddress(RdpProfile p) => ConnectionEndpoint.FromProfile(p).Address;
 
-    // ---------------- certificate pinning (issue #2) ----------------
-    //
-    // Windows records "don't ask me again for connections to this computer" as a
-    // REG_BINARY value named CertHash under
-    //     HKCU\Software\Microsoft\Terminal Server Client\Servers\<address>
-    // holding the thumbprint of the certificate the user accepted. TraceCleaner
-    // deletes that key on purpose, so the approval never used to survive a session and
-    // the warning returned on every connect - which is why 1.1.1 gave up and shipped
-    // authentication level 0 (no verification at all, credentials handed to whatever
-    // answered). Keeping the approval inside the encrypted vault and replaying it here
-    // gives us both halves: the user is asked once, and nothing is left on the PC.
-    //
-    // Everything below is best effort. If the registry is not writable, or Windows
-    // changes where it stores this, the only consequence is that the user sees the
-    // normal certificate warning again - never a failed or silently unverified
-    // connection.
 
     private const string TscServersKey = @"Software\Microsoft\Terminal Server Client\Servers";
 
     private static void RestoreCertPin(RdpProfile p)
     {
         var settings = SessionManager.Current.Payload?.Settings;
-        if (p.ResolveSuppressCertWarnings(settings)) return; // warnings suppressed globally or per-profile
-        if (p.AllowUnverifiedServer) return;                 // nothing is being verified
+        if (p.ResolveSuppressCertWarnings(settings)) return;
+        if (p.AllowUnverifiedServer) return;
         if (string.IsNullOrWhiteSpace(p.CertThumbprint)) return;
 
         try
@@ -940,7 +901,6 @@ public static class RdpLauncher
 
         if (applied.Count > 0)
         {
-            // Atomically save to the vault file first. ONLY if save succeeds do we purge the applied updates!
             bool saved = false;
             try
             {
@@ -975,24 +935,14 @@ public static class RdpLauncher
         }
         catch { }
 
-        // Delete the key ourselves rather than leaving it to TraceCleaner.Sweep().
-        // Sweep only removes Servers\<host> entries that match a CONFIGURED vault host,
-        // and ForgetHosts() empties that list the moment the vault auto-locks - so a
-        // session that outlives an auto-lock would otherwise leave the very registry
-        // trace this app exists to erase, planted by us.
         RemoveCertPin(p);
 
         if (string.IsNullOrEmpty(seen)) return;
         if (string.Equals(seen, p.CertThumbprint, StringComparison.OrdinalIgnoreCase)) return;
 
-        // Copy into a non-nullable local: the compiler discards the null-state of a
-        // captured variable inside a lambda (CS8601 otherwise).
         string thumb = seen;
         string launchEndpoint = ConnectionEndpoint.FromProfile(p).ToString();
 
-        // This runs on a background task when mstsc exits. Every other vault save
-        // happens on the UI thread from a user action, and VaultCrypto.WriteAtomic
-        // shares one .tmp path - so hop to the UI thread instead of racing them.
         Dispatcher.UIThread.Post(() =>
         {
             try
@@ -1000,7 +950,6 @@ public static class RdpLauncher
                 var mgr = SessionManager.Current;
                 if (!mgr.IsUnlocked || mgr.Payload == null)
                 {
-                    // Locked since; preserve pending certificate update safely across vault locking to encrypted store
                     lock (CertUpdatesLock)
                     {
                         PendingCertUpdates.RemoveAll(u => u.ProfileId == p.Id);
@@ -1011,10 +960,8 @@ public static class RdpLauncher
                 }
 
                 var target = mgr.Payload.Profiles.FirstOrDefault(x => x.Id == p.Id);
-                if (target == null) return;  // deleted or edited away
+                if (target == null) return;
 
-                // Before applying approval, verify that the current profile's normalized endpoint
-                // still equals the launch snapshot's endpoint.
                 string currentEndpoint = ConnectionEndpoint.FromProfile(target).ToString();
                 if (!string.Equals(currentEndpoint, launchEndpoint, StringComparison.OrdinalIgnoreCase))
                     return;
@@ -1064,7 +1011,6 @@ public static class RdpLauncher
         return targets;
     }
 
-    // ---------------- session credential coordinator (lease-based & isolated) ----------------
 
     private static class SessionCredentialCoordinator
     {
@@ -1111,8 +1057,6 @@ public static class RdpLauncher
                             return CredentialAcquireResult.Success;
                         }
 
-                        // Conflict: Another active session holds a lease on this target with different credentials.
-                        // Reject injection so running sessions are not hijacked.
                         return CredentialAcquireResult.Conflict;
                     }
 
@@ -1121,7 +1065,7 @@ public static class RdpLauncher
                         string newLease = Guid.NewGuid().ToString("N");
                         ActiveCredentials[target] = new ActiveCred(user, inputHash, newLease);
                         leaseId = newLease;
-                        inputHash = null; // ownership transferred to ActiveCred
+                        inputHash = null;
                         return CredentialAcquireResult.Success;
                     }
                     return CredentialAcquireResult.WriteFailed;
@@ -1172,7 +1116,6 @@ public static class RdpLauncher
         }
     }
 
-    // ---------------- session credential via CredWrite ----------------
 
     private const int CRED_TYPE_GENERIC = 1;
     private const int CRED_PERSIST_SESSION = 1;
@@ -1217,7 +1160,7 @@ public static class RdpLauncher
                 TargetName = targetPtr,
                 CredentialBlobSize = (uint)blob.Length,
                 CredentialBlob = blobPtr,
-                Persist = CRED_PERSIST_SESSION, // lives only until logoff; we delete sooner
+                Persist = CRED_PERSIST_SESSION,
                 UserName = userPtr
             };
             return CredWriteW(ref c, 0);
@@ -1225,7 +1168,6 @@ public static class RdpLauncher
         catch { return false; }
         finally
         {
-            // Scrub the unmanaged copy of the password before releasing it.
             try { for (int i = 0; i < blob.Length; i++) Marshal.WriteByte(blobPtr, i, 0); } catch { }
             Marshal.FreeHGlobal(blobPtr);
             Marshal.FreeHGlobal(userPtr);

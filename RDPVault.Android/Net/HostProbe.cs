@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -59,7 +59,6 @@ public static class HostProbe
             }
             catch
             {
-                // Ignore DNS resolution errors if direct IP already present
             }
 
             foreach (var ip in addresses)
@@ -72,7 +71,6 @@ public static class HostProbe
                 }
                 catch
                 {
-                    // Continue to next IP candidate
                 }
             }
 

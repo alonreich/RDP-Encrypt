@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -85,8 +85,6 @@ public static class InstallerService
         }
         catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
         {
-            // User cancelled / declined the UAC prompt (ERROR_CANCELLED).
-            // Return false to gracefully continue in user-level mode without crashing.
             return false;
         }
         catch
@@ -165,7 +163,6 @@ public static class InstallerService
             catch { }
         }
 
-        // Fast poll: wait up to 400ms in 25ms intervals, exiting immediately when all PIDs are gone
         for (int i = 0; i < 16; i++)
         {
             try
@@ -181,7 +178,6 @@ public static class InstallerService
         }
     }
 
-    // ================================================================ install
 
     public static void InstallWithProgress(Action<string> log)
     {
@@ -239,12 +235,10 @@ public static class InstallerService
             key.SetValue("NoRepair", 1, RegistryValueKind.DWord);
         }
 
-        // Issue #6: make legacy .rdpvlink files from v1.0.0 actually open.
         log("Registering the .rdpvlink file type...");
         try { RegisterFileAssociation(InstalledExe); }
         catch (Exception ex) { log($"  (skipped: {ex.Message})"); }
 
-        // Issue #16: real IShellLink shortcuts, and failures are reported now.
         log("Creating the Desktop shortcut...");
         TryShortcut(log, Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "RDP Vault.lnk"));
@@ -303,7 +297,6 @@ public static class InstallerService
         Environment.Exit(0);
     }
 
-    // ================================================================ uninstall
 
     /// <summary>Is there a vault inside the install directory that would be destroyed?</summary>
     public static bool InstalledVaultExists() => File.Exists(AppPaths.InstalledVaultPath);
@@ -364,8 +357,6 @@ public static class InstallerService
             bool isInstalledExe = IsInstalledLocation();
             if (isInstalledExe)
             {
-                // A running installed exe cannot delete itself; hand the last step to cmd.exe.
-                // The vault has already been rescued or deliberately shredded above.
                 string cmd = $"/C choice /C Y /N /D Y /T 2 & Del /F /Q \"{InstalledExe}\" & rmdir /S /Q \"{InstallDir}\"";
                 Process.Start(new ProcessStartInfo
                 {
@@ -377,7 +368,6 @@ public static class InstallerService
             }
             else
             {
-                // Running from portable or external location: only delete installed files, NEVER current portable exe!
                 try { if (File.Exists(InstalledExe)) File.Delete(InstalledExe); } catch { }
                 try { if (Directory.Exists(InstallDir)) Directory.Delete(InstallDir, true); } catch { }
             }

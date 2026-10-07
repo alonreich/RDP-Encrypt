@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Pipes;
@@ -40,7 +40,6 @@ public sealed class SessionManager : IDisposable
     /// </summary>
     public bool UnlockedViaRecovery { get; private set; }
 
-    // Timers are created lazily ON THE UI THREAD - see StartTimers (issue #18a).
     private DispatcherTimer? _lockTimer;
     private DispatcherTimer? _usbTimer;
     private DateTime _lastActivity = DateTime.UtcNow;
@@ -64,8 +63,8 @@ public sealed class SessionManager : IDisposable
 
     private SessionManager()
     {
-        VaultPath = AppPaths.VaultPath;              // issue #5: one source of truth
-        SecurityEnforcer.RemoveLegacyState();        // issue #4: kill the old plaintext counter
+        VaultPath = AppPaths.VaultPath;
+        SecurityEnforcer.RemoveLegacyState();
 
         ParseCommandLine();
         _ = Task.Run(PipeLoop);
@@ -122,11 +121,9 @@ public sealed class SessionManager : IDisposable
         target = target.Trim().Trim('"', '\'');
         string normTarget = target.Replace("-", "").Trim();
 
-        // 1. Exact or case-insensitive ID match
         var match = Payload.Profiles.FirstOrDefault(p => string.Equals(p.Id, target, StringComparison.OrdinalIgnoreCase));
         if (match != null) return match;
 
-        // 2. Normalized ID match (ignoring dashes)
         if (normTarget.Length >= 8)
         {
             match = Payload.Profiles.FirstOrDefault(p =>
@@ -134,18 +131,15 @@ public sealed class SessionManager : IDisposable
             if (match != null) return match;
         }
 
-        // 3. Name match
         match = Payload.Profiles.FirstOrDefault(p =>
             string.Equals(p.Name, target, StringComparison.OrdinalIgnoreCase));
         if (match != null) return match;
 
-        // 4. Host match
         match = Payload.Profiles.FirstOrDefault(p =>
             string.Equals(p.Host, target, StringComparison.OrdinalIgnoreCase));
         return match;
     }
 
-    // ---------------------------------------------------------------- timers
 
     private static void OnUi(Action action)
     {
@@ -173,7 +167,6 @@ public sealed class SessionManager : IDisposable
         _usbTimer.Start();
     });
 
-    // ---------------------------------------------------------------- load / create
 
     public void LoadFile()
     {
@@ -194,7 +187,6 @@ public sealed class SessionManager : IDisposable
         return recoveryCode;
     }
 
-    // ---------------------------------------------------------------- unlock
 
     /// <summary>Seconds the user must wait before another attempt is accepted (issue #4 / #10).</summary>
     public TimeSpan CooldownRemaining()
@@ -257,7 +249,7 @@ public sealed class SessionManager : IDisposable
         }
 
         (Master, Payload) = opened.Value;
-        UnlockedViaRecovery = true;      // issue #1: lets ChangePassword skip the old password
+        UnlockedViaRecovery = true;
         SecurityEnforcer.ClearFailures(File, VaultPath);
         AfterUnlock();
         return true;
@@ -344,7 +336,6 @@ public sealed class SessionManager : IDisposable
         StartTimers();
         OnUi(() => Unlocked?.Invoke());
 
-        // Issue #7: the BitLocker setting is now actually acted on, as a warning.
         if (Payload?.Settings.WarnIfDriveNotEncrypted == true)
         {
             string? root = Path.GetPathRoot(VaultPath);
@@ -387,7 +378,6 @@ public sealed class SessionManager : IDisposable
             Payload?.Profiles.Select(p => p.Host) ?? Enumerable.Empty<string>());
     }
 
-    // ---------------------------------------------------------------- save
 
     /// <summary>
     /// Issue #9: this used to return silently when the vault had auto-locked, so
@@ -433,9 +423,6 @@ public sealed class SessionManager : IDisposable
         if (newPassword.Length < 10)
             throw new ArgumentException("The new master password must be at least 10 characters.");
 
-        // ISSUE #1 (2026 review): a session opened with the Recovery Code cannot be
-        // asked for the old password - that is the whole reason the user is here. The
-        // master key is already unwrapped, so proof of knowledge adds nothing.
         if (!UnlockedViaRecovery)
         {
             if (string.IsNullOrEmpty(oldPassword))
@@ -446,26 +433,20 @@ public sealed class SessionManager : IDisposable
             try { (verifyMaster, verifyPayload) = VaultCrypto.Open(File, oldPassword); }
             catch (InvalidDataException) { throw new InvalidDataException("The current password is not correct."); }
 
-            // We only needed proof of knowledge; keep the already-open master key.
             CryptographicOperations.ZeroMemory(verifyMaster);
             _ = verifyPayload;
         }
 
-        // A password change is treated as a possible compromise: every quick-unlock
-        // seal is dropped, so each PC must re-enroll Windows Hello.
         VaultCrypto.Save(File, Master, Payload, VaultPath, newPassword, newSeals: new List<SealEntry>());
 
-        // The vault is now on a password the user chose and knows.
         UnlockedViaRecovery = false;
     }
 
-    // ---------------------------------------------------------------- lock
 
     public void Lock(bool killSessions)
     {
-        bool deep = Payload?.Settings.DeepSweep == true;   // issue #7: setting now honoured
+        bool deep = Payload?.Settings.DeepSweep == true;
 
-        // Snapshot certificate pins from active sessions before memory is cleared or sweep runs
         RdpLauncher.SnapshotActiveCertPins();
 
         if (Master != null) CryptographicOperations.ZeroMemory(Master);
@@ -480,7 +461,7 @@ public sealed class SessionManager : IDisposable
         _ = Task.Run(() =>
         {
             if (deep) TraceCleaner.DeepSweep(); else TraceCleaner.Sweep();
-            TraceCleaner.ForgetHosts();   // issue #20: don't retain host names after locking
+            TraceCleaner.ForgetHosts();
         });
     }
 
@@ -543,12 +524,11 @@ public sealed class SessionManager : IDisposable
                 if (kill) TraceCleaner.DeepSweep();
             }
             catch { }
-            await Task.Delay(2500);   // let the explanation on screen actually render
+            await Task.Delay(2500);
             Environment.Exit(0);
         });
     }
 
-    // ---------------------------------------------------------------- Windows Hello enrollment
 
     public async Task<HelloEnrollResult> EnableHelloSealAsync()
     {
@@ -561,7 +541,6 @@ public sealed class SessionManager : IDisposable
         {
             var seal = VaultCrypto.SealTpm(Master, keyId, signature, File);
 
-            // Issue #18c: prove the seal can actually be opened before we save it.
             byte[]? proof = VaultCrypto.UnsealTpm(File, seal, signature);
             if (proof == null) return HelloEnrollResult.SignatureNotReproducible;
             CryptographicOperations.ZeroMemory(proof);
@@ -586,7 +565,6 @@ public sealed class SessionManager : IDisposable
         VaultCrypto.Save(File, Master, Payload, VaultPath, newSeals: seals);
     }
 
-    // ---------------------------------------------------------------- IPC
 
     private async Task PipeLoop()
     {

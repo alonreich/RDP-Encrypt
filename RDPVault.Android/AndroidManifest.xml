@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
           package="com.rdpvault.app"
-          android:versionCode="2"
-          android:versionName="1.2.0">
+          android:versionCode="3"
+          android:versionName="2.0.0">
 
     <!-- minSdk 28 (Android 9): StrongBox Keymaster, Class 3 BiometricPrompt and
          ClipboardManager.ClearPrimaryClip all require API 28. Optimised for API 34/35. -->
@@ -22,26 +22,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-
-    <!-- Intent and package visibility for external RDP client handoff and Play Store fallback -->
-    <queries>
-        <intent>
-            <action android:name="android.intent.action.VIEW" />
-            <data android:scheme="rdp" />
-        </intent>
-        <intent>
-            <action android:name="android.intent.action.VIEW" />
-            <data android:scheme="market" />
-        </intent>
-        <intent>
-            <action android:name="android.intent.action.SEND" />
-            <data android:mimeType="*/*" />
-        </intent>
-        <package android:name="com.microsoft.rdc.androidx" />
-        <package android:name="com.microsoft.rdc.android" />
-        <package android:name="com.iiordanov.freeaRDP" />
-        <package android:name="com.iiordanov.aRDP" />
-    </queries>
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <application
         android:label="RDP Vault"

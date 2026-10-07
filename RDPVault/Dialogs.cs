@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Threading.Tasks;
 using Avalonia.Controls;
@@ -107,7 +107,6 @@ public static class Dialogs
             Padding = new Avalonia.Thickness(10, 8)
         };
 
-    // ============================================================ confirm / message
 
     /// <summary>Issue #12: nothing destructive happens without this.</summary>
     public static Task<bool> ConfirmAsync(Window owner, string title, string message,
@@ -172,7 +171,6 @@ public static class Dialogs
         return w.ShowDialog<bool>(owner);
     }
 
-    // ============================================================ create vault (issue #3)
 
     public static Task<string?> CreateVaultAsync(Window owner)
     {
@@ -255,7 +253,6 @@ public static class Dialogs
         };
     }
 
-    // ============================================================ recovery code (issue #2)
 
     /// <summary>Shows a freshly generated Recovery Code and refuses to close until it is acknowledged.</summary>
     public static Task ShowRecoveryCodeAsync(Window owner, string code, bool mustAcknowledge = true)
@@ -409,7 +406,6 @@ public static class Dialogs
         return w.ShowDialog<string?>(owner);
     }
 
-    // ============================================================ change password (issue #2)
 
     public static Task<(string Old, string New)?> ChangePasswordAsync(Window owner, bool requireOldPassword = true)
     {

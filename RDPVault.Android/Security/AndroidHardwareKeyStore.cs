@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
@@ -83,29 +83,17 @@ public static class AndroidHardwareKeyStore
             .SetBlockModes(KeyProperties.BlockModeGcm)
             .SetEncryptionPaddings(KeyProperties.EncryptionPaddingNone)
             .SetKeySize(256)
-            // Randomised encryption is mandatory for GCM: the caller must never be able
-            // to supply its own IV, which is why SealMasterKey reads the IV back out.
             .SetRandomizedEncryptionRequired(true);
 
         if (requireBiometrics)
         {
-            // THE binding. Without these two lines the fingerprint prompt is cosmetic.
             builder.SetUserAuthenticationRequired(true);
 
-            // -1 == "authenticate for every use, with a strong biometric only".
-            // On API 30+ the platform maps this onto AUTH_BIOMETRIC_STRONG internally.
             builder.SetUserAuthenticationValidityDurationSeconds(-1);
 
-            // Many OEM fingerprint HALs (Xiaomi/Samsung optical FOD) trigger condition updates
-            // on screen off/lock that cause Android Keymaster to prematurely invalidate keys
-            // if SetInvalidatedByBiometricEnrollment is true. Set to false to prevent infinite
-            // re-seal loops while keeping Class 3 Strong Biometric mandatory for every decryption.
             builder.SetInvalidatedByBiometricEnrollment(false);
         }
 
-        // Use hardware-isolated ARM TrustZone TEE Keymaster (KeyMint).
-        // Avoid StrongBox dedicated chip as Qualcomm/OEM implementations suffer from known
-        // AEADBadTagException / -30 VERIFICATION_FAILED driver bugs during Cipher.doFinal.
         keyGenerator.Init(builder.Build());
         keyGenerator.GenerateKey();
     }
@@ -493,8 +481,6 @@ public static class AndroidHardwareKeyStore
 
         public override void OnAuthenticationFailed()
         {
-            // A single non-matching finger. BiometricPrompt keeps the dialog open and
-            // will eventually raise OnAuthenticationError, so nothing to do here.
             base.OnAuthenticationFailed();
         }
     }

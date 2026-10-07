@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -102,16 +102,13 @@ public static class IcmpKnock
         try
         {
             using var ping = new Ping();
-            // Firewalls often consume a knock without replying; a timeout is expected.
             await ping.SendPingAsync(host, TimeSpan.FromMilliseconds(750), payload, cancellationToken: ct).ConfigureAwait(false);
         }
         catch (PingException)
         {
-            // Expected on networks that block ICMP responses
         }
         catch (SocketException)
         {
-            // Expected
         }
     }
 
@@ -120,8 +117,6 @@ public static class IcmpKnock
     public static async Task SendTcpKnockAsync(string host, int port, CancellationToken ct)
     {
         // Emulates: curl -m 1 http://<host>:<port> >nul 2>&1
-        // Dispatches both an HTTP GET request via HttpClient and direct dual-stack TCP SYN attempts
-        // to guarantee compatibility across cellular CLAT/NAT64, Web knock daemons, and raw firewall SYN filters.
         var httpTask = SendHttpKnockAsync(host, port, ct);
         var synTask = SendSocketSynKnockAsync(host, port, ct);
 
@@ -131,7 +126,6 @@ public static class IcmpKnock
         }
         catch
         {
-            // All timeouts, connection refusals, and socket resets are expected during stealth port knocking.
         }
     }
 
@@ -156,7 +150,6 @@ public static class IcmpKnock
         }
         catch
         {
-            // Expected on stealth firewalls with drop rules (e.g. MikroTik action=drop after address-list)
         }
     }
 
@@ -186,10 +179,8 @@ public static class IcmpKnock
             }
             catch
             {
-                // DNS resolution may fail if offline or IP literal without DNS64
             }
 
-            // Also include direct host connect task using .NET Happy Eyeballs
             var tasks = new List<Task>();
 
             tasks.Add(Task.Run(async () =>
@@ -208,7 +199,6 @@ public static class IcmpKnock
                 }
                 catch
                 {
-                    // Expected on drop firewall
                 }
             }, cts.Token));
 
@@ -235,11 +225,9 @@ public static class IcmpKnock
                     }
                     catch (OperationCanceledException)
                     {
-                        // Expected: Stealth DROP firewall behavior causes timeout while SYN is delivered.
                     }
                     catch (SocketException)
                     {
-                        // Expected: Reset or connection refused by intermediate hops still delivers SYN.
                     }
                     catch
                     {
@@ -251,7 +239,6 @@ public static class IcmpKnock
         }
         catch
         {
-            // Expected
         }
     }
 }

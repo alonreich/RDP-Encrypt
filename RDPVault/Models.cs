@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
@@ -113,7 +113,6 @@ public class RdpProfile
     /// <summary>Hex SHA-1 thumbprint of the server certificate accepted by user.</summary>
     public string CertThumbprint { get; set; } = "";
 
-    // Wake-on-LAN (WOL) settings
     public bool EnableWol { get; set; } = false;
     public string WolMacAddress { get; set; } = "";
     public string WolBroadcastIp { get; set; } = "255.255.255.255";
@@ -152,7 +151,7 @@ public class RdpProfile
     {
         if (FullScreenOverride == TriStateOverride.Enabled) return true;
         if (FullScreenOverride == TriStateOverride.Disabled) return false;
-        if (!FullScreen) return false; // Explicitly configured windowed resolution
+        if (!FullScreen) return false;
         return settings?.DefaultFullScreen ?? FullScreen;
     }
 
@@ -200,7 +199,6 @@ public class RdpProfile
                   Height > 0 ? Height : (settings?.DefaultHeight > 0 ? settings.DefaultHeight : 1080), false)
         };
 
-        // Host Desktop Protection: Guarantee landscape ratio (w >= h) to prevent remote workstation scramble
         if (w < h && w > 0 && h > 0)
         {
             (w, h) = (h, w);
@@ -270,8 +268,6 @@ public class VaultPayload
 {
     public List<RdpProfile> Profiles { get; set; } = new();
     public VaultSettings Settings { get; set; } = new();
-    // Encrypted with the payload; survives Android process death until acknowledgement.
-    // Cleared once the user confirms that the code is safely recorded.
     public string PendingRecoveryCode { get; set; } = "";
 }
 
@@ -342,10 +338,6 @@ public class VaultFile
     public class KdfParams
     {
         public string Salt { get; set; } = "";
-        // Issue #13: was 262144 KiB / t=5, which meant multi-second unlocks and a
-        // 256 MB spike on the managed Argon2 implementation. 64 MiB / t=3 matches
-        // the documented spec and is still memory-hard. Existing vaults keep their
-        // own stored parameters, so this change is backward compatible.
         public int Mem { get; set; } = 65536;
         public int Iter { get; set; } = 3;
         public int Lanes { get; set; } = 4;

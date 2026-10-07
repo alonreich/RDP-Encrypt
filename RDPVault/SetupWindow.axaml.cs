@@ -1,4 +1,4 @@
-using Avalonia.Controls;
+﻿using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
 using System;
@@ -20,7 +20,6 @@ public partial class SetupWindow : Window
             Title = "Upgrade RDP Vault";
             TxtInstallTitle.Text = "Upgrade the installed copy";
             TxtInstallSubtitle.Text = "Keeps your vault and settings";
-            // Only offer the destructive option when there is actually something to destroy.
             BtnCleanInstall.IsVisible = InstallerService.InstalledVaultExists();
         }
     }

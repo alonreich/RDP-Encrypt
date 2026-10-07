@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Threading.Tasks;
 using Avalonia.Controls;
@@ -49,11 +49,9 @@ public partial class SettingsWindow : Window
         _ = CheckBitLockerAsync();
     }
 
-    // ---------------------------------------------------------------- live read-outs
 
     private void UpdateScopeHint()
     {
-        // Issue #20: say plainly what the aggressive option destroys.
         TxtScopeHint.Text = CmbSweepScope.SelectedIndex == 1
             ? "Warning: this also erases Remote Desktop history for connections you made outside RDP Vault, plus the mstsc entries in Recent items, UserAssist and Prefetch. That cannot be undone."
             : "Only registry entries, Default.rdp, jump-list and Recent entries that mention a host stored in this vault are removed. Your own separate Remote Desktop history is left alone.";
@@ -61,7 +59,6 @@ public partial class SettingsWindow : Window
 
     private void UpdateRecoveryUI()
     {
-        // Issue #2: tell the user the truth about whether a way back in exists.
         bool has = SessionManager.Current.HasRecoveryCode;
         TxtRecoveryStatus.Text = has
             ? "A Recovery Code exists for this vault. Generating a new one immediately invalidates the old one."
@@ -102,7 +99,6 @@ public partial class SettingsWindow : Window
 
     private async Task CheckBitLockerAsync()
     {
-        // Issue #7: this used to be a checkbox with no code behind it whatsoever.
         string? root = Path.GetPathRoot(SessionManager.Current.VaultPath);
         string drive = (root ?? "C:\\").TrimEnd('\\', '/');
         var status = await Task.Run(() => SecurityEnforcer.CheckDrive(drive));
@@ -121,14 +117,11 @@ public partial class SettingsWindow : Window
         });
     }
 
-    // ---------------------------------------------------------------- actions
 
     private async void BtnChangePassword_Click(object? sender, RoutedEventArgs e)
     {
         SessionManager.Current.Touch();
 
-        // Issue #1 (2026 review): a session opened with the Recovery Code has no old
-        // password to offer, so the field is hidden and the check is skipped.
         bool needOld = !SessionManager.Current.UnlockedViaRecovery;
         var result = await Dialogs.ChangePasswordAsync(this, needOld);
         if (result == null) return;
@@ -176,8 +169,6 @@ public partial class SettingsWindow : Window
         BtnToggleHello.IsEnabled = false;
         SessionManager.Current.Touch();
 
-        // Issue #21: enrollment raises the same OS prompt as unlocking, so it needs
-        // the same foreground handling - and the owner is THIS window, not MainWindow.
         SystemPromptFocus.SetOwner(TryGetPlatformHandle()?.Handle ?? IntPtr.Zero);
         Activate();
 
@@ -196,7 +187,6 @@ public partial class SettingsWindow : Window
                     {
                         HelloEnrollResult.Cancelled => "Windows Hello was cancelled, so nothing was changed.",
                         HelloEnrollResult.NotSupported => "This PC does not offer Windows Hello with a hardware-backed key.",
-                        // Issue #18c
                         HelloEnrollResult.SignatureNotReproducible =>
                             "This PC's Windows Hello key does not produce a repeatable signature, so it cannot be used to unlock the vault. " +
                             "Quick unlock has been left off; your master password still works normally.",
@@ -249,7 +239,6 @@ public partial class SettingsWindow : Window
         var file = SessionManager.Current.File;
         if (settings == null || file == null) { Close(); return; }
 
-        // Issue #4/#15: values are validated instead of being accepted blindly.
         if (!int.TryParse((TxtLockMinutes.Text ?? "").Trim(), out int lockMinutes) ||
             lockMinutes < 1 || lockMinutes > 1440)
         {

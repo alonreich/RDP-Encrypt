@@ -1,10 +1,11 @@
 # RDP Vault Android Companion Architecture
 
-> **Revision 1.2.0 (September 2026 audit).** Section 5 at the end of this document is the
-> current, corrected description of how the Android app behaves. Where sections 1-4
-> disagree with it, section 5 wins - two statements in section 2 described intended
-> behaviour that the 1.1.0 code did not actually implement, and they are flagged inline
-> below.
+> **Revision 2.0.0 (October 2026 — Embedded FreeRDP Engine Migration).** Section 7 at the
+> end of this document is the current, authoritative description of the Android client architecture.
+> External intent handoff (rdp://), Microsoft Remote Desktop dependencies, and the
+> RdpAutoTypeService accessibility subsystem have been completely superseded and purged.
+> RDP Vault for Android embeds a native FreeRDP engine directly. Where sections 1–6
+> describe external handoff or accessibility auto-typing, section 7 supersedes them.
 
 ## 1. Executive Summary
 RDP Vault Android is a parallel distribution branch providing zero-compromise encrypted remote desktop capabilities on mobile devices. It shares the identical cryptographic core, in-memory credential protection, and JSON vault structure (`vault.rdpv`) as the Windows desktop version.
@@ -265,6 +266,8 @@ Authoritative implementation details recorded in `project_structure.txt` **SECTI
 - **Unrestricted Mobile WOL**: Cellular data checks no longer abort WAN WOL magic packet delivery.
 
 ### 6.3 Post-APK-Upgrade Accessibility Service Recovery (`RdpAutoTypeService.cs`)
+> **SUPERSEDED IN 2.0.0 (see Section 7)**: RdpAutoTypeService and accessibility requirements were purged in 2.0.0.
+
 - **Stale Package Unbind State**: On in-place APK upgrades, Android OS marks accessibility services as `Crashed services:{}` until re-registered.
 - **Active State Check**: `IsServiceActive => Instance != null` verifies that the service is physically bound and receiving events, while `IsServiceConfigured` queries `Settings.Secure`.
 - **UI Diagnostics**: If configured in settings but `Instance == null`, the UI warns `AUTO-TYPE UNBOUND (UPDATE DETECTED)` and provides a direct shortcut to Android Accessibility Settings.
@@ -275,4 +278,49 @@ Authoritative implementation details recorded in `project_structure.txt` **SECTI
   adb shell settings put secure enabled_accessibility_services com.rdpvault.app/com.rdpvault.app.services.RdpAutoTypeService
   adb shell pm grant com.rdpvault.app android.permission.POST_NOTIFICATIONS
   ```
+
+---
+
+## 7. Release 2.0.0 — Embedded FreeRDP Engine Architecture (October 2026)
+
+Authoritative implementation details recorded in `project_structure.txt` **SECTION 30**.
+
+### 7.1 Deprecation & Purge of External Handoff & Accessibility Auto-Type
+- **Architectural Motivation**:
+  - In version 1.2.0, RDP Vault dispatched external `rdp://` intents to Microsoft Remote Desktop / Windows App (`com.microsoft.rdc.androidx`) and used an Accessibility Service (`RdpAutoTypeService`) to type passwords into external text fields.
+  - This required users on Android 13–15 to bypass "Restricted Settings" menus or issue ADB shell commands, and created fragility when external apps redesigned their login hierarchies.
+- **2.0.0 Subsystem Replacement**:
+  - Purged `RdpAutoTypeService.cs` and `accessibility_service_config.xml`.
+  - Removed all accessibility queries, intent-filters, and permissions from `AndroidManifest.xml`.
+  - Android APK installs completely unprivileged without triggering Restricted Settings or requiring ADB commands.
+
+### 7.2 Native FreeRDP Engine Integration
+- **Embedded C/C++ Shared Libraries**:
+  - Packaged inside APK under `lib/arm64-v8a/` and `lib/x86_64/`:
+    `libfreerdp.so`, `libfreerdp2.so`, `libfreerdp-client.so`, `libfreerdp-client2.so`, `libfreerdp-android.so`, `libwinpr.so`, `libwinpr2.so`, `libcrypto.so`, `libssl.so`, `libavcodec.so`, `libavutil.so`, `libswresample.so`, `libswscale.so`, and `libc++_shared.so`.
+- **P/Invoke Bindings (`Rdp/NativeFreeRdp.cs`)**:
+  - Implements managed P/Invoke signatures for FreeRDP context allocation, settings configuration, network I/O, session thread loop, and input injection.
+- **In-Memory Credential Streaming (`Rdp/RdpSessionBridge.cs`)**:
+  - Unwraps passwords from `VaultMemoryGuard` directly in RAM, sets `FreeRDP_Password` via native memory pointer, and immediately executes `Array.Clear()` to zero managed buffers.
+  - Enforces `redirectclipboard = 0` (default deny) to prevent remote clipboard leakage.
+  - Disables dynamic desktop resizing (`dynamic resolution = 0`) to safeguard Windows host desktop icon arrangements.
+
+### 7.3 Immersive Session View & Touch Controls (`Activities/RdpSessionActivity.cs`)
+- **Hardware-Accelerated Framebuffer Rendering**:
+  - Double-buffered ARGB_8888 bitmap rendering onto native Android `SurfaceView`.
+  - Matrix-based Pan and Pinch-to-Zoom engine for 1:1 desktop navigation.
+- **Relative Virtual Trackpad**:
+  - Smooth accelerated mouse cursor tracking.
+  - Single tap = Left Click, two-finger tap = Right Click, tap-and-drag = Left Drag.
+- **Direct Touch Mode**:
+  - Tap directly on remote elements with inverted matrix coordinate translation.
+- **Virtual Mouse Wheel**:
+  - Dedicated right-edge vertical drag gesture transmitting mouse wheel rotation PDUs.
+- **Soft Keyboard & Modifier Drawer**:
+  - Expandable modifier toolbar providing one-tap toggles for Ctrl, Alt, Shift, Win, Esc, Tab, Enter, Backspace, Delete, and F1–F12 keys.
+  - Integrated with native Android InputMethodManager (IME).
+- **Session Continuity**:
+  - Full sensor rotation (`ScreenOrientation.Sensor`), adapting seamlessly without dropping active sessions.
+  - Bound `RdpSessionService` tracks connection status in foreground notification.
+
 

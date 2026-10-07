@@ -59,16 +59,13 @@ public partial class MainView : UserControl
     /// </summary>
     private bool _suppressSettingsSave;
 
-    // ---- Foreground inactivity auto-lock (audit item 3 / suggestion 7) ----
     private DispatcherTimer? _idleTimer;
     private DateTime _lastActivityUtc = DateTime.UtcNow;
     private bool _idleTimerSuspended;
 
-    // ---- Pre-flight reachability decision plumbing (suggestion 10) ----
     private enum UnreachableChoice { Cancel = 0, ConnectAnyway = 1, Retry = 2, SendWol = 3 }
     private TaskCompletionSource<UnreachableChoice>? _unreachableChoiceTcs;
 
-    // ---- Deferred biometric seal repair (Finding 3) ----
     private bool _pendingSealRepair;
 
     private struct ProfileEditorState
@@ -82,8 +79,7 @@ public partial class MainView : UserControl
         public int ResIndex;
         public string CustomWidth;
         public string CustomHeight;
-        public int MultiMonIndex;
-        public int SmartSizingIndex;
+        public bool AllowClipboard;
         public bool EnableWol;
         public string WolMac;
         public string WolPort;
@@ -111,7 +107,6 @@ public partial class MainView : UserControl
         string standardPath = Path.Combine(baseDir, AppPaths.VaultFileName);
         if (File.Exists(standardPath)) return standardPath;
 
-        // Legacy migration: an earlier build wrote into the Documents subfolder.
         try
         {
             string legacyDir = Environment.GetFolderPath(Environment.SpecialFolder.Personal);
@@ -145,14 +140,9 @@ public partial class MainView : UserControl
         Loaded += (_, _) => CheckInitialVaultState();
     }
 
-    // ==================================================================
-    //  FOREGROUND INACTIVITY AUTO-LOCK
-    // ==================================================================
 
     private void SetupIdleTimer()
     {
-        // Every touch anywhere in the app resets the clock. MainActivity.OnUserInteraction
-        // also feeds NotifyUserActivity() so events Avalonia does not surface still count.
         AddHandler(InputElement.PointerPressedEvent, (_, _) => NotifyUserActivity(), RoutingStrategies.Tunnel);
         AddHandler(InputElement.PointerReleasedEvent, (_, _) => NotifyUserActivity(), RoutingStrategies.Tunnel);
         AddHandler(InputElement.KeyDownEvent, (_, _) => NotifyUserActivity(), RoutingStrategies.Tunnel);
@@ -176,11 +166,11 @@ public partial class MainView : UserControl
     private void EvaluateIdleTimeout()
     {
         if (_idleTimerSuspended) return;
-        if (_masterKey == null) return;                       // already locked
-        if (OverlayLaunch.IsVisible && !CardLaunchUnreachable.IsVisible) return;                  // never lock mid-connect unless waiting on unreachable prompt
+        if (_masterKey == null) return;
+        if (OverlayLaunch.IsVisible && !CardLaunchUnreachable.IsVisible) return;
 
         int minutes = _payload?.Settings?.LockMinutes ?? 0;
-        if (minutes <= 0) return;                             // "Never"
+        if (minutes <= 0) return;
 
         if ((DateTime.UtcNow - _lastActivityUtc).TotalMinutes >= minutes)
         {
@@ -190,16 +180,9 @@ public partial class MainView : UserControl
         }
     }
 
-    // ==================================================================
-    //  EVENT WIRING
-    // ==================================================================
 
     private void WireEvents()
     {
-        // 1. Password visibility toggles.
-        //    NOTE: the connection PASSWORD toggle exists ONLY inside the profile editor.
-        //    Cards, the launch overlay and Settings deliberately expose no way to read or
-        //    copy a stored remote password.
         SetupPasswordToggle(TxtFirstRunPass, BtnToggleFirstRunPass);
         SetupPasswordToggle(TxtFirstRunConfirm, BtnToggleFirstRunConfirm);
         SetupPasswordToggle(TxtPassword, BtnToggleUnlockPass);
@@ -212,18 +195,15 @@ public partial class MainView : UserControl
         SetupPasswordToggle(TxtProfilePass, BtnToggleProfilePass);
         SetupPasswordToggle(TxtVerifyBackupPass, BtnToggleVerifyBackupPass);
 
-        // 2. Numeric input filtering
         RestrictToDigits(TxtProfilePort);
         RestrictToDigits(TxtProfileWolPort);
         RestrictToDigits(TxtProfileWolWait);
         RestrictToDigits(TxtProfileCustomWidth);
         RestrictToDigits(TxtProfileCustomHeight);
 
-        // 3. First-Time Setup Wizard
         BtnFirstRunCreate.Click += async (_, _) => await CreateVaultFirstTimeAsync();
         BtnFirstRunImportExisting.Click += async (_, _) => await ImportVaultFileAsync();
 
-        // 4. Recovery Code Display - three independent escape routes
         BtnCopyRecoveryCode.Click += (_, _) => CopyRecoveryCodeToClipboard();
         BtnSaveRecoveryCodeFile.Click += async (_, _) => await SaveRecoveryCodeToFileAsync();
         BtnShareRecoveryCode.Click += (_, _) => ShareRecoveryCodeText();
@@ -243,7 +223,6 @@ public partial class MainView : UserControl
             SwitchToUnlocked();
         };
 
-        // 5. Lock Screen
         BtnBiometricUnlock.Click += async (_, _) =>
         {
             _biometricPromptSuppressed = false;
@@ -257,7 +236,6 @@ public partial class MainView : UserControl
         BtnShowRecovery.Click += (_, _) => ShowRecoveryUnlock();
         BtnLockRestoreBackup.Click += async (_, _) => await RestoreVaultFromFileAsync();
 
-        // 6. Recovery Unlock
         BtnPasteRecoveryCode.Click += async (_, _) => await PasteRecoveryCodeAsync();
         BtnClearRecoveryInput.Click += (_, _) =>
         {
@@ -271,7 +249,6 @@ public partial class MainView : UserControl
         BtnSubmitRecoveryUnlock.Click += async (_, _) => await SubmitRecoveryUnlockAsync();
         BtnCancelRecoveryUnlock.Click += (_, _) => ShowLockScreen();
 
-        // 7. Unlocked Screen
         BtnAddProfile.Click += (_, _) => ShowProfileEditor(null);
         BtnSettings.Click += (_, _) => ShowSettings();
         BtnLock.Click += (_, _) => LockVault();
@@ -313,11 +290,11 @@ public partial class MainView : UserControl
         BtnEndSessionStopTracking.Click += (_, _) =>
         {
             OverlayEndSession.IsVisible = false;
+            RdpSessionBridge.ActiveSession?.Disconnect();
             EndActiveSession();
         };
         BtnEndSessionCancel.Click += (_, _) => OverlayEndSession.IsVisible = false;
 
-        // Backup reminder banner
         BtnBackupNow.Click += async (_, _) => await ShareVaultBackupAsync();
         BtnDismissBackupReminder.Click += (_, _) =>
         {
@@ -325,7 +302,6 @@ public partial class MainView : UserControl
             BannerBackupReminder.IsVisible = false;
         };
 
-        // 8. Profile Editor - Save and Cancel in header and bottom, plus knock
         BtnTopSaveProfile.Click += (_, _) => SaveProfile();
         BtnTopCancelProfile.Click += (_, _) => OnCancelProfileEditor();
         BtnBottomSaveProfile.Click += (_, _) => SaveProfile();
@@ -385,19 +361,13 @@ public partial class MainView : UserControl
         CmbProfileResolution.SelectionChanged += (_, _) =>
         {
             int idx = CmbProfileResolution.SelectedIndex;
-            PnlProfileCustomRes.IsVisible = idx == 2;
-            UpdateProfilePreserveNativeHint();
+            PnlProfileCustomRes.IsVisible = idx == 5;
+            TxtProfileMatchScreenWarning.IsVisible = idx == 6;
         };
-        TxtProfileCustomWidth.TextChanged += (_, _) => UpdateProfilePreserveNativeHint();
-        TxtProfileCustomHeight.TextChanged += (_, _) => UpdateProfilePreserveNativeHint();
-        CmbProfileSmartSizing.SelectionChanged += (_, _) => UpdateProfilePreserveNativeHint();
 
-        // Suggestion 8: no hardcoded pixel jumps. Whatever gains focus scrolls itself into
-        // view above the soft keyboard, on any screen size or keyboard height.
         PanelProfileEditor.AddHandler(InputElement.GotFocusEvent, OnEditorChildGotFocus, RoutingStrategies.Bubble);
         PanelSettings.AddHandler(InputElement.GotFocusEvent, OnEditorChildGotFocus, RoutingStrategies.Bubble);
 
-        // 9. Settings
         BtnTopCloseSettings.Click += (_, _) =>
         {
             PanelSettings.IsVisible = false;
@@ -443,28 +413,19 @@ public partial class MainView : UserControl
             MainActivity.Instance?.ApplyScreenSecurity();
         };
 
-        BtnResetAutoTypePrompt.Click += (_, _) =>
-        {
-            AppPrefs.SetBool(AppPrefs.KeyAutoTypePromptSuppressed, false);
-            BtnResetAutoTypePrompt.IsVisible = false;
-            TxtVaultBackupStatus.IsVisible = false;
-            TxtAccessibilityStatus.Text = "The Auto-Type prompt will be offered again the next time you connect.";
-            TxtAccessibilityStatus.Foreground = new SolidColorBrush(Color.Parse("#2FBF71"));
-        };
-
         CmbSettingsAutoLock.SelectionChanged += (_, _) => SaveSettingsDefaults();
         ChkSettingsLockOnBackground.IsCheckedChanged += (_, _) => SaveSettingsDefaults();
         CmbSettingsResolution.SelectionChanged += (_, _) =>
         {
-            if (!_suppressSettingsSave && CmbSettingsResolution.SelectedIndex == 6)
+            if (!_suppressSettingsSave && CmbSettingsResolution.SelectedIndex == 5)
             {
-                // "Match Mobile Device Screen" has no fixed native size to preserve.
                 ChkSettingsPreserveNative.IsChecked = false;
             }
+            TxtSettingsMatchScreenWarning.IsVisible = CmbSettingsResolution.SelectedIndex == 5;
             UpdateSettingsPreserveNativeHint();
             SaveSettingsDefaults();
         };
-        CmbSettingsMultiMon.SelectionChanged += (_, _) => SaveSettingsDefaults();
+        ChkSettingsAllowClipboard.IsCheckedChanged += (_, _) => SaveSettingsDefaults();
         ChkSettingsPreserveNative.IsCheckedChanged += (_, _) =>
         {
             UpdateSettingsPreserveNativeHint();
@@ -477,73 +438,18 @@ public partial class MainView : UserControl
             AppPrefs.SetBool(AppPrefs.KeyPreflightEnabled, ChkSettingsPreflight.IsChecked == true);
         };
 
-        // 10. Auto-Type Accessibility
-        BtnSettingsAccessibility.Click += (_, _) =>
-        {
-            MainActivity.Instance?.BeginExternalActivity();
-            RdpAutoTypeService.OpenAccessibilitySettings(AndroidContext);
-        };
-        BtnSettingsAppInfo.Click += (_, _) =>
-        {
-            MainActivity.Instance?.BeginExternalActivity();
-            RdpAutoTypeService.OpenAppInfo(AndroidContext);
-        };
-        BtnOpenAccessibilitySettings.Click += (_, _) =>
-        {
-            OverlayEnableAccessibility.IsVisible = false;
-            MainActivity.Instance?.BeginExternalActivity();
-            RdpAutoTypeService.OpenAccessibilitySettings(AndroidContext);
-        };
-        BtnOpenAppInfo.Click += (_, _) =>
-        {
-            MainActivity.Instance?.BeginExternalActivity();
-            RdpAutoTypeService.OpenAppInfo(AndroidContext);
-        };
-        BtnContinueWithoutAccessibility.Click += async (_, _) =>
-        {
-            PersistAccessibilityPromptChoice();
-            OverlayEnableAccessibility.IsVisible = false;
-            if (_activeLaunchProfile != null)
-            {
-                await ProceedLaunchAsync(_activeLaunchProfile);
-            }
-        };
-        BtnCancelAccessibilityPrompt.Click += (_, _) =>
-        {
-            PersistAccessibilityPromptChoice();
-            OverlayEnableAccessibility.IsVisible = false;
-        };
-        CardLaunchPasswordTip.PointerPressed += (_, _) =>
-        {
-            if (!RdpAutoTypeService.IsServiceActive)
-            {
-                MainActivity.Instance?.BeginExternalActivity();
-                RdpAutoTypeService.OpenAccessibilitySettings(AndroidContext);
-            }
-        };
-
-        // 11. Launch overlay controls
         BtnSkipWolWait.Click += (_, _) => SkipWolWait();
         BtnCancelLaunch.Click += (_, _) => CancelLaunch();
         BtnLaunchConnectAnyway.Click += (_, _) => _unreachableChoiceTcs?.TrySetResult(UnreachableChoice.ConnectAnyway);
         BtnLaunchRetryProbe.Click += (_, _) => _unreachableChoiceTcs?.TrySetResult(UnreachableChoice.Retry);
         BtnLaunchSendWol.Click += (_, _) => _unreachableChoiceTcs?.TrySetResult(UnreachableChoice.SendWol);
 
-        // 12. Biometric seal repair
         BtnSkipRepairBiometrics.Click += (_, _) =>
         {
             _pendingSealRepair = false;
             OverlayRepairBiometrics.IsVisible = false;
         };
         BtnDoRepairBiometrics.Click += async (_, _) => await RepairBiometricSealAsync();
-    }
-
-    private void PersistAccessibilityPromptChoice()
-    {
-        if (ChkDontAskAccessibilityAgain.IsChecked == true)
-        {
-            AppPrefs.SetBool(AppPrefs.KeyAutoTypePromptSuppressed, true);
-        }
     }
 
     private void OnEditorChildGotFocus(object? sender, GotFocusEventArgs e)
@@ -563,50 +469,31 @@ public partial class MainView : UserControl
             : "▸  Advanced options (display, wake-on-LAN, gateway, notes)";
     }
 
-    // ==================================================================
-    //  RESOLUTION LABELS (suggestion 2 / audit item 8)
-    // ==================================================================
 
-    // Returns the current editor resolution label
     private string CurrentEditorResolutionLabel()
     {
         int idx = CmbProfileResolution.SelectedIndex;
         return idx switch
         {
-            1 => "Multi-Monitor (Spanned)",
-            2 => $"{(string.IsNullOrWhiteSpace(TxtProfileCustomWidth.Text) ? "1920" : TxtProfileCustomWidth.Text.Trim())}x{(string.IsNullOrWhiteSpace(TxtProfileCustomHeight.Text) ? "1080" : TxtProfileCustomHeight.Text.Trim())}",
-            _ => "1920x1080 Landscape"
+            1 => "2560x1440",
+            2 => "3840x2160",
+            3 => "1440x900",
+            4 => "1280x720",
+            5 => $"{(string.IsNullOrWhiteSpace(TxtProfileCustomWidth.Text) ? "1920" : TxtProfileCustomWidth.Text.Trim())}x{(string.IsNullOrWhiteSpace(TxtProfileCustomHeight.Text) ? "1080" : TxtProfileCustomHeight.Text.Trim())}",
+            6 => "Match Phone Screen",
+            _ => "1920x1080"
         };
-    }
-
-    private void UpdateProfilePreserveNativeHint()
-    {
-        string res = CurrentEditorResolutionLabel();
-        int mode = CmbProfileSmartSizing.SelectedIndex;
-        bool effectiveScroll = mode == 2 || (mode == 0 && !(_payload?.Settings?.DefaultSmartSizing ?? false));
-
-        if (effectiveScroll)
-        {
-            TxtProfilePreserveNativeHint.Text = $"Native {res} desktop (1:1 scrollable landscape without squashing remote monitors).";
-            TxtProfilePreserveNativeHint.Foreground = new SolidColorBrush(Color.Parse("#2FBF71"));
-        }
-        else
-        {
-            TxtProfilePreserveNativeHint.Text = $"Native {res} desktop with client-side zoom & pan.";
-            TxtProfilePreserveNativeHint.Foreground = new SolidColorBrush(Color.Parse("#2FBF71"));
-        }
     }
 
     private string CurrentSettingsResolutionLabel()
     {
         return CmbSettingsResolution.SelectedIndex switch
         {
-            1 => "1280x720",
-            2 => "1600x900",
-            3 => "1366x768",
-            4 => "2560x1440",
-            5 => "3840x2160",
-            6 => "your phone's screen size",
+            1 => "2560x1440",
+            2 => "3840x2160",
+            3 => "1440x900",
+            4 => "1280x720",
+            5 => "your phone's screen size",
             _ => "1920x1080"
         };
     }
@@ -614,7 +501,7 @@ public partial class MainView : UserControl
     private void UpdateSettingsPreserveNativeHint()
     {
         string res = CurrentSettingsResolutionLabel();
-        bool deviceNative = CmbSettingsResolution.SelectedIndex == 6;
+        bool deviceNative = CmbSettingsResolution.SelectedIndex == 5;
 
         ChkSettingsPreserveNative.Content = deviceNative
             ? "Keep native size by default (not applicable when matching the phone screen)"
@@ -624,7 +511,7 @@ public partial class MainView : UserControl
         {
             TxtSettingsPreserveNativeHint.Text = deviceNative
                 ? "The remote desktop is resized to fit your phone, so there is nothing to preserve."
-                : $"Requests native {res} desktop. Note: External RDP clients control resolution, scaling, and panning according to their own display settings.";
+                : $"Requests native {res} desktop without squashing or distortion.";
             TxtSettingsPreserveNativeHint.Foreground = new SolidColorBrush(Color.Parse("#2FBF71"));
         }
         else
@@ -664,9 +551,6 @@ public partial class MainView : UserControl
         };
     }
 
-    // ==================================================================
-    //  BACK NAVIGATION
-    // ==================================================================
 
     public bool HandleBackPressed()
     {
@@ -682,13 +566,6 @@ public partial class MainView : UserControl
         if (OverlayEndSession.IsVisible)
         {
             OverlayEndSession.IsVisible = false;
-            return true;
-        }
-
-        if (OverlayEnableAccessibility.IsVisible)
-        {
-            PersistAccessibilityPromptChoice();
-            OverlayEnableAccessibility.IsVisible = false;
             return true;
         }
 
@@ -743,9 +620,6 @@ public partial class MainView : UserControl
             return true;
         }
 
-        // Recovery code screen: the ONLY way off it is ticking the confirmation box.
-        // Losing this code means losing the vault, so Back is deliberately trapped here
-        // (audit item 7).
         if (PanelRecoveryDisplay.IsVisible)
         {
             if (ChkConfirmRecoverySaved.IsChecked == true && _payload != null)
@@ -770,13 +644,17 @@ public partial class MainView : UserControl
             return true;
         }
 
-        // Root level: MainActivity decides whether to lock before minimising.
         return false;
     }
 
     /// <summary>Locks the vault if it is currently open. Safe to call from any state.</summary>
     public void AutoLockIfUnlocked()
     {
+        if (MainActivity.Instance?.IsSessionActive == true || RdpSessionBridge.ActiveSession != null)
+        {
+            return;
+        }
+
         if (_masterKey != null)
         {
             LockVault();
@@ -794,9 +672,6 @@ public partial class MainView : UserControl
         PanelSettings.IsVisible = panel == PanelSettings;
     }
 
-    // ==================================================================
-    //  STATE MANAGEMENT
-    // ==================================================================
 
     private void CheckInitialVaultState()
     {
@@ -865,9 +740,9 @@ public partial class MainView : UserControl
         payload.Settings.DefaultWidth = 1920;
         payload.Settings.DefaultHeight = 1080;
         payload.Settings.DefaultSmartSizing = false;
-        payload.Settings.DefaultUseMultiMon = false;   // safe single-monitor default for mobile
+        payload.Settings.DefaultUseMultiMon = false;
+        payload.Settings.DefaultAllowClipboard = false;
 
-        // Audit item 3: a security vault must not sit unlocked for an hour by default.
         payload.Settings.LockMinutes = 1;
         payload.Settings.LockImmediatelyOnBackground = true;
 
@@ -906,7 +781,6 @@ public partial class MainView : UserControl
                 }
                 else if (!enroll.Cancelled && !string.IsNullOrEmpty(enroll.Error))
                 {
-                    // Not fatal: the vault is password-protected regardless.
                     global::Android.Util.Log.Warn("RDPVault", "Biometric enrolment skipped: " + enroll.Error);
                 }
             }
@@ -1022,9 +896,6 @@ public partial class MainView : UserControl
         }
     }
 
-    // ==================================================================
-    //  LOCK SCREEN & UNLOCK
-    // ==================================================================
 
     private void ShowLockScreen()
     {
@@ -1111,8 +982,6 @@ public partial class MainView : UserControl
 
         if (result.Invalidated)
         {
-            // Finding 3: the seal is genuinely dead. Say so plainly and offer to rebuild it
-            // AFTER a master-password unlock - never silently regenerate it.
             _pendingSealRepair = true;
             PnlBiometricCard.IsVisible = false;
             TxtLockError.Text = "Fingerprint unlock stopped working - a new fingerprint or face was added to this phone, or Android was updated. Unlock with your master password and RDP Vault will offer to set it up again.";
@@ -1173,8 +1042,6 @@ public partial class MainView : UserControl
             TxtPassword.Text = "";
             _biometricPromptSuppressed = false;
 
-            // Finding 3: detect a dead seal, but NEVER rebuild it silently. Rebuilding
-            // requires a fresh biometric authorisation, so it needs the user's consent.
             string machineId = VaultCrypto.CurrentMachineId();
             var deviceSeal = file.Seals?.FirstOrDefault(s => s.MachineId == machineId);
             if (deviceSeal != null && (string.IsNullOrEmpty(deviceSeal.KeyId) || !AndroidHardwareKeyStore.HasKey(deviceSeal.KeyId)))
@@ -1214,8 +1081,6 @@ public partial class MainView : UserControl
 
         string machineId = VaultCrypto.CurrentMachineId();
 
-        // Drop the dead alias before creating a new one so the Keystore does not accumulate
-        // orphaned keys across OS updates.
         var old = _vaultFile.Seals?.FirstOrDefault(s => s.MachineId == machineId);
         if (old != null && !string.IsNullOrEmpty(old.KeyId))
         {
@@ -1322,9 +1187,6 @@ public partial class MainView : UserControl
             _payload = payload;
             ApplyLockSettingsToActivity();
 
-            // The master password changed, so every existing hardware seal now wraps a key
-            // the user can no longer reach by biometric alone. Clear them and let the user
-            // re-enrol deliberately.
             var survivingSeals = new List<SealEntry>();
             foreach (var s in _vaultFile.Seals ?? new List<SealEntry>())
             {
@@ -1396,7 +1258,6 @@ public partial class MainView : UserControl
         OverlayVerifyBackupPassword.IsVisible = false;
         OverlayConfirmRestoreVault.IsVisible = false;
         OverlayPromptPasswordForRecovery.IsVisible = false;
-        OverlayEnableAccessibility.IsVisible = false;
         OverlayEndSession.IsVisible = false;
         OverlayRepairBiometrics.IsVisible = false;
 
@@ -1429,12 +1290,6 @@ public partial class MainView : UserControl
         _stagedRestoreVaultFile = null;
         _biometricPromptSuppressed = false;
 
-        // Any armed auto-type credential dies with the lock.
-        RdpAutoTypeService.Disarm();
-
-        // Locking the vault does NOT end a remote session - that session belongs to the
-        // external RDP client and is none of our business. The banner state is rebuilt
-        // from the service on the next unlock.
         PnlProfilesList.Children.Clear();
         TxtSearch.Text = "";
 
@@ -1443,9 +1298,6 @@ public partial class MainView : UserControl
         TxtLockNotice.IsVisible = true;
     }
 
-    // ==================================================================
-    //  PROFILES
-    // ==================================================================
 
     private void SaveVault()
     {
@@ -1538,7 +1390,6 @@ public partial class MainView : UserControl
 
         var rootStack = new StackPanel { Spacing = 10 };
 
-        // Row 1: name + host  |  Connect
         var topGrid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
 
         var info = new StackPanel
@@ -1593,9 +1444,6 @@ public partial class MainView : UserControl
         topGrid.Children.Add(btnConnect);
         rootStack.Children.Add(topGrid);
 
-        // Row 2: status chips on their own wrapping row
-        // Spacing is applied per-chip via Margin: WrapPanel.ItemSpacing / LineSpacing do not
-        // exist in Avalonia 11.1, which is the version this project pins.
         var chips = new WrapPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, -6, -6) };
 
         bool isInherit = string.IsNullOrWhiteSpace(profile.ResolutionPreset) || profile.ResolutionPreset.Equals("InheritGlobal", StringComparison.OrdinalIgnoreCase);
@@ -1636,8 +1484,6 @@ public partial class MainView : UserControl
 
         rootStack.Children.Add(chips);
 
-        // Row 3: actions. No password view / copy control exists anywhere on this card,
-        // by design - a stored password is readable only inside the profile editor.
         var actionsRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
 
         var btnEdit = new Button
@@ -1702,8 +1548,7 @@ public partial class MainView : UserControl
             ResIndex = CmbProfileResolution.SelectedIndex,
             CustomWidth = TxtProfileCustomWidth.Text ?? "1920",
             CustomHeight = TxtProfileCustomHeight.Text ?? "1080",
-            MultiMonIndex = CmbProfileMultiMon.SelectedIndex,
-            SmartSizingIndex = CmbProfileSmartSizing.SelectedIndex,
+            AllowClipboard = ChkClipboard.IsChecked == true,
             EnableWol = ChkProfileEnableWol.IsChecked == true,
             WolMac = TxtProfileWolMac.Text ?? "",
             WolPort = TxtProfileWolPort.Text ?? "9",
@@ -1730,8 +1575,7 @@ public partial class MainView : UserControl
             || CmbProfileResolution.SelectedIndex != _editorInitialState.ResIndex
             || (TxtProfileCustomWidth.Text ?? "") != _editorInitialState.CustomWidth
             || (TxtProfileCustomHeight.Text ?? "") != _editorInitialState.CustomHeight
-            || CmbProfileMultiMon.SelectedIndex != _editorInitialState.MultiMonIndex
-            || CmbProfileSmartSizing.SelectedIndex != _editorInitialState.SmartSizingIndex
+            || (ChkClipboard.IsChecked == true) != _editorInitialState.AllowClipboard
             || (ChkProfileEnableWol.IsChecked == true) != _editorInitialState.EnableWol
             || (TxtProfileWolMac.Text ?? "") != _editorInitialState.WolMac
             || (TxtProfileWolPort.Text ?? "") != _editorInitialState.WolPort
@@ -1778,10 +1622,10 @@ public partial class MainView : UserControl
 
             CmbProfileResolution.SelectedIndex = 0;
             PnlProfileCustomRes.IsVisible = false;
+            TxtProfileMatchScreenWarning.IsVisible = false;
             TxtProfileCustomWidth.Text = "1920";
             TxtProfileCustomHeight.Text = "1080";
-            CmbProfileMultiMon.SelectedIndex = 0;
-            CmbProfileSmartSizing.SelectedIndex = 0;
+            ChkClipboard.IsChecked = false;
 
             ChkProfileEnableWol.IsChecked = false;
             PnlWolDetails.IsVisible = false;
@@ -1812,35 +1656,39 @@ public partial class MainView : UserControl
             TxtProfileGateway.Text = profile.GatewayHost;
 
             string preset = profile.ResolutionPreset ?? "InheritGlobal";
-            if (profile.MultiMonOverride == TriStateOverride.Enabled || profile.UseMultiMon || string.Equals(preset, "MultiMon", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(preset, "2560x1440", StringComparison.OrdinalIgnoreCase))
             {
                 CmbProfileResolution.SelectedIndex = 1;
             }
-            else if (string.Equals(preset, "Custom", StringComparison.OrdinalIgnoreCase) || (profile.Width > 0 && profile.Height > 0 && (profile.Width != 1920 || profile.Height != 1080)))
+            else if (string.Equals(preset, "3840x2160", StringComparison.OrdinalIgnoreCase))
             {
                 CmbProfileResolution.SelectedIndex = 2;
+            }
+            else if (string.Equals(preset, "1440x900", StringComparison.OrdinalIgnoreCase))
+            {
+                CmbProfileResolution.SelectedIndex = 3;
+            }
+            else if (string.Equals(preset, "1280x720", StringComparison.OrdinalIgnoreCase))
+            {
+                CmbProfileResolution.SelectedIndex = 4;
+            }
+            else if (string.Equals(preset, "Custom", StringComparison.OrdinalIgnoreCase) || (profile.Width > 0 && profile.Height > 0 && (profile.Width != 1920 || profile.Height != 1080)))
+            {
+                CmbProfileResolution.SelectedIndex = 5;
+            }
+            else if (string.Equals(preset, "Device", StringComparison.OrdinalIgnoreCase) || string.Equals(preset, "Match Device", StringComparison.OrdinalIgnoreCase))
+            {
+                CmbProfileResolution.SelectedIndex = 6;
             }
             else
             {
                 CmbProfileResolution.SelectedIndex = 0;
             }
-            PnlProfileCustomRes.IsVisible = CmbProfileResolution.SelectedIndex == 2;
+            PnlProfileCustomRes.IsVisible = CmbProfileResolution.SelectedIndex == 5;
+            TxtProfileMatchScreenWarning.IsVisible = CmbProfileResolution.SelectedIndex == 6;
             TxtProfileCustomWidth.Text = (profile.Width > 0 ? profile.Width : 1920).ToString();
             TxtProfileCustomHeight.Text = (profile.Height > 0 ? profile.Height : 1080).ToString();
-
-            CmbProfileMultiMon.SelectedIndex = profile.MultiMonOverride switch
-            {
-                TriStateOverride.Disabled => 1,
-                TriStateOverride.Enabled => 2,
-                _ => 0
-            };
-
-            CmbProfileSmartSizing.SelectedIndex = profile.SmartSizingOverride switch
-            {
-                TriStateOverride.Enabled => 1,
-                TriStateOverride.Disabled => 2,
-                _ => 0
-            };
+            ChkClipboard.IsChecked = profile.AllowClipboardOverride == TriStateOverride.Enabled || (profile.AllowClipboardOverride == TriStateOverride.InheritGlobal && profile.AllowClipboard);
 
             ChkProfileEnableWol.IsChecked = profile.EnableWol;
             PnlWolDetails.IsVisible = profile.EnableWol;
@@ -1865,18 +1713,14 @@ public partial class MainView : UserControl
             };
             BtnDeleteProfile.IsVisible = true;
 
-            // Open "Advanced" automatically if this profile actually uses any of it, so a
-            // configured gateway, knock or WOL setup is never hidden behind a collapsed section.
             bool usesAdvanced = profile.EnableWol
                 || profile.EnableIcmpKnock
                 || !string.IsNullOrWhiteSpace(profile.GatewayHost)
                 || !string.IsNullOrWhiteSpace(profile.Notes)
                 || CmbProfileResolution.SelectedIndex != 0
-                || CmbProfileMultiMon.SelectedIndex != 0;
+                || ChkClipboard.IsChecked == true;
             SetAdvancedVisible(usesAdvanced);
         }
-
-        UpdateProfilePreserveNativeHint();
         CaptureProfileEditorInitialState();
         ScrollProfileEditor.Offset = new Vector(0, 0);
         ShowPanel(PanelProfileEditor);
@@ -1980,36 +1824,50 @@ public partial class MainView : UserControl
 
         int resIdx = CmbProfileResolution.SelectedIndex;
         string resPreset;
-        TriStateOverride multiMonOverride;
         int customWidth = 1920;
         int customHeight = 1080;
 
-        if (resIdx == 1) // Multi-Mon Spanning
+        switch (resIdx)
         {
-            resPreset = "MultiMon";
-            multiMonOverride = TriStateOverride.Enabled;
-        }
-        else if (resIdx == 2) // Custom
-        {
-            resPreset = "Custom";
-            multiMonOverride = TriStateOverride.Disabled;
-            int.TryParse(TxtProfileCustomWidth.Text, out customWidth);
-            if (customWidth <= 0) customWidth = 1920;
-            int.TryParse(TxtProfileCustomHeight.Text, out customHeight);
-            if (customHeight <= 0) customHeight = 1080;
-        }
-        else // 1080p Standard Landscape [Default]
-        {
-            resPreset = "1920x1080";
-            multiMonOverride = TriStateOverride.Disabled;
+            case 1:
+                resPreset = "2560x1440";
+                customWidth = 2560;
+                customHeight = 1440;
+                break;
+            case 2:
+                resPreset = "3840x2160";
+                customWidth = 3840;
+                customHeight = 2160;
+                break;
+            case 3:
+                resPreset = "1440x900";
+                customWidth = 1440;
+                customHeight = 900;
+                break;
+            case 4:
+                resPreset = "1280x720";
+                customWidth = 1280;
+                customHeight = 720;
+                break;
+            case 5:
+                resPreset = "Custom";
+                int.TryParse(TxtProfileCustomWidth.Text, out customWidth);
+                if (customWidth <= 0) customWidth = 1920;
+                int.TryParse(TxtProfileCustomHeight.Text, out customHeight);
+                if (customHeight <= 0) customHeight = 1080;
+                break;
+            case 6:
+                resPreset = "Device";
+                break;
+            default:
+                resPreset = "1920x1080";
+                customWidth = 1920;
+                customHeight = 1080;
+                break;
         }
 
-        TriStateOverride smartSizingOverride = CmbProfileSmartSizing.SelectedIndex switch
-        {
-            1 => TriStateOverride.Enabled,
-            2 => TriStateOverride.Disabled,
-            _ => TriStateOverride.InheritGlobal
-        };
+        bool allowClip = ChkClipboard.IsChecked == true;
+        TriStateOverride allowClipOverride = allowClip ? TriStateOverride.Enabled : TriStateOverride.Disabled;
 
         TriStateOverride certOverride = CmbProfileSuppressCert.SelectedIndex switch
         {
@@ -2035,8 +1893,11 @@ public partial class MainView : UserControl
                 ResolutionPreset = resPreset,
                 Width = customWidth,
                 Height = customHeight,
-                MultiMonOverride = multiMonOverride,
-                SmartSizingOverride = smartSizingOverride,
+                AllowClipboard = allowClip,
+                AllowClipboardOverride = allowClipOverride,
+                MultiMonOverride = TriStateOverride.Disabled,
+                UseMultiMon = false,
+                SmartSizingOverride = TriStateOverride.Disabled,
                 EnableWol = ChkProfileEnableWol.IsChecked == true,
                 WolMacAddress = wolMac,
                 WolPort = wolPort > 0 ? wolPort : 9,
@@ -2062,8 +1923,11 @@ public partial class MainView : UserControl
             _editingProfile.ResolutionPreset = resPreset;
             _editingProfile.Width = customWidth;
             _editingProfile.Height = customHeight;
-            _editingProfile.MultiMonOverride = multiMonOverride;
-            _editingProfile.SmartSizingOverride = smartSizingOverride;
+            _editingProfile.AllowClipboard = allowClip;
+            _editingProfile.AllowClipboardOverride = allowClipOverride;
+            _editingProfile.MultiMonOverride = TriStateOverride.Disabled;
+            _editingProfile.UseMultiMon = false;
+            _editingProfile.SmartSizingOverride = TriStateOverride.Disabled;
             _editingProfile.EnableWol = ChkProfileEnableWol.IsChecked == true;
             _editingProfile.WolMacAddress = wolMac;
             _editingProfile.WolPort = wolPort > 0 ? wolPort : 9;
@@ -2115,16 +1979,11 @@ public partial class MainView : UserControl
         RefreshBackupReminder();
     }
 
-    // ==================================================================
-    //  SETTINGS
-    // ==================================================================
 
     private void ShowSettings()
     {
         ShowPanel(PanelSettings);
 
-        // Audit item 6: populate with every write-back disabled, otherwise assigning
-        // SelectedIndex fires SelectionChanged and persists half-initialised state.
         _suppressSettingsSave = true;
         try
         {
@@ -2161,16 +2020,15 @@ public partial class MainView : UserControl
             string defRes = _payload?.Settings?.DefaultResolution ?? "1920x1080";
             CmbSettingsResolution.SelectedIndex = defRes.ToLowerInvariant() switch
             {
-                "1280x720" => 1,
-                "1600x900" => 2,
-                "1366x768" => 3,
-                "2560x1440" => 4,
-                "3840x2160" => 5,
-                "device" => 6,
+                "2560x1440" => 1,
+                "3840x2160" => 2,
+                "1440x900" => 3,
+                "1280x720" => 4,
+                "device" or "match device" => 5,
                 _ => 0
             };
-
-            CmbSettingsMultiMon.SelectedIndex = (_payload?.Settings?.DefaultUseMultiMon == true) ? 1 : 0;
+            TxtSettingsMatchScreenWarning.IsVisible = CmbSettingsResolution.SelectedIndex == 5;
+            ChkSettingsAllowClipboard.IsChecked = _payload?.Settings?.DefaultAllowClipboard ?? false;
             ChkSettingsPreserveNative.IsChecked = !(_payload?.Settings?.DefaultSmartSizing ?? false);
             UpdateSettingsPreserveNativeHint();
 
@@ -2195,16 +2053,6 @@ public partial class MainView : UserControl
                 BtnToggleBiometrics.Content = "Enroll Biometrics";
                 BtnToggleBiometrics.IsEnabled = true;
             }
-
-            bool autoTypeActive = RdpAutoTypeService.IsServiceEnabled(AndroidContext);
-            bool promptSuppressed = AppPrefs.GetBool(AppPrefs.KeyAutoTypePromptSuppressed, false);
-
-            TxtAccessibilityStatus.Text = autoTypeActive
-                ? "On: RDP Vault types your password into Remote Desktop for you."
-                : "Off: you will need to type the remote password yourself.";
-            TxtAccessibilityStatus.Foreground = new SolidColorBrush(Color.Parse(autoTypeActive ? "#2FBF71" : "#E5A93C"));
-            CardAccessibilityGuide.IsVisible = !autoTypeActive;
-            BtnResetAutoTypePrompt.IsVisible = promptSuppressed && !autoTypeActive;
 
             TxtSettingsVersion.Text = "RDP Vault for Android " + (AppVersionName() ?? "");
         }
@@ -2250,28 +2098,27 @@ public partial class MainView : UserControl
 
         _payload.Settings.DefaultResolution = CmbSettingsResolution.SelectedIndex switch
         {
-            1 => "1280x720",
-            2 => "1600x900",
-            3 => "1366x768",
-            4 => "2560x1440",
-            5 => "3840x2160",
-            6 => "Device",
+            1 => "2560x1440",
+            2 => "3840x2160",
+            3 => "1440x900",
+            4 => "1280x720",
+            5 => "Device",
             _ => "1920x1080"
         };
 
         var (w, h) = _payload.Settings.DefaultResolution switch
         {
-            "1280x720" => (1280, 720),
-            "1600x900" => (1600, 900),
-            "1366x768" => (1366, 768),
             "2560x1440" => (2560, 1440),
             "3840x2160" => (3840, 2160),
+            "1440x900" => (1440, 900),
+            "1280x720" => (1280, 720),
             _ => (1920, 1080)
         };
         _payload.Settings.DefaultWidth = w;
         _payload.Settings.DefaultHeight = h;
 
-        _payload.Settings.DefaultUseMultiMon = CmbSettingsMultiMon.SelectedIndex == 1;
+        _payload.Settings.DefaultAllowClipboard = ChkSettingsAllowClipboard.IsChecked == true;
+        _payload.Settings.DefaultUseMultiMon = false;
         _payload.Settings.DefaultSmartSizing = ChkSettingsPreserveNative.IsChecked != true;
         _payload.Settings.SuppressCertWarnings = ChkSettingsSuppressCert.IsChecked == true;
 
@@ -2428,9 +2275,6 @@ public partial class MainView : UserControl
         }
     }
 
-    // ==================================================================
-    //  CLIPBOARD (recovery code only - remote passwords NEVER go here)
-    // ==================================================================
 
     private void CopySensitiveTextToClipboard(string text, string label)
     {
@@ -2509,35 +2353,18 @@ public partial class MainView : UserControl
         _lastSensitiveCopiedText = null;
     }
 
-    // ==================================================================
-    //  RDP SESSION LAUNCH
-    // ==================================================================
 
     private void CancelLaunch()
     {
         _unreachableChoiceTcs?.TrySetResult(UnreachableChoice.Cancel);
         _connectCts?.Cancel();
         OverlayLaunch.IsVisible = false;
-        RdpAutoTypeService.Disarm();
     }
 
     private async Task StartSessionAsync(RdpProfile profile)
     {
         NotifyUserActivity();
         _activeLaunchProfile = profile;
-
-        bool promptSuppressed = AppPrefs.GetBool(AppPrefs.KeyAutoTypePromptSuppressed, false);
-        bool isConfigured = RdpAutoTypeService.IsServiceConfigured(AndroidContext);
-        bool isActive = RdpAutoTypeService.IsServiceActive;
-
-        // If the service is not active (or unbound post-update), prompt the user
-        if (profile.HasPassword && !promptSuppressed && !isActive)
-        {
-            ChkDontAskAccessibilityAgain.IsChecked = false;
-            OverlayEnableAccessibility.IsVisible = true;
-            return;
-        }
-
         await ProceedLaunchAsync(profile);
     }
 
@@ -2562,57 +2389,17 @@ public partial class MainView : UserControl
         TxtLaunchCountdown.IsVisible = false;
         BtnSkipWolWait.IsVisible = false;
         CardLaunchUnreachable.IsVisible = false;
-
-        var (w, h, isDevice) = profile.ResolveResolution(_payload?.Settings);
         CardLaunchPanTip.IsVisible = false;
-        CardLaunchPasswordTip.IsVisible = false;
-        if (profile.HasPassword)
-        {
-            bool isConfigured = RdpAutoTypeService.IsServiceConfigured(AndroidContext);
-            bool isActive = RdpAutoTypeService.IsServiceActive;
-            if (isActive)
-            {
-                TxtLaunchPasswordTipTitle.Text = "AUTO-TYPE IS ACTIVE";
-                TxtLaunchPasswordTipBody.Text = "Your password will be typed straight into Remote Desktop. It never touches the clipboard.";
-                TxtLaunchPasswordTipBody.Foreground = new SolidColorBrush(Color.Parse("#2FBF71"));
-            }
-            else if (isConfigured)
-            {
-                TxtLaunchPasswordTipTitle.Text = "AUTO-TYPE UNBOUND (UPDATE DETECTED)";
-                TxtLaunchPasswordTipBody.Text = "Android suspended the service after update. Tap here to toggle RDP Vault Auto-Type OFF and ON in Accessibility Settings.";
-                TxtLaunchPasswordTipBody.Foreground = new SolidColorBrush(Color.Parse("#E5A93C"));
-            }
-            else
-            {
-                TxtLaunchPasswordTipTitle.Text = "YOU WILL TYPE THE PASSWORD";
-                TxtLaunchPasswordTipBody.Text = "Auto-Type is off, so type the password into Remote Desktop yourself. You can read it any time under Edit on this connection.";
-                TxtLaunchPasswordTipBody.Foreground = new SolidColorBrush(Color.Parse("#E5A93C"));
-            }
-        }
 
         TxtLaunchSubStatus.Text = "";
         TxtLaunchStep.Text = "Preparing connection...";
         BtnCancelLaunch.IsEnabled = true;
         OverlayLaunch.IsVisible = true;
 
-        bool handedOff = false;
-        var (targetWidth, targetHeight, _) = profile.ResolveResolution(_payload?.Settings);
-        bool shouldEnforceLandscape = targetWidth >= targetHeight && targetWidth > 0;
-        if (shouldEnforceLandscape && MainActivity.Instance != null)
-        {
-            // Desktop Protection: Rotate to Landscape during connection sequence so that
-            // Android Window Manager and Microsoft Remote Desktop / aRDP initialize in Landscape.
-            // This prevents the external client from querying portrait metrics (1080x1920)
-            // and sending an RDP PDU that forces Windows into a vertical single-monitor session,
-            // which squashes open windows and scrambles multi-monitor desktop icons.
-            MainActivity.Instance.RequestedOrientation = global::Android.Content.PM.ScreenOrientation.SensorLandscape;
-        }
-
         try
         {
             await Task.Delay(150, ct);
 
-            // 1. Port Knocking (Issue 31) - opens router dynamic address list before WOL and preflight
             if (profile.EnableIcmpKnock)
             {
                 bool isTcp = string.Equals(profile.KnockProtocol, "TCP", StringComparison.OrdinalIgnoreCase);
@@ -2636,7 +2423,6 @@ public partial class MainView : UserControl
 
             if (ct.IsCancellationRequested) return;
 
-            // 2. Wake-on-LAN (Magic packet can now pass through the opened router firewall)
             if (profile.EnableWol && !string.IsNullOrWhiteSpace(profile.WolMacAddress))
             {
                 await RunWolSequenceAsync(profile, host, ct);
@@ -2644,7 +2430,6 @@ public partial class MainView : UserControl
 
             if (ct.IsCancellationRequested) return;
 
-            // 3. Reachability pre-flight (suggestion 10)
             if (AppPrefs.GetBool(AppPrefs.KeyPreflightEnabled, true))
             {
                 bool proceed = await RunPreflightAsync(profile, host, port, ct);
@@ -2653,45 +2438,35 @@ public partial class MainView : UserControl
 
             if (ct.IsCancellationRequested) return;
 
-            // 4. Hand off
             ProgLaunch.IsIndeterminate = true;
             TxtLaunchCountdown.IsVisible = false;
             CardLaunchUnreachable.IsVisible = false;
-            TxtLaunchSubStatus.Text = "Opening Remote Desktop";
-            TxtLaunchStep.Text = $"Opening Remote Desktop for {ep.Address}...";
+            TxtLaunchSubStatus.Text = "Connecting";
+            TxtLaunchStep.Text = $"Connecting to {ep.Address} via embedded FreeRDP...";
 
             var result = RdpLauncher.LaunchRdp(AndroidContext, profile, _payload?.Settings, out string message);
 
             ProgLaunch.IsIndeterminate = false;
             ProgLaunch.Value = 100;
-            TxtLaunchSubStatus.Text = result == RdpLaunchStatus.Failed ? "Hand-off failed" : "Handed off";
+            TxtLaunchSubStatus.Text = result == RdpLaunchStatus.Failed ? "Connection failed" : "Connected";
             TxtLaunchStep.Text = message;
 
             if (result == RdpLaunchStatus.Success)
             {
-                handedOff = true;
                 MainActivity.Instance?.StartForegroundSession(profile);
                 UpdateSessionBanner(profile.Name, host, port, unreachable: false, profile);
                 OverlayLaunch.IsVisible = false;
             }
-            else if (result == RdpLaunchStatus.RedirectedToStore)
-            {
-                RdpAutoTypeService.Disarm();
-                await Task.Delay(2500, ct);
-            }
             else
             {
-                RdpAutoTypeService.Disarm();
                 await Task.Delay(3500, ct);
             }
         }
         catch (OperationCanceledException)
         {
-            RdpAutoTypeService.Disarm();
         }
         catch (Exception ex)
         {
-            RdpAutoTypeService.Disarm();
             TxtLaunchSubStatus.Text = "Error";
             TxtLaunchStep.Text = $"Connection failed: {ex.Message}";
             try { await Task.Delay(3000); } catch { }
@@ -2701,16 +2476,10 @@ public partial class MainView : UserControl
             _isLaunching = false;
             OverlayLaunch.IsVisible = false;
             BtnSkipWolWait.IsVisible = false;
-            CardLaunchPasswordTip.IsVisible = false;
             CardLaunchUnreachable.IsVisible = false;
             _unreachableChoiceTcs = null;
             _connectCts?.Dispose();
             _connectCts = null;
-
-            if (!handedOff && MainActivity.Instance != null)
-            {
-                MainActivity.Instance.RequestedOrientation = global::Android.Content.PM.ScreenOrientation.Unspecified;
-            }
         }
     }
 
@@ -2877,7 +2646,6 @@ public partial class MainView : UserControl
                     TxtLaunchSubStatus.Text = "Sending wake signal";
                     TxtLaunchStep.Text = $"Sending wake-up signal to {profile.WolMacAddress}...";
                     await DispatchWolAsync(profile, host);
-                    // Give the machine a moment to come up before re-probing.
                     for (int s = 15; s > 0; s--)
                     {
                         if (ct.IsCancellationRequested) return false;
@@ -2969,7 +2737,6 @@ public partial class MainView : UserControl
         }
         catch
         {
-            // WOL is best-effort by nature; the pre-flight check reports the real outcome.
         }
     }
 
@@ -2980,9 +2747,6 @@ public partial class MainView : UserControl
         TxtLaunchStep.Text = "Skipping the countdown, connecting now...";
     }
 
-    // ==================================================================
-    //  SESSION BANNER
-    // ==================================================================
 
     private void UpdateSessionBanner(string name, string host, int port, bool unreachable, RdpProfile? profile = null)
     {
@@ -3073,9 +2837,6 @@ public partial class MainView : UserControl
         RefreshBackupReminder();
     }
 
-    // ==================================================================
-    //  RECOVERY CODE INPUT (caret-preserving - suggestion 1)
-    // ==================================================================
 
     /// <summary>
     /// Mirrors exactly what RecoveryCode.Normalize accepts, so the caret arithmetic below
@@ -3102,8 +2863,6 @@ public partial class MainView : UserControl
         string raw = tb.Text ?? "";
         int caret = Math.Clamp(tb.CaretIndex, 0, raw.Length);
 
-        // Count how many REAL code characters sit to the left of the caret. Hyphens are
-        // decoration, so they must not affect the caret's logical position.
         int significantBefore = 0;
         for (int i = 0; i < caret; i++)
         {
@@ -3120,15 +2879,12 @@ public partial class MainView : UserControl
         string formatted = RecoveryCode.Format(clean);
         if (formatted == raw) return;
 
-        // Translate the logical position back into an index in the hyphenated string.
         int newCaret = 0, seen = 0;
         while (newCaret < formatted.Length && seen < significantBefore)
         {
             if (formatted[newCaret] != '-') seen++;
             newCaret++;
         }
-        // Sitting immediately before a separator reads as "after the group" to the user, so
-        // step over it - otherwise the next keystroke appears on the wrong side of the dash.
         if (newCaret < formatted.Length && formatted[newCaret] == '-' && significantBefore > 0)
         {
             newCaret++;
@@ -3164,9 +2920,6 @@ public partial class MainView : UserControl
         catch { }
     }
 
-    // ==================================================================
-    //  VAULT FILE IMPORT / EXPORT / SHARE
-    // ==================================================================
 
     /// <summary>
     /// Validates that the bytes really are an RDP Vault file before they are allowed to
@@ -3219,7 +2972,7 @@ public partial class MainView : UserControl
 
             Directory.CreateDirectory(Path.GetDirectoryName(VaultPath)!);
             await File.WriteAllBytesAsync(VaultPath, importedData);
-            AppPrefs.MarkVaultExported();   // it came from a file, so a copy already exists
+            AppPrefs.MarkVaultExported();
 
             ShowLockScreen();
             TxtLockNotice.Text = "Vault imported. Enter its master password to unlock.";
@@ -3298,7 +3051,6 @@ public partial class MainView : UserControl
             string shareDir = Path.Combine(cacheRoot, "share");
             Directory.CreateDirectory(shareDir);
 
-            // Clear previous staged copies so old vault snapshots do not accumulate.
             foreach (var stale in Directory.GetFiles(shareDir, "*.rdpv"))
             {
                 try { File.Delete(stale); } catch { }

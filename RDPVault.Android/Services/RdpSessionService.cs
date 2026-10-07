@@ -1,25 +1,18 @@
 using System;
-using System.Threading;
-using System.Threading.Tasks;
 using Android.App;
 using Android.Content;
 using Android.OS;
 using AndroidX.Core.App;
 using RDPVault;
-using RDPVault.Android.Net;
+using RDPVault.Android.Activities;
+using RDPVault.Android.Rdp;
 
 namespace RDPVault.Android.Services;
 
 /// <summary>
-/// Foreground Service that tracks a hand-off to an external RDP client.
-///
-/// HONESTY CONTRACT (audited 2026-09-21, Finding 2):
-/// RDP Vault does NOT own the remote session. It hands the connection to Microsoft Remote
-/// Desktop (or aRDP) through an Android Intent and has no protocol-level visibility into
-/// that session. Therefore this service must never claim "connected" as a fact.
-/// What it CAN establish is whether the target host:port still answers a TCP connect, and
-/// that is exactly what it reports - nothing more. Every user-facing string here is
-/// phrased as "handed off" / "responding" / "not responding", never "connected".
+/// Foreground Service tracking the embedded FreeRDP session.
+/// Listens to native FreeRDP session callbacks (CONNECTED, DISCONNECTED, CONNECTION_FAILED)
+/// and maintains the active connection notification with an explicit Disconnect action.
 /// </summary>
 [Service(Name = "com.rdpvault.app.services.RdpSessionService", Enabled = true, Exported = false, ForegroundServiceType = global::Android.Content.PM.ForegroundService.TypeConnectedDevice)]
 public class RdpSessionService : Service
@@ -37,21 +30,14 @@ public class RdpSessionService : Service
     public const string ChannelId = "rdpvault_active_session";
     public const int NotificationId = 1001;
 
-    private const int ProbeIntervalMs = 20000;
-    private const int ProbeTimeoutMs = 2500;
-    private const int FailuresBeforeUnreachable = 2;
-
     private readonly IBinder _binder;
     private RdpProfile? _activeProfile;
     private string _sessionName = "";
     private string _sessionHost = "";
     private int _sessionPort = 3389;
-    private string _gatewayHost = "";
-    private int _gatewayPort = 443;
-    private bool _isHandedOff;
-    private bool _hostUnreachable;
+    private bool _isConnected;
     private bool _isStopping;
-    private CancellationTokenSource? _probeCts;
+    private FreeRdpSession? _activeSession;
 
     public RdpSessionService()
     {
@@ -85,92 +71,90 @@ public class RdpSessionService : Service
 
         if (action == ActionResumeRemoteDesktop)
         {
-            Rdp.RdpLauncher.ResumeRemoteDesktop(this);
+            RdpLauncher.ResumeRemoteDesktop(this);
             return StartCommandResult.Sticky;
         }
 
         if (action == ActionStartSession)
         {
-            // Cold-start path: the Activity called StartForegroundService before the bind
-            // completed. Android requires StartForeground within ~5s of that call.
             _sessionName = intent?.GetStringExtra(ExtraProfileName) ?? "Remote PC";
             _sessionHost = intent?.GetStringExtra(ExtraProfileHost) ?? "";
             _sessionPort = intent?.GetIntExtra(ExtraProfilePort, 3389) ?? 3389;
-            _gatewayHost = intent?.GetStringExtra(ExtraProfileGatewayHost) ?? "";
-            _gatewayPort = intent?.GetIntExtra(ExtraProfileGatewayPort, 443) ?? 443;
             BeginTracking();
             return StartCommandResult.Sticky;
         }
 
-        if (_isHandedOff)
+        if (_isConnected)
         {
-            // Restarted by the OS while a hand-off was being tracked: re-post the
-            // notification immediately so we never sit in the foreground without one.
             StartForeground(NotificationId, BuildNotification());
         }
 
         return StartCommandResult.Sticky;
     }
 
-    /// <summary>
-    /// Records that the session was handed off to the external RDP client and starts the
-    /// reachability watchdog. Called by MainActivity once the Intent has been dispatched.
-    /// </summary>
     public void StartSession(RdpProfile profile)
     {
         _activeProfile = profile;
         _sessionName = profile.Name;
         _sessionHost = profile.Host;
         _sessionPort = profile.Port > 0 ? profile.Port : 3389;
-        if (!string.IsNullOrWhiteSpace(profile.GatewayHost) &&
-            ConnectionEndpoint.TryParseGatewayAuthority(profile.GatewayHost, out var gwEp, out _))
-        {
-            _gatewayHost = gwEp.Host;
-            _gatewayPort = gwEp.Port;
-        }
-        else
-        {
-            _gatewayHost = "";
-            _gatewayPort = 443;
-        }
         BeginTracking();
     }
 
     private void BeginTracking()
     {
         _isStopping = false;
-        _isHandedOff = true;
-        _hostUnreachable = false;
+        _isConnected = true;
 
+        HookNativeSession();
         StartForeground(NotificationId, BuildNotification());
-        StartReachabilityWatchdog();
     }
 
-    /// <summary>
-    /// Stops tracking the hand-off and removes the notification.
-    ///
-    /// This does NOT and CANNOT disconnect Microsoft Remote Desktop: Android app sandboxing
-    /// forbids one app from terminating another app's session. The UI must therefore never
-    /// present this as "the remote session was terminated".
-    /// </summary>
+    private void HookNativeSession()
+    {
+        _activeSession = RdpSessionBridge.ActiveSession;
+        if (_activeSession != null)
+        {
+            _activeSession.Connected += OnNativeConnected;
+            _activeSession.Disconnected += OnNativeDisconnected;
+            _activeSession.ConnectionFailed += OnNativeConnectionFailed;
+        }
+    }
+
+    private void OnNativeConnected()
+    {
+        _isConnected = true;
+        SafeUpdateNotification();
+    }
+
+    private void OnNativeDisconnected()
+    {
+        EndSession();
+    }
+
+    private void OnNativeConnectionFailed(string reason)
+    {
+        EndSession();
+    }
+
     public void EndSession()
     {
         if (_isStopping) return;
         _isStopping = true;
 
-        _isHandedOff = false;
-        _hostUnreachable = false;
+        _isConnected = false;
         _activeProfile = null;
         _sessionName = "";
         _sessionHost = "";
 
-        try
+        if (_activeSession != null)
         {
-            _probeCts?.Cancel();
-            _probeCts?.Dispose();
+            _activeSession.Connected -= OnNativeConnected;
+            _activeSession.Disconnected -= OnNativeDisconnected;
+            _activeSession.ConnectionFailed -= OnNativeConnectionFailed;
+            try { _activeSession.Disconnect(); } catch { }
+            _activeSession = null;
         }
-        catch { }
-        _probeCts = null;
 
         try
         {
@@ -180,116 +164,25 @@ public class RdpSessionService : Service
         catch { }
     }
 
-    public bool IsConnected => _isHandedOff;
-    public bool HostUnreachable => _hostUnreachable;
+    public bool IsConnected => _isConnected;
+    public bool HostUnreachable => false;
     public RdpProfile? ActiveProfile => _activeProfile;
     public string SessionName => _sessionName;
     public string SessionHost => _sessionHost;
     public int SessionPort => _sessionPort;
 
-    /// <summary>
-    /// Periodically TCP-probes the remote host. The only honest liveness signal available
-    /// to an app that does not own the RDP socket. Two consecutive failures flip the
-    /// notification and the in-app banner to "not responding" so the user finds out from
-    /// RDP Vault instead of from a frozen Remote Desktop window.
-    /// </summary>
-    private void StartReachabilityWatchdog()
-    {
-        try { _probeCts?.Cancel(); } catch { }
-        _probeCts?.Dispose();
-        _probeCts = new CancellationTokenSource();
-        var token = _probeCts.Token;
-
-        string probeTarget;
-        int probePort;
-
-        if (!string.IsNullOrWhiteSpace(_gatewayHost))
-        {
-            probeTarget = _gatewayHost;
-            probePort = _gatewayPort;
-        }
-        else if (_activeProfile != null && !string.IsNullOrWhiteSpace(_activeProfile.GatewayHost) &&
-                 ConnectionEndpoint.TryParseGatewayAuthority(_activeProfile.GatewayHost, out var parsedGw, out _))
-        {
-            probeTarget = parsedGw.Host;
-            probePort = parsedGw.Port;
-        }
-        else
-        {
-            if (ConnectionEndpoint.TryParse(_sessionHost, out var hostEp, out _, port: _sessionPort))
-            {
-                probeTarget = hostEp.Host;
-                probePort = hostEp.Port;
-            }
-            else
-            {
-                probeTarget = _sessionHost;
-                probePort = _sessionPort;
-            }
-        }
-
-        if (string.IsNullOrWhiteSpace(probeTarget)) return;
-
-        _ = Task.Run(async () =>
-        {
-            int consecutiveFailures = 0;
-
-            while (!token.IsCancellationRequested && _isHandedOff)
-            {
-                try
-                {
-                    await Task.Delay(ProbeIntervalMs, token).ConfigureAwait(false);
-                }
-                catch (System.OperationCanceledException)
-                {
-                    // Fully qualified: `using Android.OS;` also brings an
-                    // Android.OS.OperationCanceledException into scope.
-                    return;
-                }
-
-                if (token.IsCancellationRequested || !_isHandedOff) return;
-
-                bool reachable = await HostProbe.IsReachableAsync(probeTarget, probePort, ProbeTimeoutMs, token).ConfigureAwait(false);
-
-                if (reachable)
-                {
-                    consecutiveFailures = 0;
-                    if (_hostUnreachable)
-                    {
-                        _hostUnreachable = false;
-                        SafeUpdateNotification();
-                    }
-                }
-                else
-                {
-                    consecutiveFailures++;
-                    if (consecutiveFailures >= FailuresBeforeUnreachable && !_hostUnreachable)
-                    {
-                        _hostUnreachable = true;
-                        SafeUpdateNotification();
-                    }
-                }
-            }
-        }, token);
-    }
-
     private void SafeUpdateNotification()
     {
         try
         {
-            if (!_isHandedOff) return;
+            if (!_isConnected) return;
             var manager = NotificationManagerCompat.From(this);
             manager?.Notify(NotificationId, BuildNotification());
         }
-        catch (Exception ex)
-        {
-            global::Android.Util.Log.Warn("RDPVault", "Notification update failed: " + ex.Message);
-        }
+        catch { }
 
         try
         {
-            // Refresh the in-app banner text (responding / not responding). This must NOT
-            // clear the banner - the hand-off is still being tracked.
             MainActivity.Instance?.NotifySessionStateChanged();
         }
         catch { }
@@ -297,35 +190,13 @@ public class RdpSessionService : Service
 
     private Notification BuildNotification()
     {
-        var launchIntent = new Intent(this, typeof(MainActivity));
+        var launchIntent = new Intent(this, typeof(RdpSessionActivity));
         launchIntent.AddFlags(ActivityFlags.SingleTop);
         var pendingIntent = PendingIntent.GetActivity(
             this,
             0,
             launchIntent,
             PendingIntentFlags.UpdateCurrent | PendingIntentFlags.Immutable);
-
-        PendingIntent? resumePendingIntent = null;
-        var directResumeIntent = Rdp.RdpLauncher.CreateResumeIntent(this);
-        if (directResumeIntent != null)
-        {
-            directResumeIntent.AddFlags(ActivityFlags.NewTask | ActivityFlags.ReorderToFront);
-            resumePendingIntent = PendingIntent.GetActivity(
-                this,
-                1,
-                directResumeIntent,
-                PendingIntentFlags.UpdateCurrent | PendingIntentFlags.Immutable);
-        }
-        else
-        {
-            var fallbackIntent = new Intent(this, typeof(MainActivity));
-            fallbackIntent.AddFlags(ActivityFlags.SingleTop);
-            resumePendingIntent = PendingIntent.GetActivity(
-                this,
-                1,
-                fallbackIntent,
-                PendingIntentFlags.UpdateCurrent | PendingIntentFlags.Immutable);
-        }
 
         var endIntent = new Intent(this, typeof(RdpSessionService));
         endIntent.SetAction(ActionEndSession);
@@ -337,14 +208,12 @@ public class RdpSessionService : Service
 
         string target = string.IsNullOrWhiteSpace(_sessionHost)
             ? _sessionName
-            : $"{_sessionName} ({_sessionHost})";
+            : $"{_sessionName} ({_sessionHost}:{_sessionPort})";
 
-        string statusText = _hostUnreachable
-            ? $"{target} is not responding - it may be asleep or off the network."
-            : $"Handed off to Remote Desktop - {target}";
+        string statusText = $"Connected to {target}";
 
         var builder = new NotificationCompat.Builder(this, ChannelId);
-        builder.SetContentTitle(_hostUnreachable ? "Remote PC not responding" : "Remote Desktop session handed off");
+        builder.SetContentTitle("Remote Desktop Session Active");
         builder.SetContentText(statusText);
         builder.SetStyle(new NotificationCompat.BigTextStyle().BigText(statusText));
         builder.SetSmallIcon(Resource.Drawable.ic_stat_vault);
@@ -359,10 +228,8 @@ public class RdpSessionService : Service
             builder.SetContentIntent(pendingIntent);
         }
 
-        builder.AddAction(Resource.Drawable.ic_stat_vault, "Open Remote Desktop", resumePendingIntent);
-        // "Stop tracking" - deliberately NOT called "End Session": tapping it cannot and
-        // does not disconnect the remote session, it only clears RDP Vault's own banner.
-        builder.AddAction(Resource.Drawable.ic_stat_vault, "Stop tracking", endPendingIntent);
+        builder.AddAction(Resource.Drawable.ic_stat_vault, "Open Session", pendingIntent);
+        builder.AddAction(Resource.Drawable.ic_stat_vault, "Disconnect", endPendingIntent);
 
         var notification = builder.Build();
         return notification ?? new Notification();
@@ -376,10 +243,10 @@ public class RdpSessionService : Service
             {
                 var channel = new NotificationChannel(
                     ChannelId,
-                    "Remote Desktop hand-off",
+                    "Remote Desktop Session",
                     NotificationImportance.Low)
                 {
-                    Description = "Quick return to a remote session and a warning if the remote PC stops responding."
+                    Description = "Active Remote Desktop connection notification and quick return to session."
                 };
                 channel.SetShowBadge(false);
                 channel.LockscreenVisibility = NotificationVisibility.Secret;
@@ -388,22 +255,19 @@ public class RdpSessionService : Service
                 manager?.CreateNotificationChannel(channel);
             }
         }
-        catch (Exception ex)
-        {
-            global::Android.Util.Log.Warn("RDPVault", "Notification channel creation failed: " + ex.Message);
-        }
+        catch { }
     }
 
     public override void OnDestroy()
     {
-        _isHandedOff = false;
-        try
+        _isConnected = false;
+        if (_activeSession != null)
         {
-            _probeCts?.Cancel();
-            _probeCts?.Dispose();
+            _activeSession.Connected -= OnNativeConnected;
+            _activeSession.Disconnected -= OnNativeDisconnected;
+            _activeSession.ConnectionFailed -= OnNativeConnectionFailed;
+            _activeSession = null;
         }
-        catch { }
-        _probeCts = null;
         base.OnDestroy();
     }
 }

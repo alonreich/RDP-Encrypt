@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Sockets;
 
 namespace RDPVault;
@@ -66,7 +66,6 @@ public readonly record struct ConnectionEndpoint(string Host, int Port)
         {
             finalPort = embedded > 0 ? embedded : 3389;
         }
-        // If the separate port is valid (1..65535), it takes precedence over embedded port.
 
         if (string.IsNullOrWhiteSpace(host) || host.Any(char.IsWhiteSpace) || host.IndexOfAny(['/', '\\', '&', '?', '#', '"']) >= 0 || Uri.CheckHostName(host) == UriHostNameType.Unknown)
         {
@@ -172,7 +171,6 @@ public readonly record struct ConnectionEndpoint(string Host, int Port)
 
         int embedded = 0;
 
-        // IPv6 bracketed format: [2001:db8::1] or [2001:db8::1]:3389
         if (raw.StartsWith('['))
         {
             int end = raw.IndexOf(']');
@@ -204,7 +202,6 @@ public readonly record struct ConnectionEndpoint(string Host, int Port)
             return true;
         }
 
-        // Unbracketed IPv6 address (e.g. 2001:db8::1)
         if (raw.Count(c => c == ':') > 1)
         {
             if (IPAddress.TryParse(raw, out var ip6) && ip6.AddressFamily == AddressFamily.InterNetworkV6)
@@ -217,7 +214,6 @@ public readonly record struct ConnectionEndpoint(string Host, int Port)
             return false;
         }
 
-        // Single colon format: host:port
         if (raw.Count(c => c == ':') == 1)
         {
             int colon = raw.LastIndexOf(':');
@@ -239,7 +235,6 @@ public readonly record struct ConnectionEndpoint(string Host, int Port)
             port = null;
         }
 
-        // Validate host syntax
         if (string.IsNullOrWhiteSpace(host) || host.Any(char.IsWhiteSpace) ||
             host.IndexOfAny(['/', '\\', '&', '?', '#', '"', '\'']) >= 0)
         {

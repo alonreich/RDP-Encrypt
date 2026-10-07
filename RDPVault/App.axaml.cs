@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -22,12 +22,6 @@ public partial class App : Application
             }
             else if (InstallerService.IsInstalledLocation() || System.IO.File.Exists(AppPaths.VaultPath))
             {
-                // ISSUE #5.
-                // The old test was File.Exists(BaseDirectory + "vault.dat") - a file
-                // this app never creates. The real vault is vault.rdpv, so an exe
-                // sitting next to a perfectly good vault (the portable / USB case,
-                // which is the app's headline scenario) always showed the installer
-                // instead of the vault.
                 desktop.MainWindow = new MainWindow();
             }
             else

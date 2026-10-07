@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Android.Content;
 
 namespace RDPVault.Android.Platform;
@@ -15,7 +15,6 @@ public static class AppPrefs
 {
     private const string StoreName = "rdpvault_ui_prefs";
 
-    // Keys
     public const string KeyAutoTypePromptSuppressed = "autotype_prompt_suppressed";
     public const string KeyAllowScreenshots = "allow_screenshots";
     public const string KeyPreflightEnabled = "preflight_enabled";

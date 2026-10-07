@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -47,7 +47,6 @@ public static class SystemPromptFocus
     /// </summary>
     public static IDisposable Begin() => new Scope(_owner);
 
-    // ------------------------------------------------------------------ scope
 
     private sealed class Scope : IDisposable
     {
@@ -57,8 +56,6 @@ public static class SystemPromptFocus
 
         public Scope(IntPtr owner)
         {
-            // 1. Make sure WE are the foreground process right now, otherwise
-            //    step 2 is a no-op as far as Windows is concerned.
             if (owner != IntPtr.Zero)
             {
                 try
@@ -69,16 +66,14 @@ public static class SystemPromptFocus
                 catch { }
             }
 
-            // 2. Grant the foreground right to whichever process shows the prompt.
             try { AllowSetForegroundWindow(ASFW_ANY); } catch { }
 
-            // 3. Keep it in front until we are disposed.
             _watchdog = Task.Run(() => WatchAsync(_cts.Token));
         }
 
         private async Task WatchAsync(CancellationToken token)
         {
-            var deadline = DateTime.UtcNow.AddMinutes(2);   // hard stop; never spin forever
+            var deadline = DateTime.UtcNow.AddMinutes(2);
             try
             {
                 while (!token.IsCancellationRequested && DateTime.UtcNow < deadline)
@@ -101,8 +96,6 @@ public static class SystemPromptFocus
             try { _cts.Cancel(); } catch { }
             try { _watchdog.Wait(500); } catch { }
 
-            // Release anything we pinned, in case the prompt is still on screen
-            // (e.g. the user cancelled our await but Windows kept the dialog).
             foreach (IntPtr h in _pinned)
             {
                 try
@@ -118,7 +111,6 @@ public static class SystemPromptFocus
         }
     }
 
-    // ------------------------------------------------------------------ locating the prompt
 
     /// <summary>Processes Windows uses to host the Hello / credential prompt.</summary>
     private static readonly string[] BrokerProcesses =
@@ -155,8 +147,6 @@ public static class SystemPromptFocus
                 string proc = ProcessNameOf(pid);
                 if (proc.Length > 0 && Array.IndexOf(BrokerProcesses, proc) >= 0)
                 {
-                    // Broker processes also own invisible helper windows; require
-                    // something with actual size on screen.
                     if (GetWindowRect(hwnd, out RECT r) && (r.Right - r.Left) > 120 && (r.Bottom - r.Top) > 80)
                     {
                         found = hwnd;
@@ -199,7 +189,6 @@ public static class SystemPromptFocus
         return name;
     }
 
-    // ------------------------------------------------------------------ forcing focus
 
     /// <summary>
     /// Brings a target window to the foreground and focuses it without permanently pinning it topmost.
@@ -240,14 +229,9 @@ public static class SystemPromptFocus
         {
             ShowWindow(hwnd, SW_SHOW);
 
-            // Pin it above everything for as long as the prompt is up - the user
-            // asked for the authentication window to stay on top until it resolves.
             SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
             BringWindowToTop(hwnd);
 
-            // Windows refuses SetForegroundWindow from a process that does not own
-            // the foreground. Attaching our input queue to the current foreground
-            // thread is the standard, documented-by-practice way around that.
             IntPtr fg = GetForegroundWindow();
             uint fgThread = fg == IntPtr.Zero ? 0 : GetWindowThreadProcessId(fg, out _);
             uint thisThread = GetCurrentThreadId();
@@ -257,7 +241,7 @@ public static class SystemPromptFocus
             try
             {
                 if (!SetForegroundWindow(hwnd))
-                    SwitchToThisWindow(hwnd, true);   // last resort
+                    SwitchToThisWindow(hwnd, true);
                 SetActiveWindow(hwnd);
             }
             finally
@@ -268,7 +252,6 @@ public static class SystemPromptFocus
         catch { }
     }
 
-    // ------------------------------------------------------------------ P/Invoke
 
     private const int ASFW_ANY = -1;
     private const int SW_SHOW = 5;

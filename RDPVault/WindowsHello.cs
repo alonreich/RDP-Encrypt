@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
@@ -43,8 +43,6 @@ public static class WindowsHello
     /// </summary>
     public static async Task<(HelloEnrollResult Result, string KeyId, byte[] Signature)> EnrollAndSignAsync()
     {
-        // Issue #21: keep the OS credential prompt in the foreground for the whole
-        // enrollment, including both signatures.
         using var focus = SystemPromptFocus.Begin();
         try
         {
@@ -77,16 +75,12 @@ public static class WindowsHello
 
     public static async Task<byte[]?> GetSignatureAsync(string expectedKeyId)
     {
-        // Issue #21: the fingerprint / face prompt must own the foreground the
-        // moment it appears, otherwise the sensor reading is discarded and the user
-        // has to click the dialog first.
         using var focus = SystemPromptFocus.Begin();
         try
         {
             var opened = await KeyCredentialManager.OpenAsync(KeyName);
             if (opened.Status != KeyCredentialStatus.Success) return null;
 
-            // The public key must be the exact one this vault was sealed against.
             if (PublicKeyFingerprint(opened.Credential) != expectedKeyId) return null;
 
             return await SignAsync(opened.Credential);
@@ -103,7 +97,6 @@ public static class WindowsHello
         return signature;
     }
 
-    // RetrievePublicKey is SYNCHRONOUS in the .NET projection - there is no Async overload.
     private static string PublicKeyFingerprint(KeyCredential credential)
     {
         IBuffer key = credential.RetrievePublicKey(CryptographicPublicKeyBlobType.BCryptPublicKey);

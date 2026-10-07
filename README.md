@@ -10,7 +10,7 @@ It is one self-contained `.exe`. Nothing to install first, no .NET runtime requi
   *Self-contained single executable for Windows 10/11 x64. Portable, installer, and uninstaller in one binary.*
 
 - **[Download RDP Vault for Android (RDPVault.apk)](https://github.com/alonreich/RDP-Encrypt/releases/latest/download/RDPVault.apk)**  
-  *Android mobile package with hardware StrongBox Keystore security and screen-flip session continuity.*
+  *Android mobile package with embedded native FreeRDP engine, hardware StrongBox Keystore security, virtual trackpad, and screen-flip continuity.*
 
 Both links always resolve to the newest release online.
 
@@ -55,155 +55,49 @@ Being straight about the limits:
 - Memory forensics against a running, unlocked instance. The master key is wiped on lock, and profile passwords in RAM are shielded with ephemeral AES-256-GCM session encryption (`VaultMemoryGuard`) rather than cleartext strings. However, unmanaged memory during active connection setup may still be vulnerable to aggressive kernel-level inspection.
 - Windows Event Logs, EDR/telemetry records of `mstsc.exe` running, and anything logged on the *remote* server. RDP Vault does not touch those — clearing them needs admin rights and is conspicuous in itself.
 - Recovery of deleted files by forensic carving. Deleting is not shredding, and on SSDs even overwriting is not a guarantee.
-- On Android, RDP Vault cannot disconnect your remote session for you. Android forbids one app terminating another app's session, so "End Session" only stops RDP Vault tracking it — you sign out inside Remote Desktop. The app says so rather than pretending otherwise.
-- Once a connection is handed to Microsoft Remote Desktop, what that app does with the session, its logs and its own stored state is outside RDP Vault's control.
-- Aggressive vendor battery managers (Xiaomi MIUI, Samsung OneUI power saving) can kill the background process and drop the ongoing notification while a session is still running in the other app. Exempt RDP Vault from battery optimisation if that happens.
+- Aggressive vendor battery managers (Xiaomi MIUI, Samsung OneUI power saving) can kill background processes and drop ongoing notifications if the app is placed in deep sleep. Exempt RDP Vault from battery optimisation if that happens.
 - BitLocker. RDP Vault checks whether the drive holding the vault is encrypted and warns you if it is not. It does not, and cannot, encrypt the drive for you, and it will not refuse to open your own vault.
 
-## Android Companion (Parallel Distribution Branch)
+## Android Companion (Embedded FreeRDP Engine)
 
-RDP Vault provides an Android mobile APK companion sharing the exact same cryptographic core and `vault.rdpv` file format. Requires **Android 9 (API 28) or newer**, and a separate RDP client app (Microsoft Remote Desktop is free; the app offers to install it):
+RDP Vault provides an Android mobile companion sharing the exact same cryptographic core and `vault.rdpv` file format. Requires **Android 9 (API 28) or newer**.
 
-- **Mobile TPM Equivalent**: Master keys are sealed inside the phone's hardware Secure Element (StrongBox Keymaster) or ARM TrustZone TEE and are released only by a Class 3 strong biometric, bound through `BiometricPrompt.CryptoObject`. They cannot be exported, even from a rooted device. Adding a new fingerprint to the phone cancels the seal on purpose — unlock once with your master password and the app offers to rebuild it.
-- **It hands off, it does not host**: RDP Vault stores and protects your connections, then opens them in Microsoft Remote Desktop (or aRDP) through a standard Android `rdp://` intent. It contains no RDP protocol stack of its own, so it cannot — and never claims to — connect or disconnect a session itself. The in-app banner says "handed off", and tells you when the remote PC stops responding.
-- **Passwords stay inside the vault**: a saved remote password is visible only while you are editing that specific connection. Nothing else in the app can show, copy, export or share it, and it is never placed on the Android clipboard. Auto-Type (an optional accessibility service scoped to RDP client apps only) types it straight into Remote Desktop and wipes it from memory immediately; if that fails, the app tells you to read it under Edit and type it yourself.
-- **Locks like a vault should**: locks after a configurable idle timeout — on screen as well as in the background — and, by default, the instant the app leaves the screen. Screenshots, screen recording and the app-switcher preview are blocked by default. A running remote session never triggers a lock.
-- **Checks before it switches apps**: a pre-flight reachability check tells you "your PC is asleep" in plain words, instead of leaving Remote Desktop to spin for thirty seconds and emit `0x204`. Offers to send a Wake-on-LAN signal right there — supporting both local subnet broadcast on Wi-Fi and unicast Wake-on-LAN across cellular/WAN.
-- **Stealth Port Knocking**: Built-in HTTP GET and dual-stack raw TCP SYN knock engine (configurable port and delay) to open dynamic perimeter firewall rules (e.g. MikroTik `action=add-src-to-address-list`) before RDP pre-flight checks and hand-off.
-- **Resolution & Multi-Monitor Desktop Protection**: streamlined resolution options (1080p Standard Landscape [Default], Multi-Monitor Spanning, or Custom Resolution), with single-monitor lock and automatic landscape pre-rotation that prevents external RDP clients from negotiating portrait viewport dimensions (e.g., 1080x1920). This guarantees the remote Windows host does not squash open windows or scramble multi-monitor desktop icons, while smart-scrolling (`smart sizing:i:1`) lets you pan and zoom across the full 1080p desktop from your phone. For complete protection in Microsoft Remote Desktop (Windows App), configure **Settings → Display → Orientation: Lock to landscape** and **Display resolution: 1920 x 1080**.
-- **Your vault lives only on the phone**: uninstalling the app deletes it. Settings has a one-tap **Share backup** (Quick Share, Drive, email) of the still-encrypted vault, and the app reminds you when there are unbacked-up changes.
+In version 2.0.0, RDP Vault incorporates a **fully embedded, self-contained native FreeRDP engine** (`aFreeRDP` for ARM64 and x86_64), eliminating external RDP client dependencies (Microsoft Remote Desktop / aRDP) and completely removing the need for Android Accessibility Services or ADB configurations:
 
-## Android Installation & Zero-Clipboard Setup Guide
+- **Fully Embedded Native Engine**: End-to-end RDP connection management, NLA credential negotiation, hardware-accelerated GDI framebuffer rendering, and touch/keyboard input run entirely inside RDP Vault.
+- **Zero ADB / Zero Accessibility Requirement**: Installs cleanly via standard Android package installers on Android 9 through Android 15. Requires no Accessibility Service permissions, never triggers Android 13-15 "Restricted Settings", and requires no USB debugging or ADB commands.
+- **Zero Cleartext Credentials on Disk / Zero Clipboard Exposure**: Passwords remain encrypted in RAM via `VaultMemoryGuard` until the exact moment of connection, decrypting directly in memory into FreeRDP's native NLA structures and wiped immediately from RAM (`Array.Clear`). Clipboard redirection defaults to disabled (`redirectclipboard = 0`), preventing remote data leakage to Android clipboards or IME caches.
+- **Mobile TPM Equivalent (Hardware Root of Trust)**: Master keys are sealed inside the phone's hardware Secure Element (StrongBox Keymaster) or ARM TrustZone TEE and released exclusively by Class 3 Strong Biometrics (Fingerprint / 3D Face Unlock) bound through `BiometricPrompt.CryptoObject`. Keys cannot be exported even from rooted devices. Adding a new biometric enrollee cancels the seal intentionally, prompting master password verification to re-seal.
+- **Mobile Input Controls & Virtual Trackpad**:
+  - **Relative Virtual Trackpad (Default)**: Phone screen functions as a precision laptop trackpad controlling an on-screen mouse pointer with smooth acceleration. Single tap for Left Click, two-finger tap for Right Click, and tap-and-drag for selecting text or moving windows.
+  - **Direct Touch Mode**: Tap directly on remote UI elements with instant coordinate mapping.
+  - **Virtual Mouse Wheel**: Vertical edge-scroll gesture transmitting smooth mouse wheel rotation PDUs to the remote host.
+  - **Soft Keyboard & Modifier Drawer**: Integrated soft keyboard with an expandable on-screen modifier toolbar providing one-tap access to Ctrl, Alt, Shift, Win, Esc, Tab, Enter, Backspace, Delete, and F1–F12 keys.
+  - **Pinch-to-Zoom & Pan**: Smooth two-finger pinch-zoom and pan navigation across the complete remote desktop.
+  - **Haptic Feedback**: Crisp tactile response on mouse clicks and modifier drawer toggles.
+- **Host Desktop Layout Protection**: Locks remote desktop dimensions to native resolution with dynamic resize PDUs disabled (`dynamic resolution = 0`). Connecting from mobile will never squash application windows or scramble multi-monitor desktop icons.
+- **Sensor Orientation Freedom**: Full screen rotation freedom (`ScreenOrientation.Sensor`), adapting in-place to portrait or landscape holding positions without dropping active sessions.
+- **Stealth Port Knocking & WAN Wake-on-LAN**: Raw TCP SYN and HTTP GET port knocking engine executes before pre-flight checks to open dynamic perimeter firewall rules (e.g. MikroTik `action=add-src-to-address-list`), followed by local subnet broadcast or cellular WAN unicast Wake-on-LAN.
+- **Vault Portability & Backup**: Open or save the same `vault.rdpv` file used on Windows. Settings includes a one-tap **Share backup** (Quick Share, Drive, email) of the encrypted vault file.
 
-### Method A: Step-by-Step Installation via ADB (Recommended — Zero Restrictions)
+## Android Installation & Quick Start Guide
 
-This method sideloads the application directly and activates the secure Auto-Type Accessibility service without dealing with Android 13/14/15's grayed-out "Restricted Settings" menus.
+### Direct Phone Sideloading (7-Step Installation Guide)
 
-#### Step 1: Prepare the APK File & Working Directory
-1. Build or download `RDPVault.apk`:
-   - If building from source: run `build-apk.cmd` (or `build.cmd`). The output artifact is generated at `compiled\RDPVault.apk`.
-   - If downloading from GitHub Releases: place `RDPVault.apk` into `compiled\RDPVault.apk`.
-2. ADB is bundled directly in the repository under `.\adb\`:
-<div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); border-radius: 6px; margin: 6px 0 14px 0;">
+Because RDP Vault is an independent, self-contained open-source application signed with a release keystore rather than distributed via Google Play Store, modern Android devices (Android 14/15) and Samsung devices may trigger Google Play Protect or Samsung Auto Blocker during direct browser sideloads. Follow these 7 steps to install smoothly:
 
-```cmd
-.\adb\adb.exe version
-```
+1. **Open Google Play Store** on your Android phone.
+2. **Tap your Profile icon** in the top-right corner.
+3. Select **Play Protect**.
+4. **Tap the Settings gear icon** in the top-right corner.
+5. **Toggle OFF "Scan apps with Play Protect"** (temporarily pauses real-time sideload blocking).
+6. *(Samsung Galaxy devices only)*: Go to phone **Settings → Security and privacy → Auto Blocker** and toggle it **OFF**.
+7. **Open and Install `RDPVault.apk`**: Once the installation completes, return to Google Play Protect (and Samsung Auto Blocker) and toggle them back **ON**.
 
-</div>
-   *(Alternatively, add `.\adb` to your PATH or use system-wide ADB).*
+### Host Desktop Scale Protection (Recommended for 1080p / Multi-Monitor Hosts)
 
-#### Step 2: Enable Developer Options & USB Debugging on Your Phone
-1. Open phone **Settings** → **About phone** (or **About device** → **Software information**).
-2. Locate the **Build number** entry.
-3. Tap **Build number** 7 times consecutively until you see the toast message: *"You are now a developer!"* (enter your phone PIN/pattern if prompted).
-4. Return to the main **Settings** menu and tap **System → Developer options** (on Samsung devices, **Developer options** appears at the very bottom of the main Settings menu).
-5. Scroll down to the **Debugging** section and toggle **USB debugging** to **ON**. Tap **OK** on the confirmation dialog.
+When connecting from a high-DPI phone to a Windows PC, Windows may attempt to apply mobile DPI scaling (e.g. 225%), which enlarges fonts and rearranges desktop icons. To ensure your host layout remains completely untouched at native 100% scale (96 DPI), run this once in an elevated PowerShell prompt on the Windows host machine:
 
-#### Step 3: Connect Phone via USB & Authorize PC
-1. Connect your phone to your PC using a high-quality USB data cable (ensure it is not a charge-only cable).
-2. If prompted on the phone for USB connection mode, select **Transferring files / Android Auto** (MTP).
-3. Look at your phone's screen. A dialog will appear: **"Allow USB debugging?"**.
-4. Check the box **"Always allow from this computer"** and tap **Allow**.
-
-#### Step 4: Verify Device Connection
-Confirm your phone is authorized and recognized:
-<div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
-
-```cmd
-.\adb\adb.exe devices
-```
-
-</div>
-
-#### Step 5: Sideload & Install APK
-Install the freshly built package with update and downgrade flags:
-<div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
-
-```cmd
-.\adb\adb.exe install -r -d compiled\RDPVault.apk
-```
-
-</div>
-
-#### Step 6: Flush Process & Service State
-Terminate running instances so Android flushes any dead binder tokens from prior versions:
-<div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
-
-```cmd
-.\adb\adb.exe shell am force-stop com.rdpvault.app
-```
-
-</div>
-
-#### Step 7: Clear Floating Shortcut Buttons
-Ensure Android/MIUI floating accessibility overlay buttons are removed:
-<div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
-
-```cmd
-.\adb\adb.exe shell settings delete secure accessibility_button_targets
-```
-
-</div>
-
-#### Step 8: Reset Stale Accessibility State
-Clear any crashed or suspended accessibility state from prior versions:
-<div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
-
-```cmd
-.\adb\adb.exe shell settings delete secure enabled_accessibility_services
-```
-
-</div>
-
-#### Step 9: Enable Accessibility Subsystem
-Activate the Android accessibility subsystem:
-<div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
-
-```cmd
-.\adb\adb.exe shell settings put secure accessibility_enabled 1
-```
-
-</div>
-
-#### Step 10: Register & Bind RDP Vault Auto-Type
-Bypass Android restricted settings and bind the service immediately:
-<div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
-
-```cmd
-.\adb\adb.exe shell settings put secure enabled_accessibility_services com.rdpvault.app/com.rdpvault.app.services.RdpAutoTypeService
-```
-
-</div>
-
-#### Step 11: Grant Foreground Notification Permission
-Authorize session foreground notifications without runtime prompts:
-<div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
-
-```cmd
-.\adb\adb.exe shell pm grant com.rdpvault.app android.permission.POST_NOTIFICATIONS
-```
-
-</div>
-
-#### Step 12: Launch RDP Vault
-Start the application on the phone:
-<div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
-
-```cmd
-.\adb\adb.exe shell am start -n com.rdpvault.app/com.rdpvault.app.MainActivity
-```
-
-</div>
-
-#### Step 13: Prevent Host Desktop Scramble & Lock 1:1 Scroll (Crucial Setup)
-
-When connecting from a phone to a multi-monitor or 1080p Windows host, mobile RDP clients (such as Microsoft Remote Desktop / Windows App) attempt by default to adapt the remote session to the phone's vertical screen (e.g. 1220x2580) and apply 225% DPI scaling. This shrinks open applications, enlarges fonts, and scrambles desktop icons across monitors.
-
-Follow these two steps to preserve the untouched 1920x1080 desktop layout and scroll/pan smoothly on the phone:
-
-##### A. Windows Host: Lock 100% Native Desktop Scale (Elevated PowerShell)
-Execute on the Windows host machine to strictly ignore incoming mobile DPI scaling requests:
 <div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
 
 ```powershell
@@ -212,56 +106,30 @@ Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\W
 
 </div>
 
-##### B. Phone: Lock Microsoft Remote Desktop to Landscape & 1080p
-In the **Windows App** (Microsoft Remote Desktop) on your Android device:
-1. Tap the **Settings** icon (or menu `≡` in the top left).
-2. Tap **Display**.
-3. Under **Orientation**, select **"Lock to landscape"** (prevents the session from collapsing into a portrait strip when held vertically).
-4. Under **Display resolution**, select **"1920 x 1080"** (prevents the client from requesting dynamic phone dimensions).
+### In-Session Gestures & Navigation
 
-In RDP Vault, connections default to **1:1 Native Resolution** (`smart sizing: 0`, `screen mode: 1`). You can freely pan and zoom across the complete 1920x1080 desktop canvas without altering window geometry or icon positions on your host PC.
+| Action | Trackpad Mode | Direct Touch Mode |
+|---|---|---|
+| **Move Cursor** | Drag one finger across screen | Cursor moves to touch location |
+| **Left Click** | Single tap | Single tap |
+| **Right Click** | Two-finger tap | Long press |
+| **Drag & Select** | Double-tap and drag | Long press and drag |
+| **Scroll Wheel** | Slide one finger along right edge | Two-finger vertical drag |
+| **Zoom Canvas** | Two-finger pinch / spread | Two-finger pinch / spread |
+| **Pan Canvas** | Two-finger drag | Two-finger drag |
+| **Modifier Keys** | Tap floating modifier drawer handle to toggle Ctrl, Alt, Shift, Win, Esc, Tab, F1-F12 |
+| **Keyboard** | Tap keyboard icon in modifier toolbar to toggle Android soft keyboard |
 
-#### Step 14: Diagnostic Checks (Optional)
+### Developer Sideloading via ADB (Optional)
 
-Verify that the Auto-Type accessibility service is bound:
+If installing from a development PC using bundled ADB:
 <div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
 
 ```cmd
-.\adb\adb.exe shell dumpsys accessibility | findstr /C:"Bound services"
+.\adb\adb.exe install -r compiled\RDPVault.apk
 ```
 
 </div>
-
-Stream real-time connection, port knocking, and password injection logs:
-<div style="background-color: rgb(35, 35, 35); color: rgb(255, 190, 27); border-radius: 6px; padding: 4px 12px; border-left: 4px solid rgb(255, 190, 27); margin: 6px 0 14px 0;">
-
-```cmd
-.\adb\adb.exe logcat -v time -s RDPVault RdpAutoTypeService
-```
-
-</div>
-
----
-
-### Method B: Manual Sideload via Phone (Without PC/ADB)
-
-If you do not have a PC with ADB available, install directly on the phone:
-
-1. **If Samsung blocks installation ("App blocked to protect your device")**:
-   - Go to **Settings → Security and privacy → Auto Blocker** and toggle it **OFF**.
-   - If Google Play Protect warns during install, tap **More details → Install anyway**.
-
-2. **Un-grey the Auto-Type switch (Android 13+ "Restricted Settings" bypass)**:
-   - In RDP Vault, tap **Settings → Configure** (or tap **Connect** on any profile).
-   - In Accessibility, tap **RDP Vault Auto-Type**. When the *"Restricted setting"* pop-up appears, tap **OK**.
-   - Return to RDP Vault and tap **Unlock App Info** (or go to phone **Settings → Apps → RDP Vault**).
-   - Tap **Force Stop**, then tap the **3 dots (`⋮`)** in the top-right corner.
-   - Tap **Allow restricted settings** and confirm with your PIN/fingerprint.
-   - Return to **Accessibility → RDP Vault Auto-Type** and toggle the switch **ON**.
-
-3. **Lock 1:1 Native Scroll & Prevent Desktop Layout Collapse**:
-   - On the Windows host PC, run the elevated PowerShell command from Step 13.A above to lock 100% DPI scale.
-   - In Windows App on Android, tap **Settings (`≡`) → Display**, set **Orientation** to **"Lock to landscape"**, and set **Display resolution** to **"1920 x 1080"**.
 
 ---
 
@@ -319,7 +187,20 @@ The build outputs are `compiled\RDPVault.exe` (Windows desktop) and `compiled\RD
 | Recovery Code | 256-bit secret, 52 Crockford-Base32 characters, wrapped over the master key |
 | Quick unlock (PC) | TPM signature → Argon2id → AES-GCM seal, bound to machine + Windows account |
 | Quick unlock (Android) | Android Keystore / StrongBox Keymaster → Class 3 BiometricPrompt (Hardware TEE) |
+| Android Engine | Embedded native FreeRDP (aFreeRDP), ARM64 / x86_64, SurfaceView rendering |
 | Runtime | .NET 9, Avalonia UI, Windows single-file & Android APK |
 
 Detailed design notes live in `project_structure.txt` and `ANDROID_ARCHITECTURE.md`.
+
+## Third-Party Licenses & Legal Notices
+
+RDP Vault embeds and links open-source software libraries under their respective permissive licenses:
+
+- **FreeRDP & WinPR**: Licensed under the [Apache License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0). Copyright (c) 2009-2024 FreeRDP Developers. FreeRDP provides the core native Remote Desktop Protocol engine.
+- **OpenSSL**: Licensed under the Apache License 2.0 / Dual OpenSSL and SSLeay License. Copyright (c) 1998-2024 The OpenSSL Project.
+- **FFmpeg / Libav Native Codecs**: Dynamically linked shared libraries (`libavcodec`, `libavutil`, `libswresample`, `libswscale`) licensed under the [GNU Lesser General Public License (LGPL) v2.1+](https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html).
+- **Isopoh.Cryptography.Argon2**: Licensed under the MIT License. Copyright (c) 2018 Michael Heyman.
+- **Avalonia UI**: Licensed under the MIT License. Copyright (c) 2014-2024 AvaloniaUI OÜ.
+
+For full license texts and legal notices, see [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md).
 

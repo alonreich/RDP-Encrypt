@@ -80,11 +80,11 @@
                     </StackPanel>
                 </Border>
 
-                <!-- Requirement notice -->
+                <!-- Built-in Remote Desktop notice -->
                 <Border Background="#141A22" BorderBrush="#24405C" BorderThickness="1" CornerRadius="8" Padding="14">
                     <StackPanel Spacing="4">
-                        <TextBlock Text="YOU ALSO NEED A REMOTE DESKTOP APP" FontSize="12" FontWeight="Bold" Foreground="#8AB4F8" LetterSpacing="1"/>
-                        <TextBlock Text="RDP Vault stores and protects your connections, then hands them to Microsoft Remote Desktop (free, from Google Play). If it is not installed, RDP Vault will offer to install it the first time you connect."
+                        <TextBlock Text="EMBEDDED REMOTE DESKTOP ENGINE" FontSize="12" FontWeight="Bold" Foreground="#8AB4F8" LetterSpacing="1"/>
+                        <TextBlock Text="RDP Vault includes an embedded, high-performance FreeRDP engine. Connections launch instantly within the app with zero external dependencies and zero clipboard exposure."
                                    FontSize="12" Foreground="#C7C7D1" TextWrapping="Wrap"/>
                     </StackPanel>
                 </Border>
@@ -393,16 +393,23 @@
                             </StackPanel>
                         </Border>
 
-                        <!-- Remote Display Resolution & Multi-Monitor Safety Card -->
+                        <!-- Remote Display Resolution Card -->
                         <Border Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16">
                             <StackPanel Spacing="10">
-                                <TextBlock Text="REMOTE DISPLAY &amp; MONITOR PROTECTION" FontSize="12" FontWeight="Bold" Foreground="#9A9AA3" LetterSpacing="1"/>
+                                <TextBlock Text="REMOTE DISPLAY &amp; RESOLUTION" FontSize="12" FontWeight="Bold" Foreground="#9A9AA3" LetterSpacing="1"/>
                                 <TextBlock Text="Display Resolution Preset" FontSize="13" Foreground="#9A9AA3"/>
                                 <ComboBox Name="CmbProfileResolution" HorizontalAlignment="Stretch" Background="#1C1C21" BorderBrush="#2E2E35" Foreground="#EDEDED">
-                                    <ComboBoxItem Content="1920 x 1080 (1080p Landscape - Default &amp; Native)"/>
-                                    <ComboBoxItem Content="Span All Remote Displays (Multi-Monitor)"/>
+                                    <ComboBoxItem Content="1920 x 1080 (1080p Standard Landscape) [Recommended]"/>
+                                    <ComboBoxItem Content="2560 x 1440 (2K QHD)"/>
+                                    <ComboBoxItem Content="3840 x 2160 (4K UHD)"/>
+                                    <ComboBoxItem Content="1440 x 900 (16:10 WXGA+)"/>
+                                    <ComboBoxItem Content="1280 x 720 (720p HD)"/>
                                     <ComboBoxItem Content="Custom Resolution..."/>
+                                    <ComboBoxItem Content="Match Phone Screen"/>
                                 </ComboBox>
+                                <TextBlock Name="TxtProfileMatchScreenWarning"
+                                           Text="⚠ Will reconfigure Windows desktop geometry and may rearrange desktop icons"
+                                           Foreground="#FFC107" FontSize="12" TextWrapping="Wrap" IsVisible="False"/>
 
                                 <Grid Name="PnlProfileCustomRes" ColumnDefinitions="*,10,*" IsVisible="False">
                                     <StackPanel Grid.Column="0" Spacing="4">
@@ -415,21 +422,10 @@
                                     </StackPanel>
                                 </Grid>
 
-                                <TextBlock Text="Remote Multi-Monitor Mode" FontSize="13" Foreground="#9A9AA3" Margin="0,4,0,0"/>
-                                <ComboBox Name="CmbProfileMultiMon" HorizontalAlignment="Stretch" Background="#1C1C21" BorderBrush="#2E2E35" Foreground="#EDEDED">
-                                    <ComboBoxItem Content="Default (Follow Global Vault Setting)"/>
-                                    <ComboBoxItem Content="Single Monitor Only (protects a multi-monitor PC)"/>
-                                    <ComboBoxItem Content="Span All Remote Monitors"/>
-                                </ComboBox>
-
-                                <TextBlock Text="Screen Sizing / Panning (Client-Controlled)" FontSize="13" Foreground="#9A9AA3" Margin="0,4,0,0"/>
-                                <ComboBox Name="CmbProfileSmartSizing" HorizontalAlignment="Stretch" Background="#1C1C21" BorderBrush="#2E2E35" Foreground="#EDEDED">
-                                    <ComboBoxItem Content="Default (Follow Global Vault Setting)"/>
-                                    <ComboBoxItem Content="Fit Screen (Auto-scale desktop to phone)"/>
-                                    <ComboBoxItem Content="Scroll / Keep Native (Preserve PC aspect, client-controlled pan)"/>
-                                </ComboBox>
-                                <TextBlock Name="TxtProfilePreserveNativeHint" Text=""
-                                           FontSize="12" Foreground="#2FBF71" TextWrapping="Wrap"/>
+                                <CheckBox Name="ChkClipboard" Content="Share Clipboard (disabled by default for security)"
+                                          Foreground="#EDEDED" IsChecked="False" Margin="0,4,0,0"/>
+                                <TextBlock Text="Syncs text between this phone and the remote PC. Passwords bypass the clipboard completely."
+                                           FontSize="12" Foreground="#8A8A93" TextWrapping="Wrap"/>
                             </StackPanel>
                         </Border>
 
@@ -592,52 +588,22 @@
                             <TextBlock Text="REMOTE DISPLAY &amp; RESOLUTION DEFAULTS" FontSize="12" FontWeight="Bold" Foreground="#9A9AA3" LetterSpacing="1"/>
                             <TextBlock Text="Default Display Resolution" FontSize="13" Foreground="#9A9AA3"/>
                             <ComboBox Name="CmbSettingsResolution" HorizontalAlignment="Stretch" Background="#1C1C21" BorderBrush="#2E2E35" Foreground="#EDEDED">
-                                <ComboBoxItem Content="1920 x 1080 (1080p Full HD - Safe for Desktop Monitors)"/>
-                                <ComboBoxItem Content="1280 x 720 (720p HD - Bandwidth Saver)"/>
-                                <ComboBoxItem Content="1600 x 900 (900p HD+)"/>
-                                <ComboBoxItem Content="1366 x 768 (Standard Laptop)"/>
-                                <ComboBoxItem Content="2560 x 1440 (1440p 2K QHD)"/>
+                                <ComboBoxItem Content="1920 x 1080 (1080p Full HD) [Recommended]"/>
+                                <ComboBoxItem Content="2560 x 1440 (2K QHD)"/>
                                 <ComboBoxItem Content="3840 x 2160 (4K Ultra HD)"/>
-                                <ComboBoxItem Content="Match Mobile Device Screen"/>
+                                <ComboBoxItem Content="1440 x 900 (16:10 WXGA+)"/>
+                                <ComboBoxItem Content="1280 x 720 (720p HD)"/>
+                                <ComboBoxItem Content="Match Phone Screen"/>
                             </ComboBox>
+                            <TextBlock Name="TxtSettingsMatchScreenWarning"
+                                       Text="⚠ Will reconfigure Windows desktop geometry and may rearrange desktop icons"
+                                       Foreground="#FFC107" FontSize="12" TextWrapping="Wrap" IsVisible="False"/>
 
-                            <TextBlock Text="Remote Multi-Monitor Safety Mode" FontSize="13" Foreground="#9A9AA3" Margin="0,4,0,0"/>
-                            <ComboBox Name="CmbSettingsMultiMon" HorizontalAlignment="Stretch" Background="#1C1C21" BorderBrush="#2E2E35" Foreground="#EDEDED">
-                                <ComboBoxItem Content="Single Monitor Only (Recommended)"/>
-                                <ComboBoxItem Content="Use All Remote Displays (Span all monitors)"/>
-                            </ComboBox>
+                            <CheckBox Name="ChkSettingsAllowClipboard" Content="Allow Remote Clipboard Access by Default (disabled for security)" Foreground="#EDEDED" IsChecked="False"/>
 
                             <CheckBox Name="ChkSettingsPreserveNative" Content="Keep native size by default (never squash or distort - scroll to view)" Foreground="#EDEDED" IsChecked="True"/>
                             <TextBlock Name="TxtSettingsPreserveNativeHint" Text=""
                                        FontSize="12" Foreground="#2FBF71" TextWrapping="Wrap"/>
-                        </StackPanel>
-                    </Border>
-
-                    <!-- Auto-Type Password Injector Card -->
-                    <Border Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16">
-                        <StackPanel Spacing="10">
-                            <TextBlock Text="AUTO-TYPE PASSWORD INJECTION" FontSize="12" FontWeight="Bold" Foreground="#9A9AA3" LetterSpacing="1"/>
-                            <TextBlock Text="Types the saved password straight into Microsoft Remote Desktop for you. Nothing is placed on the clipboard and nothing is saved inside Remote Desktop."
-                                       FontSize="12" Foreground="#8A8A93" TextWrapping="Wrap"/>
-                            <TextBlock Name="TxtAccessibilityStatus" Text="Checking status..." FontSize="13" Foreground="#2FBF71" TextWrapping="Wrap"/>
-
-                            <Border Name="CardAccessibilityGuide" Background="#1A1813" BorderBrush="#664D03" BorderThickness="1" CornerRadius="6" Padding="12">
-                                <StackPanel Spacing="4">
-                                    <TextBlock Text="HOW TO TURN IT ON" FontSize="12" FontWeight="Bold" Foreground="#FFC107" LetterSpacing="1"/>
-                                    <TextBlock Text="1. Tap Open Accessibility below, then pick 'RDP Vault Auto-Type'.&#x0a;2. If the switch is greyed out, tap 'Unlock App Settings', then the ⋮ menu, then 'Allow restricted settings'.&#x0a;3. Go back to Accessibility and turn the switch on."
-                                               FontSize="13" Foreground="#EDEDED" TextWrapping="Wrap"/>
-                                </StackPanel>
-                            </Border>
-
-                            <Grid ColumnDefinitions="*,10,*">
-                                <Button Grid.Column="0" Name="BtnSettingsAccessibility" Content="⚙ Open Accessibility" Background="#005FB8" Foreground="White"
-                                        CornerRadius="6" HorizontalAlignment="Stretch" FontWeight="SemiBold" FontSize="13"/>
-                                <Button Grid.Column="2" Name="BtnSettingsAppInfo" Content="🔓 Unlock App Settings" Background="#2E2E35" Foreground="#FFC107"
-                                        CornerRadius="6" HorizontalAlignment="Stretch" FontSize="13"/>
-                            </Grid>
-
-                            <Button Name="BtnResetAutoTypePrompt" Content="Show the Auto-Type prompt again when connecting"
-                                    Background="Transparent" Foreground="#9A9AA3" FontSize="13" HorizontalAlignment="Stretch" IsVisible="False"/>
                         </StackPanel>
                     </Border>
 
@@ -918,57 +884,19 @@
             </ScrollViewer>
         </Border>
 
-        <!-- Enable Accessibility Auto-Type Modal Overlay -->
-        <Border Name="OverlayEnableAccessibility" Background="#E00A0A0C" IsVisible="False" ZIndex="260">
-            <ScrollViewer MaxHeight="540" HorizontalScrollBarVisibility="Disabled" VerticalAlignment="Center" HorizontalAlignment="Center">
-                <Border Background="#141417" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="8"
-                        Margin="20" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460" Padding="20">
-                    <StackPanel Spacing="14">
-                        <StackPanel Spacing="4">
-                            <TextBlock Text="🔒 TYPE MY PASSWORD FOR ME" FontSize="12" FontWeight="Bold" Foreground="#8AB4F8" LetterSpacing="1" TextWrapping="Wrap"/>
-                            <TextBlock Text="Turn on Auto-Type?" FontSize="17" FontWeight="Bold" Foreground="#FFFFFF" TextWrapping="Wrap"/>
-                        </StackPanel>
-
-                        <TextBlock Text="RDP Vault can type your saved password straight into Microsoft Remote Desktop. Nothing goes on the clipboard and nothing is stored inside Remote Desktop. Turning it on is a one-time trip to Android Settings."
-                                   FontSize="13" Foreground="#EDEDED" TextWrapping="Wrap"/>
-
-                        <Border Background="#1A1813" BorderBrush="#664D03" BorderThickness="1" CornerRadius="6" Padding="12">
-                            <StackPanel Spacing="4">
-                                <TextBlock Text="IF THE SWITCH IS GREYED OUT" FontSize="12" FontWeight="Bold" Foreground="#FFC107" LetterSpacing="1"/>
-                                <TextBlock Text="Tap 'Unlock App Settings' below, then the ⋮ menu, then 'Allow restricted settings'. Then come back to Accessibility and turn it on."
-                                           FontSize="13" Foreground="#EDEDED" TextWrapping="Wrap"/>
-                            </StackPanel>
-                        </Border>
-
-                        <StackPanel Spacing="8">
-                            <Button Name="BtnOpenAccessibilitySettings" Content="⚙ Open Accessibility Settings" Background="#005FB8" Foreground="White"
-                                    CornerRadius="6" HorizontalAlignment="Stretch" FontWeight="SemiBold"/>
-                            <Button Name="BtnOpenAppInfo" Content="🔓 Unlock App Settings (if greyed out)" Background="#2E2E35" Foreground="#FFC107"
-                                    CornerRadius="6" HorizontalAlignment="Stretch" FontSize="13"/>
-                            <Button Name="BtnContinueWithoutAccessibility" Content="No thanks - I'll type it myself" Background="#1C1C21" Foreground="#EDEDED"
-                                    BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="6" HorizontalAlignment="Stretch" FontSize="13"/>
-                            <CheckBox Name="ChkDontAskAccessibilityAgain" Content="Don't ask me again" Foreground="#9A9AA3"/>
-                            <Button Name="BtnCancelAccessibilityPrompt" Content="Cancel connection" Background="Transparent" Foreground="#9A9AA3"
-                                    CornerRadius="6" HorizontalAlignment="Stretch" FontSize="13"/>
-                        </StackPanel>
-                    </StackPanel>
-                </Border>
-            </ScrollViewer>
-        </Border>
-
-        <!-- End Session explainer (audit item 2 / Finding 2) -->
+        <!-- End Session confirmation -->
         <Border Name="OverlayEndSession" Background="#E00A0A0C" IsVisible="False" ZIndex="260">
             <ScrollViewer MaxHeight="540" HorizontalScrollBarVisibility="Disabled" VerticalAlignment="Center" HorizontalAlignment="Center">
                 <Border Background="#141417" BorderBrush="#2E2E35" BorderThickness="1" CornerRadius="8"
                         Margin="20" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460" Padding="20">
                     <StackPanel Spacing="14">
-                        <TextBlock Text="Stop tracking this remote session?" FontSize="18" FontWeight="Bold" Foreground="#FFFFFF" TextWrapping="Wrap"/>
-                        <TextBlock Text="Your session is running inside Microsoft Remote Desktop, not inside RDP Vault. Android does not let one app disconnect another app's session, so the only way to truly sign out is to do it in Remote Desktop itself."
+                        <TextBlock Text="Disconnect remote desktop session?" FontSize="18" FontWeight="Bold" Foreground="#FFFFFF" TextWrapping="Wrap"/>
+                        <TextBlock Text="You have an active Remote Desktop session. Do you want to resume the session or disconnect now?"
                                    FontSize="13" Foreground="#EDEDED" TextWrapping="Wrap"/>
                         <StackPanel Spacing="8">
-                            <Button Name="BtnEndSessionOpenRdp" Content="Open Remote Desktop and disconnect there" Background="#005FB8" Foreground="White"
+                            <Button Name="BtnEndSessionOpenRdp" Content="Resume Remote Session" Background="#005FB8" Foreground="White"
                                     CornerRadius="6" HorizontalAlignment="Stretch" FontWeight="SemiBold" FontSize="13"/>
-                            <Button Name="BtnEndSessionStopTracking" Content="Stop tracking in RDP Vault" Background="#2E2E35" Foreground="#EDEDED"
+                            <Button Name="BtnEndSessionStopTracking" Content="Disconnect Session" Background="#2E2E35" Foreground="#FF6B6B"
                                     CornerRadius="6" HorizontalAlignment="Stretch" FontSize="13"/>
                             <Button Name="BtnEndSessionCancel" Content="Cancel" Background="Transparent" Foreground="#9A9AA3"
                                     CornerRadius="6" HorizontalAlignment="Stretch" FontSize="13"/>

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -73,7 +73,6 @@ public partial class ProfileEditorWindow : Window
         TxtPassword.Text = Profile.Password;
         TxtGateway.Text = Profile.GatewayHost;
 
-        // Port Knocking
         ChkEnableKnock.IsChecked = Profile.EnableIcmpKnock;
         PnlKnockDetails.IsVisible = Profile.EnableIcmpKnock;
         ChkEnableKnock.IsCheckedChanged += (_, _) => PnlKnockDetails.IsVisible = ChkEnableKnock.IsChecked == true;
@@ -95,7 +94,6 @@ public partial class ProfileEditorWindow : Window
         TxtKnockTcpPort.Text = Profile.KnockTcpPort > 0 ? Profile.KnockTcpPort.ToString() : "7777";
         TxtKnockDelay.Text = Profile.KnockDelaySeconds >= 0 ? Profile.KnockDelaySeconds.ToString() : "2";
 
-        // Unified Display & Monitor Mode (Streamlined 3-option picker)
         if (Profile.MultiMonOverride == TriStateOverride.Enabled || Profile.UseMultiMon || Profile.ResolutionPreset == "MultiMon")
         {
             CmbDisplayMode.SelectedIndex = 1;
@@ -108,7 +106,6 @@ public partial class ProfileEditorWindow : Window
         }
         else
         {
-            // Default 1080p Standard Landscape Full Screen
             CmbDisplayMode.SelectedIndex = 0;
         }
 
@@ -122,7 +119,6 @@ public partial class ProfileEditorWindow : Window
 
         CmbCertWarnings.SelectedIndex = (int)Profile.SuppressCertWarningsOverride;
 
-        // Wake-on-LAN: collapsible disclosure
         ChkEnableWol.IsChecked = Profile.EnableWol;
         TxtWolMac.Text = Profile.WolMacAddress;
         TxtWolBroadcast.Text = (string.IsNullOrWhiteSpace(Profile.WolBroadcastIp) || Profile.WolBroadcastIp == "255.255.255.255") ? "" : Profile.WolBroadcastIp;
@@ -139,7 +135,6 @@ public partial class ProfileEditorWindow : Window
             }
         };
 
-        // Local resources
         ChkClipboard.IsChecked = Profile.ResolveAllowClipboard(settings);
         ChkDrives.IsChecked = Profile.AllowDrives;
         ChkPrinters.IsChecked = Profile.AllowPrinters;
@@ -268,7 +263,7 @@ public partial class ProfileEditorWindow : Window
         TxtError.IsVisible = false;
 
         string newHost = endpoint.Host;
-        int newPort = endpoint.Port; // Authoritative separate port
+        int newPort = endpoint.Port;
 
         if (!string.Equals(Profile.Host, newHost, StringComparison.OrdinalIgnoreCase) ||
             Profile.Port != newPort)
@@ -283,9 +278,8 @@ public partial class ProfileEditorWindow : Window
         Profile.Password = TxtPassword.Text ?? "";
         Profile.GatewayHost = (TxtGateway.Text ?? "").Trim();
 
-        // Map simplified Display & Monitor mode (3 clean options)
         int dispIdx = CmbDisplayMode.SelectedIndex;
-        if (dispIdx == 1) // MultiMon
+        if (dispIdx == 1)
         {
             Profile.ResolutionPreset = "MultiMon";
             Profile.FullScreenOverride = TriStateOverride.Enabled;
@@ -293,7 +287,7 @@ public partial class ProfileEditorWindow : Window
             Profile.UseMultiMon = true;
             Profile.FullScreen = true;
         }
-        else if (dispIdx == 2) // Custom
+        else if (dispIdx == 2)
         {
             Profile.ResolutionPreset = "Custom";
             Profile.FullScreenOverride = TriStateOverride.Disabled;
@@ -305,7 +299,7 @@ public partial class ProfileEditorWindow : Window
             Profile.Width = cw > 0 ? cw : 1920;
             Profile.Height = ch > 0 ? ch : 1080;
         }
-        else // 1080p Standard Full Screen [Default]
+        else
         {
             Profile.ResolutionPreset = "1920x1080";
             Profile.Width = 1920;
@@ -318,14 +312,12 @@ public partial class ProfileEditorWindow : Window
 
         Profile.SuppressCertWarningsOverride = (TriStateOverride)Math.Clamp(CmbCertWarnings.SelectedIndex, 0, 2);
 
-        // Port Knocking
         Profile.EnableIcmpKnock = ChkEnableKnock.IsChecked == true;
         Profile.KnockProtocol = CmbKnockProtocol.SelectedIndex == 1 ? "TCP" : "ICMP";
         Profile.IcmpKnockSignature = (TxtIcmpSignature.Text ?? "").Trim();
         Profile.KnockTcpPort = int.TryParse((TxtKnockTcpPort.Text ?? "").Trim(), out int kp) ? kp : 7777;
         Profile.KnockDelaySeconds = int.TryParse((TxtKnockDelay.Text ?? "").Trim(), out int kd) ? kd : 2;
 
-        // WOL
         Profile.EnableWol = ChkEnableWol.IsChecked == true;
         if (Profile.EnableWol && MacAddressHelper.TryNormalizeMac(TxtWolMac.Text, out string normMac, out _))
         {
@@ -340,7 +332,6 @@ public partial class ProfileEditorWindow : Window
         Profile.WolPort = int.TryParse((TxtWolPort.Text ?? "").Trim(), out int wp) ? wp : 9;
         Profile.WolWaitSeconds = int.TryParse((TxtWolWait.Text ?? "").Trim(), out int ww) ? ww : 5;
 
-        // Resources
         var globalSettings = SessionManager.Current.Payload?.Settings;
         bool globalClipboard = globalSettings?.DefaultAllowClipboard ?? true;
         bool profileClipboard = ChkClipboard.IsChecked ?? true;

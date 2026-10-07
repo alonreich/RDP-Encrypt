@@ -1,4 +1,4 @@
-using Avalonia.Controls;
+﻿using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Input;
 using Avalonia.Threading;
@@ -22,7 +22,7 @@ public partial class MainWindow : Window
         mgr.Locked += OnLocked;
         mgr.Unlocked += OnUnlocked;
         mgr.ShowRequested += OnShowRequested;
-        mgr.UsbRemoved += OnUsbRemoved;          // issue #17: was never wired up
+        mgr.UsbRemoved += OnUsbRemoved;
         mgr.VaultDestroyed += OnVaultDestroyed;
         mgr.Notice += SetStatus;
         mgr.LaunchRequested += async (p, fromShortcut) =>
@@ -37,9 +37,6 @@ public partial class MainWindow : Window
 
         TxtSearch.TextChanged += (_, _) => RefreshProfiles();
 
-        // Issue #11: real user activity postpones the auto-lock. The old code hooked
-        // input into a private field that was never read, so simply using the app did
-        // not stop the vault locking under the user's hands.
         AddHandler(InputElement.PointerPressedEvent, (_, _) => SessionManager.Current.Touch(),
                    RoutingStrategies.Tunnel, handledEventsToo: true);
         AddHandler(InputElement.KeyDownEvent, (_, _) => SessionManager.Current.Touch(),
@@ -52,13 +49,11 @@ public partial class MainWindow : Window
 
         Loaded += async (_, _) =>
         {
-            // Issue #21: the OS credential prompt has no owner-window API, so it
-            // needs to know which of our windows to hand the foreground back to.
             var handle = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
             SystemPromptFocus.SetOwner(handle);
             BringToForeground();
 
-            await Task.Delay(300);   // let the window render before any OS Hello prompt
+            await Task.Delay(300);
             if (SessionManager.Current.VaultExists && SessionManager.Current.HelloSealAvailable())
             {
                 BtnHello.IsVisible = true;
@@ -88,7 +83,6 @@ public partial class MainWindow : Window
         });
     }
 
-    // ---------------------------------------------------------------- state
 
     private void UpdateUIState()
     {
@@ -199,7 +193,6 @@ public partial class MainWindow : Window
         UpdateUIState();
     });
 
-    // ---------------------------------------------------------------- unlock
 
     private void BtnUnlock_Click(object? sender, RoutedEventArgs e) => _ = SubmitPasswordAsync();
 
@@ -215,7 +208,6 @@ public partial class MainWindow : Window
 
         if (!mgr.VaultExists)
         {
-            // Issue #3: creating a vault is never a side effect of typing in the unlock box.
             await CreateVaultFlowAsync();
             return;
         }
@@ -282,12 +274,6 @@ public partial class MainWindow : Window
             UpdateUIState();
             SetBusy(false, null);
 
-            // ISSUE #1 (2026 review): this used to point the user at
-            // Settings > Change master password, which demanded the CURRENT password -
-            // the one they had just told us they had forgotten. The flow was a dead
-            // end. The new password is now set right here, with no old password asked
-            // for, and a fresh Recovery Code is offered immediately afterwards because
-            // the one they just used is now the only key they have proven they hold.
             await OfferPasswordResetAfterRecoveryAsync();
             return;
         }
@@ -355,9 +341,6 @@ public partial class MainWindow : Window
     {
         if (_busy) return;
 
-        // Issue #21: Windows only lets the credential broker take the foreground if
-        // OUR process holds it first, so make sure this window is genuinely active
-        // and un-minimised immediately before the prompt is raised.
         SystemPromptFocus.SetOwner(TryGetPlatformHandle()?.Handle ?? IntPtr.Zero);
         if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
         Show();
@@ -409,7 +392,6 @@ public partial class MainWindow : Window
         TxtLockError.IsVisible = true;
     }
 
-    // ---------------------------------------------------------------- profiles
 
     private void BtnLock_Click(object? sender, RoutedEventArgs e) => SessionManager.Current.Lock(killSessions: false);
 
@@ -417,7 +399,6 @@ public partial class MainWindow : Window
     {
         SessionManager.Current.Touch();
         await new SettingsWindow().ShowDialog(this);
-        // Issue #21: Settings took ownership of the credential prompt; take it back.
         SystemPromptFocus.SetOwner(TryGetPlatformHandle()?.Handle ?? IntPtr.Zero);
         UpdateUIState();
         SetStatus("Settings updated.");
@@ -441,7 +422,6 @@ public partial class MainWindow : Window
         if (sender is not Button b || b.Tag is not RdpProfile p) return;
         SessionManager.Current.Touch();
 
-        // The editor works on a copy, so Cancel really cancels (issue #15).
         var editor = new ProfileEditorWindow(p);
         if (!await editor.ShowDialog<bool>(this)) return;
 
@@ -485,7 +465,6 @@ public partial class MainWindow : Window
         {
             if (fromShortcut)
             {
-                // Wait for any unlock or busy operation to settle
                 for (int i = 0; i < 50 && _busy; i++)
                     await Task.Delay(100);
             }
@@ -514,7 +493,7 @@ public partial class MainWindow : Window
 
             SetStatus($"Disconnecting existing session to {hostDisplay}...");
             RdpLauncher.DisconnectSession(active);
-            await Task.Delay(500); // Allow mstsc process to terminate cleanly
+            await Task.Delay(500);
         }
 
         _connectCts?.Dispose();
@@ -597,7 +576,7 @@ public partial class MainWindow : Window
         finally
         {
             _busy = false;
-            await Task.Delay(350); // brief confirmation
+            await Task.Delay(350);
             OverlayLaunch.IsVisible = false;
         }
 
@@ -605,8 +584,6 @@ public partial class MainWindow : Window
         {
             if (fromShortcut)
             {
-                // When launched via desktop shortcut, minimize the main vault window so mstsc
-                // takes foreground focus immediately while keeping session tracking alive.
                 Dispatcher.UIThread.Post(() =>
                 {
                     WindowState = WindowState.Minimized;
@@ -654,16 +631,13 @@ public partial class MainWindow : Window
     private async Task SaveOrReport()
     {
         if (SessionManager.Current.TrySave(out string? error)) return;
-        // Issue #9: saving used to fail silently when the vault had auto-locked.
         await Dialogs.MessageAsync(this, "Changes were not saved",
             error ?? "The vault could not be saved.", isError: true);
     }
 
-    // ---------------------------------------------------------------- shutdown
 
     protected override void OnClosing(WindowClosingEventArgs e)
     {
-        // Issue #12: don't silently take running desktops down with the window.
         if (!_closing && RdpLauncher.AnyLive())
         {
             e.Cancel = true;
@@ -682,8 +656,6 @@ public partial class MainWindow : Window
             confirmText: "Close anyway");
         if (!go) return;
 
-        // If sessions are active, do not destroy the window or let Avalonia shutdown the process!
-        // Hide the window, lock the vault immediately, and let background tasks monitor mstsc exit and cert pins.
         _closing = true;
         _uiTimer.Stop();
         Hide();
@@ -698,10 +670,8 @@ public partial class MainWindow : Window
 
         if (RdpLauncher.AnyLive())
         {
-            // Protect credentials immediately in memory while the window is closed
             SessionManager.Current.Lock(killSessions: false);
 
-            // Defer process exit until all active mstsc sessions terminate and clean up their traces
             RdpLauncher.SessionEnded += CheckExitOnAllSessionsEnded;
         }
         else

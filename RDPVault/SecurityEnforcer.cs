@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.IO;
 using System.Security.Cryptography;
@@ -44,7 +44,6 @@ public static class SecurityEnforcer
         try { if (File.Exists(LegacyFailsFile)) File.Delete(LegacyFailsFile); } catch { }
     }
 
-    // Monotonic timestamp tracking to prevent OS clock manipulation from bypassing brute-force defenses
     private static long _lastFailureTick = 0;
     private static double _inProcessCooldownSeconds = 0;
 
@@ -61,7 +60,6 @@ public static class SecurityEnforcer
 
         double seconds = Math.Min(60, Math.Pow(2, Math.Min(n - 4, 6)));
 
-        // Monotonic check for attempts within the current process lifetime
         TimeSpan monotonicLeft = TimeSpan.Zero;
         if (_lastFailureTick > 0 && _inProcessCooldownSeconds > 0)
         {
@@ -74,7 +72,6 @@ public static class SecurityEnforcer
         TimeSpan wallClockLeft = readyAt - DateTime.UtcNow;
         if (wallClockLeft < TimeSpan.Zero) wallClockLeft = TimeSpan.Zero;
 
-        // Take the maximum of monotonic and wall-clock delays
         return monotonicLeft > wallClockLeft ? monotonicLeft : wallClockLeft;
     }
 
@@ -84,13 +81,11 @@ public static class SecurityEnforcer
         var now = DateTime.UtcNow;
         var policy = file.Policy;
 
-        // Detect clock rollback (user moving clock backwards)
         bool clockRolledBack = file.Fails.LastFailUtc != DateTime.MinValue && now < file.Fails.LastFailUtc;
 
         if (!clockRolledBack && (file.Fails.FirstFailUtc == DateTime.MinValue ||
             (now - file.Fails.FirstFailUtc).TotalMinutes > policy.WindowMinutes))
         {
-            // Only reset if failures haven't occurred consecutively in the current running process
             if (_lastFailureTick == 0 || Stopwatch.GetElapsedTime(_lastFailureTick).TotalMinutes > policy.WindowMinutes)
             {
                 file.Fails.Count = 1;
@@ -108,7 +103,6 @@ public static class SecurityEnforcer
 
         file.Fails.LastFailUtc = clockRolledBack ? file.Fails.LastFailUtc.AddSeconds(1) : now;
 
-        // Update in-process monotonic tracking
         _lastFailureTick = Stopwatch.GetTimestamp();
         _inProcessCooldownSeconds = file.Fails.Count < 5 ? 0 : Math.Min(60, Math.Pow(2, Math.Min(file.Fails.Count - 4, 6)));
 
@@ -120,7 +114,6 @@ public static class SecurityEnforcer
         }
         else
         {
-            // Persisting the counter must never take the vault with it.
             try { VaultCrypto.SaveEnvelopeOnly(file, vaultPath); } catch { }
         }
 
@@ -173,7 +166,6 @@ public static class SecurityEnforcer
         }
     }
 
-    // ---------------------------------------------------------------- BitLocker
 
     /// <summary>
     /// Issue #7: previously this method existed but was NEVER CALLED, while the

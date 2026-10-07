@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -25,9 +25,9 @@ namespace RDPVault;
 /// </summary>
 public static class RecoveryCode
 {
-    private const string Alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"; // 32 chars, no I L O U
-    private const int EntropyBytes = 32;   // 256 bits
-    private const int CodeChars = 52;      // ceil(256 / 5)
+    private const string Alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+    private const int EntropyBytes = 32;
+    private const int CodeChars = 52;
     private const int GroupSize = 4;
 
     /// <summary>Generates a fresh code, already formatted with dashes for printing.</summary>

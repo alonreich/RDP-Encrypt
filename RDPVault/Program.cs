@@ -1,4 +1,4 @@
-using Avalonia;
+﻿using Avalonia;
 using System;
 using System.IO;
 using System.IO.Pipes;
@@ -9,8 +9,6 @@ namespace RDPVault;
 
 internal static class Program
 {
-    // Don't use Avalonia, third-party APIs or any SynchronizationContext-reliant
-    // code before AppMain is called: things aren't initialized yet.
 
     [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
     private static extern int MessageBoxW(IntPtr hWnd, string text, string caption, uint type);
@@ -23,8 +21,6 @@ internal static class Program
     {
         try
         {
-            // If running in installer, setup, upgrade, or maintenance mode, kill any running
-            // instances first to release file locks on the binaries and release the named mutex.
             bool isSetupOrMaintenance =
                 args.Any(a => string.Equals(a, "--install", StringComparison.OrdinalIgnoreCase) ||
                               string.Equals(a, "--setup", StringComparison.OrdinalIgnoreCase) ||
@@ -33,18 +29,16 @@ internal static class Program
 
             if (isSetupOrMaintenance)
             {
-                // Auto-elevate via UAC if running as standard user in setup/maintenance mode
                 if (!InstallerService.IsAdministrator() &&
                     !args.Any(a => string.Equals(a, "--no-elevate", StringComparison.OrdinalIgnoreCase)))
                 {
                     if (InstallerService.TryElevate(args))
-                        return; // Successfully spawned elevated instance; current un-elevated caller exits
+                        return;
                 }
 
                 InstallerService.KillRunningInstances(excludeCurrent: true);
             }
 
-            // Verify single-instance at the primary entry point before Avalonia initialization.
             _singleInstanceMutex = new Mutex(false, @"Local\RDPVault_SingleInstance");
             try
             {
@@ -81,7 +75,7 @@ internal static class Program
                         w.Write(pipeMsg);
                     }
                     catch { }
-                    return; // Clean exit without initializing UI framework
+                    return;
                 }
             }
 

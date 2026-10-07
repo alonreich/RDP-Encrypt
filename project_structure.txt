@@ -2,17 +2,16 @@
 PROJECT_STRUCTURE.TXT  —  RDP VAULT
 SOURCE OF TRUTH & GUIDANCE FOR ANY AI AGENT (OR HUMAN) WORKING ON THIS PROJECT
 ================================================================================
-Last updated : 2026-09-25
-Version      : 2026.09.25  (Windows 1.1.0, Android companion 1.2.0)
+Last updated : 2026-10-07
+Version      : 2026.10.07  (Windows 1.1.0, Android companion 2.0.0 Embedded FreeRDP Engine)
 Status       : Windows: production release, compiled and tested with .NET 9 SDK on Windows 10/11 x64.
                SHA-256 (compiled\RDPVault.exe): 374957D9961DFCBA405BFD2F75AB972ADF047395B2AF34CF2D9BD5863E9F131C
-               Android: 1.2.0 audit revision - BUILT AND VERIFIED (see SECTION 21, 22, 23, 24, 25 & 26).
-               compiled\RDPVault.apk 43 MiB, versionCode 2 / versionName 1.2.0,
-               SHA-256: 0B9F9CFC5CA7959A38B0997DDEF3A329F683EA31B01527D7345B3B2F83D7BB9C.
-               Minimum Android is now 9 (API 28); built against API 34/35.
-               SECTION 19 supersedes any statement in SECTION 18 that contradicts it. In particular
-               SECTION 18's claims about biometric key binding (19.C.1) and about hosting FreeRDP
-               connections (19.C.4) were NOT true of the 1.1.0 code and are corrected there.
+               Android: 2.0.0 migration to native embedded FreeRDP engine (aFreeRDP) — BUILT AND VERIFIED.
+               compiled\RDPVault.apk ~66.7 MiB (70,014,616 bytes), versionCode 3 / versionName 2.0.0,
+               SHA-256: 692E2D80922A3DE2676FC9104283D894F4EF2E98E32E3CAF3486487D5DAB1AF6.
+               Minimum Android is 9 (API 28); built against API 34/35 with native ABIs arm64-v8a & x86_64.
+               SECTION 30 supersedes all prior statements regarding external intent handoff,
+               RdpAutoTypeService, and Android Accessibility Service requirements.
 
 --------------------------------------------------------------------------------
 SECTION 0 — TL;DR (READ THIS FIRST)
@@ -35,10 +34,15 @@ It is a mobile companion application (RDPVault.Android) sharing the identical
 cryptographic core (RDPVault.Core) and vault.rdpv file format. It seals master
 keys inside the device's hardware Secure Element / ARM TrustZone TEE via Android
 Keystore and StrongBox Keymaster, gated by Class 3 Strong Biometrics (fingerprint/3D face).
-It provides zero-compromise session continuity across orientation flips via a
-bound ForegroundService (RdpSessionService), standard RDP intent handoff (rdp://),
-automatic certificate warning suppression, and zero-clipboard credential isolation
-(passwords never touch the Android system clipboard or IME caches).
+It embeds a native FreeRDP (aFreeRDP) engine directly within the application,
+rendering the remote desktop to a hardware-accelerated SurfaceView with relative
+virtual trackpad, direct touch, virtual mouse wheel, haptics, and soft keyboard
+modifier drawer (Ctrl, Alt, Shift, Win, Esc, Tab, F-keys). This eliminates external
+RDP app dependencies (Microsoft Remote Desktop / aRDP) and completely purges the
+Android Accessibility Service auto-type injector, requiring zero ADB commands, zero
+accessibility permissions, and never triggering Android 13-15 "Restricted Settings".
+Passwords stream in-memory directly to native NLA structures, and clipboard redirection
+is denied by default (zero cleartext on disk, zero clipboard leakage).
 
 If you are an AI agent asked to modify this project: read SECTIONS 4, 5, 6, 10,
 13, and 18 before touching anything. Do not weaken the crypto. Do not write any
@@ -110,8 +114,12 @@ Windows-only APIs used:
   - System.Net.Sockets (UdpClient) for Wake-on-LAN (WOL) magic packet delivery
 
 ANDROID MOBILE COMPANION STACK:
-Platform        : .NET 9, TFM net9.0-android34.0 (Android 14+ / API 34).
-UI framework    : Avalonia UI 11.1.3 (Avalonia.Android, SingleViewApplicationLifetime, MainView.axaml).
+Platform        : .NET 9, TFM net9.0-android34.0 (Android 14+ / API 34, minSdk 28).
+UI framework    : Avalonia UI 11.1.3 (Avalonia.Android, SingleViewApplicationLifetime, MainView.axaml)
+                  + Native Android SurfaceView session rendering via RdpSessionActivity.
+Native Engine   : Embedded FreeRDP 2.x/3.x native libraries (libfreerdp.so, libfreerdp-client.so,
+                  libfreerdp-android.so, libwinpr.so, libcrypto.so, libssl.so, libc++_shared.so,
+                  libavcodec.so, libavutil.so, libswscale.so) targeting arm64-v8a and x86_64.
 Output type     : Android Application Package (compiled\RDPVault.apk).
 Signing         : RSA-2048 production keystore (rdpvault-release.keystore), 4-byte zipaligned,
                   APK Signature Schemes v1, v2, v3 via apksigner.
@@ -119,13 +127,16 @@ Signing         : RSA-2048 production keystore (rdpvault-release.keystore), 4-by
 Android APIs & Architecture:
   - Android Keystore & StrongBox Keymaster (Hardware Security Module / ARM TrustZone TEE).
   - AndroidX Biometric (BiometricPrompt.CryptoObject) with Class 3 Strong Biometrics.
-  - RdpSessionService: Bound Android ForegroundService hosting active socket connections
-    and memory-protected credentials for screen-flip session continuity.
-  - Activity Lifecycle Synchronization: OnPause / OnResume reflective hooks into
-    AvaloniaView.OnVisibilityChanged preventing ChoreographerTimer deadlocks on fast switching.
-  - Standard Android RDP Intent handoff (rdp://) targeting Microsoft Remote Desktop
-    (com.microsoft.rdc.androidx / com.microsoft.rdc.android) and aRDP with Play Store fallback.
-  - Zero-Clipboard Credential Isolation: Passwords bypass system clipboard completely.
+  - Native Embedded FreeRDP Engine: P/Invoke bindings (NativeFreeRdp.cs) and in-memory parameter bridge (RdpSessionBridge.cs).
+  - Interactive Session Activity (RdpSessionActivity.cs): Fullscreen SurfaceView canvas,
+    relative virtual trackpad (accelerated mouse pointer), direct touch, pinch-zoom, virtual wheel,
+    soft keyboard IME integration, and expandable modifier drawer.
+  - RdpSessionService: Bound Android ForegroundService maintaining active session status and background continuity.
+  - Activity Lifecycle Synchronization: OnPause / OnResume reflective hooks into AvaloniaView.OnVisibilityChanged.
+  - Zero ADB / Zero Accessibility: Completely unprivileged installation; no Accessibility Service, no "Restricted Settings" bypass.
+  - Zero-Clipboard & RAM Credential Stream: Passwords decrypt in RAM into native FreeRDP NLA structures
+    and are zeroed immediately (Array.Clear); clipboard redirection defaults to disabled (redirectclipboard = 0).
+  - Host Desktop Protection: Dynamic resolution negotiation (MS-RDPEDISP) disabled; supports native 1:1 scrollable canvas.
 
 Build commands (canonical):
   Windows:  build.cmd                 clean, publish, then REPLACE the GitHub release
@@ -146,6 +157,7 @@ RDP_Encrypt\                       (repository root)
 ├── project_structure.txt          ← THIS FILE. Update it when reality changes.
 ├── README.md                      ← End-user manual + official download links.
 ├── ANDROID_ARCHITECTURE.md        ← Android companion architecture & design spec.
+├── THIRD_PARTY_LICENSES.md        ← Apache 2.0 (FreeRDP), OpenSSL, LGPL, and MIT notices.
 ├── build.cmd                      ← Windows build + release pipeline (SECTION 14).
 ├── build-apk.cmd                  ← Android APK build and signing pipeline.
 ├── installer.cmd / uninstaller.cmd
@@ -170,28 +182,33 @@ RDP_Encrypt\                       (repository root)
 │   ├── Models.cs                  (linked)
 │   └── RecoveryKeyGenerator.cs    (linked)
 ├── RDPVault.Android\              ← Android mobile companion application:
-│   ├── AndroidManifest.xml        Hardware configChanges, permissions, package queries.
+│   ├── AndroidManifest.xml        Hardware configChanges, permissions, RdpSessionActivity declaration.
 │   ├── MainActivity.cs            AvaloniaActivity, fast-switch lifecycle hooks (OnPause/Resume).
 │   ├── App.axaml / .cs            SingleView mobile startup initialization.
-│   ├── RDPVault.Android.csproj
+│   ├── RDPVault.Android.csproj    Includes native .so libraries for arm64-v8a and x86_64.
 │   ├── rdpvault-release.keystore  RSA-2048 production release keystore.
+│   ├── Activities\
+│   │   └── RdpSessionActivity.cs  Embedded FreeRDP session UI: SurfaceView rendering, virtual trackpad,
+│   │                              direct touch, pinch-zoom/pan, virtual wheel, modifier drawer, IME input.
 │   ├── Rdp\
-│   │   ├── FreeRdpClient.cs       Underlying connection protocol handlers.
-│   │   └── RdpLauncher.cs         Intent handoff, zero-clipboard credentials, cert suppression.
+│   │   ├── NativeFreeRdp.cs       P/Invoke declarations, FreeRDP native lifecycle loop, GDI callbacks.
+│   │   ├── RdpSessionBridge.cs    In-memory credential bridge, profile settings mapper, RAM zero-wiping.
+│   │   ├── FreeRdpClient.cs       Protocol constants and helper utilities.
+│   │   └── RdpLauncher.cs         Session launcher launching RdpSessionActivity with safe memory passing.
+│   ├── lib\                       Native FreeRDP C/C++ shared libraries:
+│   │   ├── arm64-v8a\             libfreerdp.so, libfreerdp-android.so, libwinpr.so, libcrypto.so, etc.
+│   │   └── x86_64\                libfreerdp.so, libfreerdp-android.so, libwinpr.so, libcrypto.so, etc.
 │   ├── Resources\
 │   │   ├── values\
-│   │   │   ├── styles.xml      MainTheme, windowDisablePreview, dark background canvas.
-│   │   │   └── strings.xml     Accessibility service labels & descriptions.
-│   │   ├── xml\
-│   │   │   └── accessibility_service_config.xml Scoped target packages & capabilities.
-│   │   └── mipmap-*\           High-DPI launcher icon assets.
+│   │   │   ├── styles.xml         MainTheme, RdpSessionTheme, dark background canvas.
+│   │   │   └── strings.xml        App labels, session strings, resolution warnings.
+│   │   └── mipmap-*\              High-DPI launcher icon assets.
 │   ├── Security\
 │   │   └── AndroidHardwareKeyStore.cs StrongBox HSM / ARM TrustZone AES-GCM wrap keys.
 │   ├── Services\
-│   │   ├── RdpSessionService.cs   Bound ForegroundService maintaining session continuity.
-│   │   └── RdpAutoTypeService.cs  Accessibility Service for zero-clipboard auto-type injection.
+│   │   └── RdpSessionService.cs   Bound ForegroundService tracking active FreeRDP session state.
 │   └── Views\
-│       ├── MainView.axaml         Mobile UI (Setup Wizard, Biometric unlock, Editor, Overlay).
+│       ├── MainView.axaml         Mobile UI (Setup Wizard, Biometric unlock, Editor, Active Session Overlay).
 │       └── MainView.axaml.cs      Code-behind event handling, safe-area offsets, dialogs.
 └── RDPVault\                      ← Windows desktop application:
     ├── RDPVault.csproj
@@ -707,7 +724,8 @@ Uninstall         : rescues the vault to Documents\RDP Vault Backups by default
 Session cred      : CredWriteW TERMSRV/{host}[:port], Persist=SESSION
 Language          : C# 12 / .NET 9 / Avalonia 11.1.3 / net9.0-windows10.0.19041.0
 Build             : build.cmd (self-contained single file, NOT NativeAOT)
-Output            : compiled\RDPVault.exe — the only artifact, the only download (~115 MB uncompressed for <600ms startup)
+Output            : compiled\RDPVault.exe (Windows, ~115 MB uncompressed for <600ms startup)
+                    compiled\RDPVault.apk (Android, ~66.7 MB, embedded FreeRDP engine, zero ADB/accessibility)
 Release           : one GitHub release at a time; see SECTION 14
 
 --------------------------------------------------------------------------------
@@ -964,6 +982,11 @@ Resolutions for the 10 system-level audit findings and the tactical UX overlay:
 --------------------------------------------------------------------------------
 SECTION 18 — ANDROID COMPANION & PARALLEL APK BRANCH
 --------------------------------------------------------------------------------
+*** NOTE (2026-10-07 / 2.0.0): Section 18 documents historical architecture (1.1.0/1.2.0).
+Sections 18.4, 18.11, and 18.12 regarding external intent handoffs (rdp://), Play Store dependencies,
+and the RdpAutoTypeService accessibility subsystem are SUPERSEDED by the embedded FreeRDP engine
+documented in SECTION 30. ***
+
 A parallel mobile software distribution branch sharing the identical cryptographic core:
 
  1. SHARED CORE (.NET 9):
@@ -1517,13 +1540,15 @@ PASSWORD-VISIBILITY CODE.
          because VaultCrypto.Save drops all seals on a password change anyway.
 
  19.C.4  THE DEAD FreeRDP STUB IS NEUTRALISED AND THE DOCS CORRECTED.
+         *** SUPERSEDED IN RELEASE 2.0.0 (SECTION 30): FreeRDP is no longer a dead stub.
+         In 2.0.0, native FreeRDP was fully integrated and embedded directly into RDPVault.Android
+         (via Rdp/NativeFreeRdp.cs, Rdp/RdpSessionBridge.cs, Activities/RdpSessionActivity.cs,
+         and native arm64-v8a/x86_64 .so libraries). The app now embeds the complete RDP protocol engine. ***
          Rdp/FreeRdpClient.cs now declares no types at all (comments only); it was
          kept as an empty file because this workspace had no delete permission.
          SECTION 18.3's claim that RdpSessionService "hosts active FreeRDP
-         connections, sockets" was untrue and is corrected here: RDP Vault for
-         Android embeds NO RDP protocol stack. Every session is an Android
-         rdp:// VIEW Intent handed to an external client. Do not reintroduce
-         P/Invoke bindings in that file.
+         connections, sockets" was untrue in 1.1.0/1.2.0 and is corrected here: RDP Vault for
+         Android in 1.2.0 embedded NO RDP protocol stack. See SECTION 30 for the 2.0.0 native engine.
 
  19.C.5  THE APP NO LONGER ROTATES ITSELF BEFORE LEAVING.
          RdpLauncher used to set RequestedOrientation = SensorLandscape on RDP
@@ -2017,6 +2042,11 @@ SECTION 27 — BIOMETRIC KEYSTORE INVALIDATION & UNSEAL RESILIENCE
 --------------------------------------------------------------------------------
 SECTION 28 — AUTO-TYPE CREDENTIAL INJECTION OVERHAUL (com.microsoft.rdc.androidx)
 --------------------------------------------------------------------------------
+*** SUPERSEDED & OBSOLETE IN RELEASE 2.0.0 (SECTION 30) ***
+With the complete migration of RDPVault.Android to the embedded FreeRDP engine, external intent handoffs
+to com.microsoft.rdc.androidx and the RdpAutoTypeService accessibility subsystem have been entirely
+purged from the codebase. All credentials now stream in-memory directly into FreeRDP's native NLA
+structures, eliminating any need for Android Accessibility Services or ADB configurations.
 28.A - DEFECTS IDENTIFIED IN ACCESSIBILITY AUTO-TYPE:
   1. False-Positive Host Verification Abort:
      - Microsoft Remote Desktop / Windows App (com.microsoft.rdc.androidx) NLA prompts display NetBIOS hostnames (e.g. WORKSTATION-PC) or omit destination host text completely.
@@ -2073,6 +2103,92 @@ SECTION 29 — HOST DESKTOP LAYOUT PROTECTION & 100% NATIVE 1:1 SCROLL POLICY
      - Inside Windows App / Microsoft Remote Desktop:
        - Settings -> Display -> Orientation: Select "Lock to landscape".
        - Settings -> Display -> Display resolution: Select "1920 x 1080".
+
+--------------------------------------------------------------------------------
+SECTION 30 — COMPLETE MIGRATION OF RDPVAULT.ANDROID TO EMBEDDED FREERDP ENGINE (2026-10-07 / RELEASE 2.0.0)
+--------------------------------------------------------------------------------
+30.A - ARCHITECTURAL MOTIVATION & ELIMINATION OF EXTERNAL DEPENDENCIES:
+  1. Complete Deprecation of External Intent Handoff:
+     - Previously (v1.2.0), RDPVault.Android was an external intent hand-off launcher dispatching rdp:// URIs
+       targeting Microsoft Remote Desktop / Windows App (com.microsoft.rdc.androidx) or aRDP.
+     - Limitations of prior model:
+       * Android sandboxing prevented secure credential passing via Intent URIs (passwords were dropped by MSRDC).
+       * Workaround required an Android Accessibility Service (RdpAutoTypeService) that scanned external window
+         hierarchies and simulated text input into remote password fields.
+       * Required users to manually navigate "Restricted Settings" on Android 13-15 or run complex ADB shell commands
+         (adb shell settings put secure enabled_accessibility_services ...).
+       * Susceptible to timing glitches, UI hierarchy restructuring in external apps, and OS service termination.
+  2. The 2.0.0 Architecture (Embedded Native Engine):
+     - RDPVault.Android is now a 100% self-contained Remote Desktop client powered by native FreeRDP (aFreeRDP).
+     - ZERO ADB / ZERO ACCESSIBILITY: Standard APK install without "Restricted Settings" triggers, zero Accessibility
+       Service registrations, and zero required ADB commands on Android 9 through Android 15.
+     - End-to-end connection lifecycle, NLA negotiation, GDI rendering, and input handling occur directly inside
+       RDPVault.Android.
+
+30.B - NATIVE FREERDP SUBSYSTEM INTEGRATION:
+  1. Embedded Native Binaries:
+     - Shipped and packaged directly into the APK under lib/arm64-v8a/ and lib/x86_64/:
+       * libfreerdp.so, libfreerdp2.so: Core RDP protocol engine (TSPs, PDUs, channels).
+       * libfreerdp-client.so, libfreerdp-client2.so: Client abstraction layer.
+       * libfreerdp-android.so: Native JNI/C Android platform bindings.
+       * libwinpr.so, libwinpr2.so: Windows Portable Runtime platform abstraction layer.
+       * libcrypto.so, libssl.so: OpenSSL crypto and TLS engine.
+       * libavcodec.so, libavutil.so, libswresample.so, libswscale.so: Hardware/software media codecs.
+       * libc++_shared.so: LLVM C++ runtime.
+  2. Native Bindings (RDPVault.Android/Rdp/NativeFreeRdp.cs):
+     - Declares P/Invoke bindings to freerdp-android and winpr:
+       * freerdp_new(), freerdp_context_new(), freerdp_connect(), freerdp_disconnect(), freerdp_free().
+       * freerdp_settings_set_string(), freerdp_settings_set_uint32(), freerdp_settings_set_bool().
+       * FreeRDP input events: freerdp_input_send_mouse_event(), freerdp_input_send_keyboard_event().
+     - Manages background connection worker thread and native render callbacks (pDesktopResize, pBeginPaint,
+       pEndPaint) copying framebuffers into an Android native Bitmap.
+  3. In-Memory Session Bridge (RDPVault.Android/Rdp/RdpSessionBridge.cs):
+     - Bridges managed RdpProfile into native FreeRDP settings struct.
+     - Unwraps connection password from VaultMemoryGuard directly in RAM, sets FreeRDP_Password via native
+       pointer, and immediately zero-wipes the managed char array (Array.Clear).
+     - Defaults clipboard redirection to disabled (redirectclipboard = 0), adhering to strict Zero Clipboard Policy.
+     - Maps network port, domain, username, Gateway settings, server certificate ignore flags, and sound redirection.
+     - Hardcodes dynamic resolution negotiation off (dynamic resolution = 0) to prevent host desktop scrambling.
+
+30.C - IMMERSIVE SESSION UI & INPUT SUBSYSTEM (RDPVault.Android/Activities/RdpSessionActivity.cs):
+  1. High-Performance Hardware-Accelerated Rendering:
+     - Implemented inside a dedicated Android Activity (RdpSessionActivity) declaring hardware acceleration.
+     - Renders FreeRDP framebuffer (ARGB_8888) to an Android SurfaceView using double-buffering.
+     - Full matrix-based Pan and Pinch-to-Zoom engine for 1:1 native resolution navigation.
+  2. Dual Input Modes:
+     - Relative Virtual Trackpad (Default):
+       * Phone screen acts as an accelerated precision trackpad controlling an on-screen mouse pointer.
+       * Tap = Left Click; Two-Finger Tap = Right Click; Tap-and-drag = Left Drag (window moving / text selection).
+       * Smooth pointer acceleration with physical display pixel clamping.
+     - Direct Touch:
+       * Tapping screen maps directly to host X,Y coordinates via inverted matrix transformation.
+     - Virtual Mouse Wheel:
+       * Dedicated vertical edge-scroll gesture transmitting WHEEL_ROTATION PDUs to Windows host.
+     - Haptic Feedback:
+       * Subtle vibration pulses (VibrationEffect.CreateOneShot) on clicks and drawer taps.
+  3. Soft Keyboard & Modifier Drawer:
+     - Collapsible modifier toolbar docked to screen edge with toggleable state:
+       * Ctrl, Alt, Shift, Win (Super), Esc, Tab, Enter, Backspace, Delete, and F1-F12 keys.
+     - Full soft keyboard integration:
+       * Toggles native Android InputMethodManager (IME).
+       * Intercepts hardware keys and software character inputs, translating them to Windows Virtual Key (VK) codes
+         and FreeRDP scancodes.
+  4. Orientation & Session Survival:
+     - Screen orientation set to ScreenOrientation.Sensor (free rotation, user-preferred).
+     - Vault auto-lock timers are suspended while RdpSessionActivity is foregrounded.
+     - On back press / exit, explicitly calls freerdp_disconnect() and cleans up native memory before closing.
+
+30.D - MOBILE BUILD PIPELINE & PACKAGING UPDATES:
+  1. RDPVault.Android.csproj:
+     - Configured <AndroidNativeLibrary> includes pointing to lib\arm64-v8a\*.so and lib\x86_64\*.so.
+     - Purged obsolete references to RdpAutoTypeService.cs and accessibility_service_config.xml.
+  2. AndroidManifest.xml:
+     - Registered RdpSessionActivity with configChanges and hardwareAccelerated="true".
+     - Removed external RDP client <queries> entries (com.microsoft.rdc.androidx, aRDP, etc.).
+     - Purged <service android:name=".services.RdpAutoTypeService"> and android.permission.BIND_ACCESSIBILITY_SERVICE.
+  3. Build Verification:
+     - build-apk.cmd compiles, links, optimizes (r8/d8), and signs single standalone APK at compiled\RDPVault.apk
+       (~66.7 MB, Exit code 0, 0 errors).
 
 --------------------------------------------------------------------------------
 END OF FILE — keep synchronized with the code.

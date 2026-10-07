@@ -1,4 +1,4 @@
-using Avalonia.Controls;
+﻿using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
 using System;
@@ -31,9 +31,6 @@ public partial class UninstallWindow : Window
 
         Loaded += (_, _) =>
         {
-            // ISSUE #1: the quiet uninstall path (QuietUninstallString, used by some
-            // management tools) previously wiped the vault with no UI at all. Quiet
-            // now means quiet AND non-destructive: the vault is always rescued.
             if (_quiet) Start(keepVault: true);
         };
     }

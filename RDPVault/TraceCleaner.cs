@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -76,7 +76,6 @@ public static class TraceCleaner
         return hosts.Any(h => text.Contains(h, StringComparison.OrdinalIgnoreCase));
     }
 
-    // ---------------- public entry points ----------------
 
     /// <summary>Standard sweep: everything except other saved TERMSRV credentials.</summary>
     public static SweepReport Sweep()
@@ -122,7 +121,6 @@ public static class TraceCleaner
         return report;
     }
 
-    // ---------------- registry history ----------------
 
     private static void RegistryHistory(string[]? explicitHosts = null)
     {
@@ -173,7 +171,6 @@ public static class TraceCleaner
                 return;
             }
 
-            // Scoped: legacy MRU values are keyed by name but hold the host as data.
             foreach (var name in key.GetValueNames())
             {
                 if (!name.StartsWith("MRU", StringComparison.OrdinalIgnoreCase)) continue;
@@ -183,7 +180,6 @@ public static class TraceCleaner
                     key.DeleteValue(name, throwOnMissingValue: false);
             }
 
-            // Modern mstsc: address-box history lives under "Default" as MRU0..MRUn.
             using (var def = key.OpenSubKey("Default", writable: true))
             {
                 if (def != null)
@@ -196,7 +192,6 @@ public static class TraceCleaner
                     }
             }
 
-            // Modern mstsc: one subkey per host, holding UsernameHint etc.
             using (var servers = key.OpenSubKey("Servers", writable: true))
             {
                 if (servers != null)
@@ -210,7 +205,6 @@ public static class TraceCleaner
         });
     }
 
-    // ---------------- files ----------------
 
     private static void DefaultRdpFile(string[]? explicitHosts = null)
     {
@@ -237,7 +231,7 @@ public static class TraceCleaner
                                       "Microsoft", "Windows", "Recent", "AutomaticDestinations");
             if (!Directory.Exists(dir)) return;
 
-            byte[] probe = Encoding.Unicode.GetBytes("mstsc"); // UTF-16LE
+            byte[] probe = Encoding.Unicode.GetBytes("mstsc");
             foreach (string file in Directory.GetFiles(dir, "*.automaticDestinations-ms"))
             {
                 try
@@ -304,9 +298,6 @@ public static class TraceCleaner
         });
     }
 
-    // ---------------- UserAssist / prefetch (SweepScope.Everything only) ----------------
-    // These record only THAT mstsc ran, never which host was contacted, and they are
-    // shared with the user's non-vault usage. Scoped mode deliberately leaves them.
 
     private static void UserAssist()
     {
@@ -336,12 +327,11 @@ public static class TraceCleaner
             if (!Directory.Exists(prefetch)) return;
             foreach (string file in Directory.GetFiles(prefetch, "MSTSC.EXE-*.pf"))
             {
-                try { File.Delete(file); } catch { } // needs admin; ignore silently
+                try { File.Delete(file); } catch { }
             }
         });
     }
 
-    // ---------------- Windows Credential Manager: TERMSRV/* ----------------
 
     public static void DeleteSavedRdpCredentials(string[]? explicitHosts = null)
     {
@@ -369,7 +359,6 @@ public static class TraceCleaner
         });
     }
 
-    // ---------------- helpers ----------------
 
     private static void TryRun(Action a)
     {
@@ -420,7 +409,6 @@ public static class TraceCleaner
         return -1;
     }
 
-    // ---------------- P/Invoke ----------------
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct CREDENTIAL

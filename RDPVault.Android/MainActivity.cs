@@ -188,11 +188,9 @@ public class MainActivity : AvaloniaMainActivity<App>
 
         try
         {
-            // Pause the on-screen idle countdown; the elapsed-time check in OnResume owns
-            // the background case so the timer cannot fire twice.
             ResolveMainView()?.SuspendIdleTimer();
 
-            if (LockImmediatelyOnBackground && !IsExternalActivitySuppressed)
+            if (LockImmediatelyOnBackground && !IsExternalActivitySuppressed && !IsSessionActive)
             {
                 Avalonia.Threading.Dispatcher.UIThread.Post(() =>
                 {
@@ -211,16 +209,12 @@ public class MainActivity : AvaloniaMainActivity<App>
         base.OnResume();
         try
         {
-            // 0. Reset orientation preference back to user / sensor control.
             RequestedOrientation = ScreenOrientation.Unspecified;
 
-            // 1. Re-assert screenshot/recents protection (the Settings toggle may have changed).
             ApplyScreenSecurity();
 
-            // 2. Force the native window background dark to prevent white canvas exposure.
             Window?.SetBackgroundDrawable(new global::Android.Graphics.Drawables.ColorDrawable(global::Android.Graphics.Color.ParseColor("#0E0E10")));
 
-            // 3. Configurable auto-lock: locked if backgrounded for longer than the timeout
             bool shouldLock = false;
 
             if (_lastBackgroundedUtc != DateTime.MinValue)
@@ -234,8 +228,6 @@ public class MainActivity : AvaloniaMainActivity<App>
             _lastBackgroundedUtc = DateTime.MinValue;
             _externalActivitySuppressUntilUtc = DateTime.MinValue;
 
-            // 4. Notify MainView that the app resumed (dismisses stale overlays, syncs the
-            //    session banner, wipes an expired sensitive clipboard, restarts the idle timer).
             Avalonia.Threading.Dispatcher.UIThread.Post(() =>
             {
                 try
@@ -256,8 +248,6 @@ public class MainActivity : AvaloniaMainActivity<App>
                 catch { }
             });
 
-            // 5. Deferred invalidation pass (60ms) so Skia renders after Android finishes
-            //    the asynchronous EGL surface rebind.
             Task.Delay(60).ContinueWith(_ =>
             {
                 Avalonia.Threading.Dispatcher.UIThread.Post(() =>
@@ -317,21 +307,16 @@ public class MainActivity : AvaloniaMainActivity<App>
             var mainView = ResolveMainView();
             if (mainView != null && mainView.HandleBackPressed())
             {
-                // Consumed internally by navigating back one screen.
                 return;
             }
 
-            // Root level. Leaving the app with an unlocked vault sitting in memory is
-            // exactly the situation "Lock immediately" exists to prevent, so honour it here
-            // too rather than silently minimising an open vault.
-            if (LockImmediatelyOnBackground && _sessionService?.IsConnected != true)
+            if (LockImmediatelyOnBackground && !IsSessionActive)
             {
                 mainView?.AutoLockIfUnlocked();
             }
         }
         catch { }
 
-        // Preserve the activity in the background instead of destroying the process.
         MoveTaskToBack(true);
     }
 
@@ -353,7 +338,7 @@ public class MainActivity : AvaloniaMainActivity<App>
         catch { }
     }
 
-    public bool IsSessionActive => _sessionService?.IsConnected == true;
+    public bool IsSessionActive => _sessionService?.IsConnected == true || Rdp.RdpSessionBridge.ActiveSession != null || Rdp.RdpSessionBridge.HasPendingConfig;
     public RdpProfile? ActiveSessionProfile => _sessionService?.ActiveProfile;
     public bool ActiveSessionHostUnreachable => _sessionService?.HostUnreachable == true;
 
@@ -368,8 +353,6 @@ public class MainActivity : AvaloniaMainActivity<App>
             }
             else
             {
-                // The bind has not completed yet (cold start straight into Connect).
-                // Start the service explicitly so the ongoing notification still appears.
                 var intent = new Intent(this, typeof(RdpSessionService));
                 intent.SetAction(RdpSessionService.ActionStartSession);
                 intent.PutExtra(RdpSessionService.ExtraProfileName, profile.Name);

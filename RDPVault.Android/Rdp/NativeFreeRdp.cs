@@ -193,18 +193,23 @@ public static class NativeFreeRdp
     public static extern IntPtr freerdp_settings_get_string(IntPtr settings, nuint key);
 
     [DllImport(LibFreeRdp, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool freerdp_input_send_mouse_event(IntPtr input, ushort flags, ushort x, ushort y);
 
     [DllImport(LibFreeRdp, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool freerdp_input_send_extended_mouse_event(IntPtr input, ushort flags, ushort x, ushort y);
 
     [DllImport(LibFreeRdp, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool freerdp_input_send_keyboard_event(IntPtr input, ushort flags, ushort code);
 
     [DllImport(LibFreeRdp, CallingConvention = CallingConvention.Cdecl)]
-    public static extern bool freerdp_input_send_keyboard_event_ex(IntPtr input, bool down, bool repeat, uint rdpScanCode);
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool freerdp_input_send_keyboard_event_ex(IntPtr input, [MarshalAs(UnmanagedType.Bool)] bool down, [MarshalAs(UnmanagedType.Bool)] bool repeat, uint rdpScanCode);
 
     [DllImport(LibFreeRdp, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool freerdp_input_send_unicode_keyboard_event(IntPtr input, ushort flags, ushort code);
 
     [DllImport(LibFreeRdp, CallingConvention = CallingConvention.Cdecl)]
@@ -325,8 +330,8 @@ public sealed class FreeRdpSession : IDisposable
                 throw new InvalidOperationException("Failed to locate rdpSettings pointer in FreeRDP instance/context.");
             }
 
-            _input = ResolveInput(_instance, _context);
-            _update = ResolveUpdate(_instance, _context);
+            _input = ResolveInput(_instance, _context, _settings);
+            _update = ResolveUpdate(_instance, _context, _settings);
 
             // Configure connection settings
             ApplySettings();
@@ -443,8 +448,105 @@ public sealed class FreeRdpSession : IDisposable
         return false;
     }
 
-    private static IntPtr ResolveInput(IntPtr instance, IntPtr context)
+    private static bool IsValidContextBacklink(IntPtr ptr, IntPtr context)
     {
+        if (ptr == IntPtr.Zero || context == IntPtr.Zero) return false;
+        try
+        {
+            IntPtr back = Marshal.ReadIntPtr(ptr, 0);
+            return back == context;
+        }
+        catch { }
+        return false;
+    }
+
+    private static IntPtr ResolveInput(IntPtr instance, IntPtr context, IntPtr settings)
+    {
+        // 1. Direct offset check from standard FreeRDP 2.x (context: 38, instance: 16)
+        if (context != IntPtr.Zero)
+        {
+            IntPtr ptr = Marshal.ReadIntPtr(context, 38 * IntPtr.Size);
+            if (IsValidContextBacklink(ptr, context))
+            {
+                AppLog.Info($"FreeRDP _input matched context offset 38: 0x{ptr.ToInt64():X}");
+                return ptr;
+            }
+        }
+
+        if (instance != IntPtr.Zero)
+        {
+            IntPtr ptr = Marshal.ReadIntPtr(instance, 16 * IntPtr.Size);
+            if (IsValidContextBacklink(ptr, context))
+            {
+                AppLog.Info($"FreeRDP _input matched instance offset 16: 0x{ptr.ToInt64():X}");
+                return ptr;
+            }
+        }
+
+        // 2. Scan relative to settings pointer (input is 2 pointers before settings in both context and instance)
+        if (context != IntPtr.Zero && settings != IntPtr.Zero)
+        {
+            for (int i = 30; i <= 50; i++)
+            {
+                IntPtr candSettings = Marshal.ReadIntPtr(context, i * IntPtr.Size);
+                if (candSettings == settings && i >= 2)
+                {
+                    IntPtr candidate = Marshal.ReadIntPtr(context, (i - 2) * IntPtr.Size);
+                    if (IsValidContextBacklink(candidate, context))
+                    {
+                        AppLog.Info($"FreeRDP _input matched context relative to settings (index {i - 2}): 0x{candidate.ToInt64():X}");
+                        return candidate;
+                    }
+                }
+            }
+        }
+
+        if (instance != IntPtr.Zero && settings != IntPtr.Zero)
+        {
+            for (int i = 12; i <= 26; i++)
+            {
+                IntPtr candSettings = Marshal.ReadIntPtr(instance, i * IntPtr.Size);
+                if (candSettings == settings && i >= 2)
+                {
+                    IntPtr candidate = Marshal.ReadIntPtr(instance, (i - 2) * IntPtr.Size);
+                    if (IsValidContextBacklink(candidate, context))
+                    {
+                        AppLog.Info($"FreeRDP _input matched instance relative to settings (index {i - 2}): 0x{candidate.ToInt64():X}");
+                        return candidate;
+                    }
+                }
+            }
+        }
+
+        // 3. Scan context for any candidate pointer whose first field is context
+        if (context != IntPtr.Zero)
+        {
+            for (int i = 32; i <= 48; i++)
+            {
+                IntPtr candidate = Marshal.ReadIntPtr(context, i * IntPtr.Size);
+                if (candidate != IntPtr.Zero && candidate != settings && IsValidContextBacklink(candidate, context))
+                {
+                    AppLog.Info($"FreeRDP _input matched context scan at index {i}: 0x{candidate.ToInt64():X}");
+                    return candidate;
+                }
+            }
+        }
+
+        // 4. Scan instance
+        if (instance != IntPtr.Zero)
+        {
+            for (int i = 12; i <= 24; i++)
+            {
+                IntPtr candidate = Marshal.ReadIntPtr(instance, i * IntPtr.Size);
+                if (candidate != IntPtr.Zero && candidate != settings && IsValidContextBacklink(candidate, context))
+                {
+                    AppLog.Info($"FreeRDP _input matched instance scan at index {i}: 0x{candidate.ToInt64():X}");
+                    return candidate;
+                }
+            }
+        }
+
+        // 5. Fallback unverified read
         if (context != IntPtr.Zero)
         {
             IntPtr ptr = Marshal.ReadIntPtr(context, 38 * IntPtr.Size);
@@ -455,11 +557,51 @@ public sealed class FreeRdpSession : IDisposable
             IntPtr ptr = Marshal.ReadIntPtr(instance, 16 * IntPtr.Size);
             if (ptr != IntPtr.Zero) return ptr;
         }
+
+        AppLog.Warn("FreeRDP failed to resolve _input pointer!");
         return IntPtr.Zero;
     }
 
-    private static IntPtr ResolveUpdate(IntPtr instance, IntPtr context)
+    private static IntPtr ResolveUpdate(IntPtr instance, IntPtr context, IntPtr settings)
     {
+        if (context != IntPtr.Zero)
+        {
+            IntPtr ptr = Marshal.ReadIntPtr(context, 39 * IntPtr.Size);
+            if (IsValidContextBacklink(ptr, context)) return ptr;
+        }
+        if (instance != IntPtr.Zero)
+        {
+            IntPtr ptr = Marshal.ReadIntPtr(instance, 17 * IntPtr.Size);
+            if (IsValidContextBacklink(ptr, context)) return ptr;
+        }
+
+        // Update is 1 pointer before settings
+        if (context != IntPtr.Zero && settings != IntPtr.Zero)
+        {
+            for (int i = 30; i <= 50; i++)
+            {
+                IntPtr candSettings = Marshal.ReadIntPtr(context, i * IntPtr.Size);
+                if (candSettings == settings && i >= 1)
+                {
+                    IntPtr candidate = Marshal.ReadIntPtr(context, (i - 1) * IntPtr.Size);
+                    if (IsValidContextBacklink(candidate, context)) return candidate;
+                }
+            }
+        }
+
+        if (instance != IntPtr.Zero && settings != IntPtr.Zero)
+        {
+            for (int i = 12; i <= 26; i++)
+            {
+                IntPtr candSettings = Marshal.ReadIntPtr(instance, i * IntPtr.Size);
+                if (candSettings == settings && i >= 1)
+                {
+                    IntPtr candidate = Marshal.ReadIntPtr(instance, (i - 1) * IntPtr.Size);
+                    if (IsValidContextBacklink(candidate, context)) return candidate;
+                }
+            }
+        }
+
         if (context != IntPtr.Zero)
         {
             IntPtr ptr = Marshal.ReadIntPtr(context, 39 * IntPtr.Size);
@@ -786,14 +928,16 @@ public sealed class FreeRdpSession : IDisposable
         }
         AppLog.Info($"FreeRDP gdi_init status: {gdiOk}");
 
+        if (_input == IntPtr.Zero && _context != IntPtr.Zero)
+        {
+            _input = ResolveInput(instance, _context, _settings);
+        }
+
         IntPtr update = _update;
         if (update == IntPtr.Zero && _context != IntPtr.Zero)
         {
-            update = Marshal.ReadIntPtr(_context, 39 * IntPtr.Size);
-        }
-        if (update == IntPtr.Zero && instance != IntPtr.Zero)
-        {
-            update = Marshal.ReadIntPtr(instance, 17 * IntPtr.Size);
+            _update = ResolveUpdate(instance, _context, _settings);
+            update = _update;
         }
 
         if (update != IntPtr.Zero)
@@ -877,38 +1021,60 @@ public sealed class FreeRdpSession : IDisposable
         return true;
     }
 
+    private IntPtr EnsureInputResolved()
+    {
+        if (_input == IntPtr.Zero && _context != IntPtr.Zero)
+        {
+            _input = ResolveInput(_instance, _context, _settings);
+        }
+        return _input;
+    }
+
     public void SendMouseMove(ushort x, ushort y)
     {
-        if (_input == IntPtr.Zero || !IsConnected) return;
-        NativeFreeRdp.freerdp_input_send_mouse_event(_input, NativeFreeRdp.PTR_FLAGS_MOVE, x, y);
+        IntPtr input = EnsureInputResolved();
+        if (input == IntPtr.Zero || !IsConnected) return;
+        bool ok = NativeFreeRdp.freerdp_input_send_mouse_event(input, NativeFreeRdp.PTR_FLAGS_MOVE, x, y);
+        if (!ok)
+        {
+            AppLog.Warn($"freerdp_input_send_mouse_event MOVE failed at ({x}, {y})");
+        }
     }
 
     public void SendMouseButton(ushort buttonFlag, bool down, ushort x, ushort y)
     {
-        if (_input == IntPtr.Zero || !IsConnected) return;
+        IntPtr input = EnsureInputResolved();
+        if (input == IntPtr.Zero || !IsConnected) return;
         ushort flags = (ushort)(buttonFlag | (down ? NativeFreeRdp.PTR_FLAGS_DOWN : 0));
-        NativeFreeRdp.freerdp_input_send_mouse_event(_input, flags, x, y);
+        bool ok = NativeFreeRdp.freerdp_input_send_mouse_event(input, flags, x, y);
+        if (!ok)
+        {
+            AppLog.Warn($"freerdp_input_send_mouse_event button failed: flags=0x{flags:X4} at ({x}, {y})");
+        }
     }
 
     public void SendMouseWheel(bool up, ushort step, ushort x, ushort y)
     {
-        if (_input == IntPtr.Zero || !IsConnected) return;
+        IntPtr input = EnsureInputResolved();
+        if (input == IntPtr.Zero || !IsConnected) return;
         ushort flags = (ushort)(NativeFreeRdp.PTR_FLAGS_WHEEL | (up ? 0 : NativeFreeRdp.PTR_FLAGS_WHEEL_NEGATIVE) | (step & 0xFF));
-        NativeFreeRdp.freerdp_input_send_mouse_event(_input, flags, x, y);
+        NativeFreeRdp.freerdp_input_send_mouse_event(input, flags, x, y);
     }
 
     public void SendKeyboardScanCode(ushort code, bool down, bool extended)
     {
-        if (_input == IntPtr.Zero || !IsConnected) return;
+        IntPtr input = EnsureInputResolved();
+        if (input == IntPtr.Zero || !IsConnected) return;
         ushort flags = (ushort)((down ? NativeFreeRdp.KBD_FLAGS_DOWN : NativeFreeRdp.KBD_FLAGS_RELEASE) | (extended ? NativeFreeRdp.KBD_FLAGS_EXTENDED : 0));
-        NativeFreeRdp.freerdp_input_send_keyboard_event(_input, flags, code);
+        NativeFreeRdp.freerdp_input_send_keyboard_event(input, flags, code);
     }
 
     public void SendUnicodeChar(char c)
     {
-        if (_input == IntPtr.Zero || !IsConnected) return;
-        NativeFreeRdp.freerdp_input_send_unicode_keyboard_event(_input, 0, (ushort)c);
-        NativeFreeRdp.freerdp_input_send_unicode_keyboard_event(_input, NativeFreeRdp.KBD_FLAGS_RELEASE, (ushort)c);
+        IntPtr input = EnsureInputResolved();
+        if (input == IntPtr.Zero || !IsConnected) return;
+        NativeFreeRdp.freerdp_input_send_unicode_keyboard_event(input, 0, (ushort)c);
+        NativeFreeRdp.freerdp_input_send_unicode_keyboard_event(input, NativeFreeRdp.KBD_FLAGS_RELEASE, (ushort)c);
     }
 
     public void Disconnect()

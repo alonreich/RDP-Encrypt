@@ -1352,31 +1352,6 @@ public partial class MainView : UserControl
         }
     }
 
-    /// <summary>
-    /// Builds one chip. Chips replace the old single cramped line that ran
-    /// "host:port • user • WOL • 1080p (Scrollable)" off the right edge of the screen
-    /// (suggestion 4).
-    /// </summary>
-    private static Border MakeChip(string text, string foreground, string background, string border)
-    {
-        return new Border
-        {
-            Background = new SolidColorBrush(Color.Parse(background)),
-            BorderBrush = new SolidColorBrush(Color.Parse(border)),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(10),
-            Padding = new Thickness(8, 3),
-            Margin = new Thickness(0, 0, 6, 6),
-            Child = new TextBlock
-            {
-                Text = text,
-                FontSize = 12,
-                Foreground = new SolidColorBrush(Color.Parse(foreground)),
-                TextWrapping = TextWrapping.NoWrap
-            }
-        };
-    }
-
     private Control CreateProfileCard(RdpProfile profile)
     {
         var border = new Border
@@ -1385,38 +1360,24 @@ public partial class MainView : UserControl
             CornerRadius = new CornerRadius(8),
             BorderBrush = new SolidColorBrush(Color.Parse("#2E2E35")),
             BorderThickness = new Thickness(1),
-            Padding = new Thickness(14, 12)
+            Padding = new Thickness(16, 14),
+            Margin = new Thickness(0, 0, 0, 8)
         };
 
-        var rootStack = new StackPanel { Spacing = 10 };
+        var rootStack = new StackPanel { Spacing = 12 };
 
-        var topGrid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
-
-        var info = new StackPanel
-        {
-            Spacing = 3,
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(0, 0, 10, 0)
-        };
-
-        info.Children.Add(new TextBlock
+        var nameBlock = new TextBlock
         {
             Text = profile.Name,
-            FontSize = 16,
+            FontSize = 18,
             FontWeight = FontWeight.Bold,
             Foreground = new SolidColorBrush(Color.Parse("#FFFFFF")),
-            TextWrapping = TextWrapping.Wrap
-        });
+            TextWrapping = TextWrapping.Wrap,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        rootStack.Children.Add(nameBlock);
 
-        info.Children.Add(new TextBlock
-        {
-            Text = string.IsNullOrWhiteSpace(profile.Username)
-                ? $"{profile.Host}:{profile.Port}"
-                : $"{profile.Host}:{profile.Port}  •  {profile.Username}",
-            FontSize = 13,
-            Foreground = new SolidColorBrush(Color.Parse("#9A9AA3")),
-            TextWrapping = TextWrapping.Wrap
-        });
+        var actionsRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
 
         var btnConnect = new Button
         {
@@ -1424,7 +1385,7 @@ public partial class MainView : UserControl
             Background = new SolidColorBrush(Color.Parse("#005FB8")),
             Foreground = Brushes.White,
             CornerRadius = new CornerRadius(6),
-            MinHeight = 44,
+            MinHeight = 40,
             Padding = new Thickness(18, 8),
             VerticalAlignment = VerticalAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center,
@@ -1437,54 +1398,7 @@ public partial class MainView : UserControl
             e.Handled = true;
             await StartSessionAsync(profile);
         };
-
-        Grid.SetColumn(info, 0);
-        Grid.SetColumn(btnConnect, 1);
-        topGrid.Children.Add(info);
-        topGrid.Children.Add(btnConnect);
-        rootStack.Children.Add(topGrid);
-
-        var chips = new WrapPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, -6, -6) };
-
-        bool isInherit = string.IsNullOrWhiteSpace(profile.ResolutionPreset) || profile.ResolutionPreset.Equals("InheritGlobal", StringComparison.OrdinalIgnoreCase);
-        string resText = isInherit
-            ? (_payload?.Settings?.DefaultResolution ?? "1920x1080")
-            : profile.ResolutionPreset;
-        if (resText.Equals("Custom", StringComparison.OrdinalIgnoreCase)) resText = $"{profile.Width}x{profile.Height}";
-        if (resText.Equals("Device", StringComparison.OrdinalIgnoreCase)) resText = "Phone screen";
-
-        bool preserveNative = profile.SmartSizingOverride switch
-        {
-            TriStateOverride.Enabled => false,
-            TriStateOverride.Disabled => true,
-            _ => !(_payload?.Settings?.DefaultSmartSizing ?? false)
-        };
-        chips.Children.Add(MakeChip(
-            preserveNative ? $"🖥 {resText} · scroll" : $"🖥 {resText} · fit to phone",
-            "#C7D6EA", "#16202C", "#2A3B4F"));
-
-        if (profile.EnableWol)
-        {
-            chips.Children.Add(MakeChip("⚡ Wake-on-LAN", "#FFE0A3", "#2A1F0A", "#5A431A"));
-        }
-
-        if (profile.EnableIcmpKnock)
-        {
-            chips.Children.Add(MakeChip("🚪 Port Knock", "#C7EAE5", "#162C2A", "#2A4F4A"));
-        }
-
-        if (!string.IsNullOrWhiteSpace(profile.GatewayHost))
-        {
-            chips.Children.Add(MakeChip("🌐 RD Gateway", "#D6C7EA", "#221A2C", "#3D2F4F"));
-        }
-
-        chips.Children.Add(profile.HasPassword
-            ? MakeChip("🔑 Password saved", "#A9E5C0", "#13251A", "#27452F")
-            : MakeChip("🔑 No password saved", "#B9B9C2", "#1C1C21", "#2E2E35"));
-
-        rootStack.Children.Add(chips);
-
-        var actionsRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        actionsRow.Children.Add(btnConnect);
 
         var btnEdit = new Button
         {
@@ -1493,9 +1407,10 @@ public partial class MainView : UserControl
             Foreground = new SolidColorBrush(Color.Parse("#EDEDED")),
             BorderBrush = new SolidColorBrush(Color.Parse("#2E2E35")),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(4),
+            CornerRadius = new CornerRadius(6),
             MinHeight = 40,
-            Padding = new Thickness(14, 6),
+            Padding = new Thickness(14, 8),
+            VerticalAlignment = VerticalAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center,
             HorizontalContentAlignment = HorizontalAlignment.Center,
             FontSize = 13
@@ -1514,9 +1429,10 @@ public partial class MainView : UserControl
             Foreground = new SolidColorBrush(Color.Parse("#E85050")),
             BorderBrush = new SolidColorBrush(Color.Parse("#3A2020")),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(4),
+            CornerRadius = new CornerRadius(6),
             MinHeight = 40,
-            Padding = new Thickness(12, 6),
+            Padding = new Thickness(12, 8),
+            VerticalAlignment = VerticalAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center,
             HorizontalContentAlignment = HorizontalAlignment.Center,
             FontSize = 13
@@ -1713,13 +1629,7 @@ public partial class MainView : UserControl
             };
             BtnDeleteProfile.IsVisible = true;
 
-            bool usesAdvanced = profile.EnableWol
-                || profile.EnableIcmpKnock
-                || !string.IsNullOrWhiteSpace(profile.GatewayHost)
-                || !string.IsNullOrWhiteSpace(profile.Notes)
-                || CmbProfileResolution.SelectedIndex != 0
-                || ChkClipboard.IsChecked == true;
-            SetAdvancedVisible(usesAdvanced);
+            SetAdvancedVisible(false);
         }
         CaptureProfileEditorInitialState();
         ScrollProfileEditor.Offset = new Vector(0, 0);
@@ -2373,6 +2283,8 @@ public partial class MainView : UserControl
         if (_isLaunching) return;
         _isLaunching = true;
 
+        MainActivity.Instance?.SetConnectingKeepAwake(true);
+
         _connectCts?.Dispose();
         _connectCts = new CancellationTokenSource();
         var ct = _connectCts.Token;
@@ -2453,6 +2365,7 @@ public partial class MainView : UserControl
 
             if (result == RdpLaunchStatus.Success)
             {
+                MainActivity.Instance?.BeginExternalActivity(30);
                 MainActivity.Instance?.StartForegroundSession(profile);
                 UpdateSessionBanner(profile.Name, host, port, unreachable: false, profile);
                 OverlayLaunch.IsVisible = false;
@@ -2473,6 +2386,7 @@ public partial class MainView : UserControl
         }
         finally
         {
+            MainActivity.Instance?.SetConnectingKeepAwake(false);
             _isLaunching = false;
             OverlayLaunch.IsVisible = false;
             BtnSkipWolWait.IsVisible = false;

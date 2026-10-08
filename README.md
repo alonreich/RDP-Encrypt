@@ -82,17 +82,9 @@ In version 2.0.0, RDP Vault incorporates a **fully embedded, self-contained nati
 
 ## Android Installation & Quick Start Guide
 
-### Direct Phone Sideloading (7-Step Installation Guide)
+### Direct Phone Installation
 
-Because RDP Vault is an independent, self-contained open-source application signed with a release keystore rather than distributed via Google Play Store, modern Android devices (Android 14/15) and Samsung devices may trigger Google Play Protect or Samsung Auto Blocker during direct browser sideloads. Follow these 7 steps to install smoothly:
-
-1. **Open Google Play Store** on your Android phone.
-2. **Tap your Profile icon** in the top-right corner.
-3. Select **Play Protect**.
-4. **Tap the Settings gear icon** in the top-right corner.
-5. **Toggle OFF "Scan apps with Play Protect"** (temporarily pauses real-time sideload blocking).
-6. *(Samsung Galaxy devices only)*: Go to phone **Settings → Security and privacy → Auto Blocker** and toggle it **OFF**.
-7. **Open and Install `RDPVault.apk`**: Once the installation completes, return to Google Play Protect (and Samsung Auto Blocker) and toggle them back **ON**.
+Download **[`RDPVault.apk`](https://github.com/alonreich/RDP-Encrypt/releases/latest/download/RDPVault.apk)** directly to your Android device and tap the file to install. If prompted by your browser or file manager, allow "Install unknown apps" for that app.
 
 ### Host Desktop Scale Protection (Recommended for 1080p / Multi-Monitor Hosts)
 

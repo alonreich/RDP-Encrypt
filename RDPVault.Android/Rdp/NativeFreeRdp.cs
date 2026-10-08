@@ -16,6 +16,36 @@ public static class NativeFreeRdp
     private const string LibFreeRdp = "freerdp2";
     private const string LibWinPR = "winpr2";
 
+    static NativeFreeRdp()
+    {
+        EnsureNativeLibrariesLoaded();
+    }
+
+    private static bool _librariesLoaded;
+
+    /// <summary>
+    /// Explicitly preloads native libraries in topological dependency order to ensure
+    /// Android dynamic linker resolves transitive symbols without runtime failure.
+    /// </summary>
+    public static void EnsureNativeLibrariesLoaded()
+    {
+        if (_librariesLoaded) return;
+        try
+        {
+            Java.Lang.JavaSystem.LoadLibrary("crypto");
+            Java.Lang.JavaSystem.LoadLibrary("ssl");
+            Java.Lang.JavaSystem.LoadLibrary("winpr2");
+            Java.Lang.JavaSystem.LoadLibrary("freerdp2");
+            try { Java.Lang.JavaSystem.LoadLibrary("freerdp-client2"); } catch { }
+            _librariesLoaded = true;
+            global::Android.Util.Log.Info("RDPVault", "FreeRDP native libraries loaded successfully.");
+        }
+        catch (Exception ex)
+        {
+            global::Android.Util.Log.Warn("RDPVault", "FreeRDP native library preload warning: " + ex.Message);
+        }
+    }
+
     // FreeRDP setting keys (stable FreeRDP 2.x)
     public const int FreeRDP_ServerPort = 19;
     public const int FreeRDP_ServerHostname = 20;
@@ -68,7 +98,7 @@ public static class NativeFreeRdp
     public delegate void PostDisconnectDelegate(IntPtr instance);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    public delegate bool AuthenticateDelegate(IntPtr instance, out IntPtr username, out IntPtr password, out IntPtr domain);
+    public delegate bool AuthenticateDelegate(IntPtr instance, ref IntPtr username, ref IntPtr password, ref IntPtr domain);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     public delegate uint VerifyCertificateDelegate(
@@ -78,6 +108,17 @@ public static class NativeFreeRdp
         [MarshalAs(UnmanagedType.LPUTF8Str)] string issuer,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string fingerprint,
         bool hostMismatch);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    public delegate uint VerifyCertificateExDelegate(
+        IntPtr instance,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string host,
+        ushort port,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string commonName,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string subject,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string issuer,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string fingerprint,
+        uint flags);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     public delegate bool BeginPaintDelegate(IntPtr context);
@@ -126,13 +167,25 @@ public static class NativeFreeRdp
     public static extern int freerdp_settings_get_key_for_name([MarshalAs(UnmanagedType.LPUTF8Str)] string name);
 
     [DllImport(LibFreeRdp, CallingConvention = CallingConvention.Cdecl)]
-    public static extern bool freerdp_settings_set_string(IntPtr settings, int key, [MarshalAs(UnmanagedType.LPUTF8Str)] string? val);
+    public static extern bool freerdp_settings_set_value_for_name(
+        IntPtr settings,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string name,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string val);
 
     [DllImport(LibFreeRdp, CallingConvention = CallingConvention.Cdecl)]
-    public static extern bool freerdp_settings_set_uint32(IntPtr settings, int key, uint val);
+    public static extern bool freerdp_settings_set_string(IntPtr settings, nuint key, [MarshalAs(UnmanagedType.LPUTF8Str)] string? val);
 
     [DllImport(LibFreeRdp, CallingConvention = CallingConvention.Cdecl)]
-    public static extern bool freerdp_settings_set_bool(IntPtr settings, int key, bool val);
+    public static extern bool freerdp_settings_set_uint32(IntPtr settings, nuint key, uint val);
+
+    [DllImport(LibFreeRdp, CallingConvention = CallingConvention.Cdecl)]
+    public static extern bool freerdp_settings_set_bool(IntPtr settings, nuint key, bool val);
+
+    [DllImport(LibFreeRdp, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint freerdp_settings_get_uint32(IntPtr settings, nuint key);
+
+    [DllImport(LibFreeRdp, CallingConvention = CallingConvention.Cdecl)]
+    public static extern IntPtr freerdp_settings_get_string(IntPtr settings, nuint key);
 
     [DllImport(LibFreeRdp, CallingConvention = CallingConvention.Cdecl)]
     public static extern bool freerdp_input_send_mouse_event(IntPtr input, ushort flags, ushort x, ushort y);
@@ -175,7 +228,9 @@ public sealed class FreeRdpSession : IDisposable
     private readonly NativeFreeRdp.PreConnectDelegate _preConnect;
     private readonly NativeFreeRdp.PostConnectDelegate _postConnect;
     private readonly NativeFreeRdp.PostDisconnectDelegate _postDisconnect;
+    private readonly NativeFreeRdp.AuthenticateDelegate _authenticate;
     private readonly NativeFreeRdp.VerifyCertificateDelegate _verifyCert;
+    private readonly NativeFreeRdp.VerifyCertificateExDelegate _verifyCertEx;
     private readonly NativeFreeRdp.BeginPaintDelegate _beginPaint;
     private readonly NativeFreeRdp.EndPaintDelegate _endPaint;
 
@@ -203,7 +258,9 @@ public sealed class FreeRdpSession : IDisposable
         _preConnect = OnPreConnect;
         _postConnect = OnPostConnect;
         _postDisconnect = OnPostDisconnect;
+        _authenticate = OnAuthenticate;
         _verifyCert = OnVerifyCertificate;
+        _verifyCertEx = OnVerifyCertificateEx;
         _beginPaint = OnBeginPaint;
         _endPaint = OnEndPaint;
     }
@@ -218,6 +275,8 @@ public sealed class FreeRdpSession : IDisposable
         string? failureReason = null;
         try
         {
+            NativeFreeRdp.EnsureNativeLibrariesLoaded();
+
             _instance = NativeFreeRdp.freerdp_new();
             if (_instance == IntPtr.Zero)
             {
@@ -225,18 +284,37 @@ public sealed class FreeRdpSession : IDisposable
             }
 
             // Write callbacks into freerdp struct
-            // Offsets: PreConnect=384 (48*8), PostConnect=392 (49*8), VerifyCert=408 (51*8), PostDisconnect=440 (55*8)
+            // Offsets (64-bit pointers):
+            // PreConnect=48, PostConnect=49, Authenticate=50, VerifyCert=51, PostDisconnect=55, VerifyCertEx=66
             Marshal.WriteIntPtr(_instance, 48 * IntPtr.Size, Marshal.GetFunctionPointerForDelegate(_preConnect));
             Marshal.WriteIntPtr(_instance, 49 * IntPtr.Size, Marshal.GetFunctionPointerForDelegate(_postConnect));
+            Marshal.WriteIntPtr(_instance, 50 * IntPtr.Size, Marshal.GetFunctionPointerForDelegate(_authenticate));
             Marshal.WriteIntPtr(_instance, 51 * IntPtr.Size, Marshal.GetFunctionPointerForDelegate(_verifyCert));
             Marshal.WriteIntPtr(_instance, 55 * IntPtr.Size, Marshal.GetFunctionPointerForDelegate(_postDisconnect));
+            Marshal.WriteIntPtr(_instance, 66 * IntPtr.Size, Marshal.GetFunctionPointerForDelegate(_verifyCertEx));
 
-            // Context size and initialization
-            NativeFreeRdp.freerdp_context_new(_instance);
-            _context = Marshal.ReadIntPtr(_instance); // offset 0
-            _settings = Marshal.ReadIntPtr(_instance, 18 * IntPtr.Size); // offset 18
-            _input = Marshal.ReadIntPtr(_instance, 16 * IntPtr.Size); // offset 16
-            _update = Marshal.ReadIntPtr(_instance, 17 * IntPtr.Size); // offset 17
+            // Context initialization
+            bool contextOk = NativeFreeRdp.freerdp_context_new(_instance);
+            if (!contextOk)
+            {
+                throw new InvalidOperationException("Failed to initialize FreeRDP context via freerdp_context_new.");
+            }
+
+            _context = Marshal.ReadIntPtr(_instance, 0); // instance->context
+            if (_context == IntPtr.Zero)
+            {
+                throw new InvalidOperationException("FreeRDP context pointer is NULL after freerdp_context_new.");
+            }
+
+            // Resolve settings pointer
+            _settings = ResolveSettings(_instance, _context);
+            if (_settings == IntPtr.Zero)
+            {
+                throw new InvalidOperationException("Failed to locate rdpSettings pointer in FreeRDP instance/context.");
+            }
+
+            _input = ResolveInput(_instance, _context);
+            _update = ResolveUpdate(_instance, _context);
 
             // Configure connection settings
             ApplySettings();
@@ -246,7 +324,12 @@ public sealed class FreeRdpSession : IDisposable
             if (!ok || _stopRequested)
             {
                 uint err = _context != IntPtr.Zero ? NativeFreeRdp.freerdp_get_last_error(_context) : 0;
-                failureReason = $"Connection failed (Code 0x{err:X}). Check host address and network reachability.";
+                IntPtr errStrPtr = NativeFreeRdp.freerdp_get_last_error_string(err);
+                string errStr = errStrPtr != IntPtr.Zero ? Marshal.PtrToStringAnsi(errStrPtr) ?? "" : "";
+                failureReason = string.IsNullOrWhiteSpace(errStr)
+                    ? $"Connection failed (0x{err:X}). Target: {Config.Host}:{Config.Port}."
+                    : $"Connection failed ({errStr}, 0x{err:X}). Target: {Config.Host}:{Config.Port}.";
+                global::Android.Util.Log.Error("RDPVault", failureReason);
                 ConnectionFailed?.Invoke(failureReason);
                 return;
             }
@@ -271,6 +354,7 @@ public sealed class FreeRdpSession : IDisposable
         catch (Exception ex)
         {
             failureReason = ex.Message;
+            global::Android.Util.Log.Error("RDPVault", "FreeRDP session loop error: " + ex);
             ConnectionFailed?.Invoke(failureReason);
         }
         finally
@@ -281,21 +365,176 @@ public sealed class FreeRdpSession : IDisposable
         }
     }
 
+    private static IntPtr ResolveSettings(IntPtr instance, IntPtr context)
+    {
+        // In FreeRDP 2.x, rdpContext.settings is at offset 40, and rdp_freerdp.settings is at offset 18
+        if (context != IntPtr.Zero)
+        {
+            IntPtr ptr = Marshal.ReadIntPtr(context, 40 * IntPtr.Size);
+            if (ptr != IntPtr.Zero) return ptr;
+        }
+
+        if (instance != IntPtr.Zero)
+        {
+            IntPtr ptr = Marshal.ReadIntPtr(instance, 18 * IntPtr.Size);
+            if (ptr != IntPtr.Zero) return ptr;
+        }
+
+        // Defensive scan in context
+        if (context != IntPtr.Zero)
+        {
+            for (int i = 35; i <= 45; i++)
+            {
+                IntPtr candidate = Marshal.ReadIntPtr(context, i * IntPtr.Size);
+                if (candidate != IntPtr.Zero && CanReadSettings(candidate))
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        // Defensive scan in instance
+        if (instance != IntPtr.Zero)
+        {
+            for (int i = 14; i <= 22; i++)
+            {
+                IntPtr candidate = Marshal.ReadIntPtr(instance, i * IntPtr.Size);
+                if (candidate != IntPtr.Zero && CanReadSettings(candidate))
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        return IntPtr.Zero;
+    }
+
+    private static bool CanReadSettings(IntPtr ptr)
+    {
+        try
+        {
+            int key = NativeFreeRdp.freerdp_settings_get_key_for_name("ServerPort");
+            if (key >= 0)
+            {
+                uint port = NativeFreeRdp.freerdp_settings_get_uint32(ptr, (nuint)key);
+                return port <= 65535;
+            }
+        }
+        catch { }
+        return false;
+    }
+
+    private static IntPtr ResolveInput(IntPtr instance, IntPtr context)
+    {
+        if (context != IntPtr.Zero)
+        {
+            IntPtr ptr = Marshal.ReadIntPtr(context, 38 * IntPtr.Size);
+            if (ptr != IntPtr.Zero) return ptr;
+        }
+        if (instance != IntPtr.Zero)
+        {
+            IntPtr ptr = Marshal.ReadIntPtr(instance, 16 * IntPtr.Size);
+            if (ptr != IntPtr.Zero) return ptr;
+        }
+        return IntPtr.Zero;
+    }
+
+    private static IntPtr ResolveUpdate(IntPtr instance, IntPtr context)
+    {
+        if (context != IntPtr.Zero)
+        {
+            IntPtr ptr = Marshal.ReadIntPtr(context, 39 * IntPtr.Size);
+            if (ptr != IntPtr.Zero) return ptr;
+        }
+        if (instance != IntPtr.Zero)
+        {
+            IntPtr ptr = Marshal.ReadIntPtr(instance, 17 * IntPtr.Size);
+            if (ptr != IntPtr.Zero) return ptr;
+        }
+        return IntPtr.Zero;
+    }
+
+    private static void SetSettingString(IntPtr settings, string name, nuint fallbackKey, string? val)
+    {
+        if (settings == IntPtr.Zero || val == null) return;
+        try
+        {
+            NativeFreeRdp.freerdp_settings_set_value_for_name(settings, name, val);
+        }
+        catch { }
+        try
+        {
+            int dyn = NativeFreeRdp.freerdp_settings_get_key_for_name(name);
+            nuint key = dyn >= 0 ? (nuint)dyn : fallbackKey;
+            NativeFreeRdp.freerdp_settings_set_string(settings, key, val);
+        }
+        catch { }
+    }
+
+    private static void SetSettingUint(IntPtr settings, string name, nuint fallbackKey, uint val)
+    {
+        if (settings == IntPtr.Zero) return;
+        try
+        {
+            NativeFreeRdp.freerdp_settings_set_value_for_name(settings, name, val.ToString());
+        }
+        catch { }
+        try
+        {
+            int dyn = NativeFreeRdp.freerdp_settings_get_key_for_name(name);
+            nuint key = dyn >= 0 ? (nuint)dyn : fallbackKey;
+            NativeFreeRdp.freerdp_settings_set_uint32(settings, key, val);
+        }
+        catch { }
+    }
+
+    private static void SetSettingBool(IntPtr settings, string name, nuint fallbackKey, bool val)
+    {
+        if (settings == IntPtr.Zero) return;
+        try
+        {
+            NativeFreeRdp.freerdp_settings_set_value_for_name(settings, name, val ? "TRUE" : "FALSE");
+        }
+        catch { }
+        try
+        {
+            int dyn = NativeFreeRdp.freerdp_settings_get_key_for_name(name);
+            nuint key = dyn >= 0 ? (nuint)dyn : fallbackKey;
+            NativeFreeRdp.freerdp_settings_set_bool(settings, key, val);
+        }
+        catch { }
+    }
+
     private void ApplySettings()
     {
         if (_settings == IntPtr.Zero) return;
 
-        NativeFreeRdp.freerdp_settings_set_string(_settings, NativeFreeRdp.FreeRDP_ServerHostname, Config.Host);
-        NativeFreeRdp.freerdp_settings_set_uint32(_settings, NativeFreeRdp.FreeRDP_ServerPort, (uint)(Config.Port > 0 ? Config.Port : 3389));
+        // Clean target host (strip port or brackets if present)
+        string targetHost = Config.Host.Trim();
+        int targetPort = Config.Port > 0 ? Config.Port : 3389;
+        if (targetHost.StartsWith('[') && targetHost.Contains(']'))
+        {
+            int end = targetHost.IndexOf(']');
+            targetHost = targetHost.Substring(1, end - 1);
+        }
+        else if (targetHost.Contains(':') && targetHost.IndexOf(':') == targetHost.LastIndexOf(':'))
+        {
+            var parts = targetHost.Split(':');
+            targetHost = parts[0];
+            if (int.TryParse(parts[1], out int p) && p > 0) targetPort = p;
+        }
+
+        SetSettingString(_settings, "ServerHostname", NativeFreeRdp.FreeRDP_ServerHostname, targetHost);
+        SetSettingUint(_settings, "ServerPort", NativeFreeRdp.FreeRDP_ServerPort, (uint)targetPort);
 
         if (!string.IsNullOrEmpty(Config.Username))
         {
-            NativeFreeRdp.freerdp_settings_set_string(_settings, NativeFreeRdp.FreeRDP_Username, Config.Username);
+            SetSettingString(_settings, "Username", NativeFreeRdp.FreeRDP_Username, Config.Username);
         }
 
         if (!string.IsNullOrEmpty(Config.Domain))
         {
-            NativeFreeRdp.freerdp_settings_set_string(_settings, NativeFreeRdp.FreeRDP_Domain, Config.Domain);
+            SetSettingString(_settings, "Domain", NativeFreeRdp.FreeRDP_Domain, Config.Domain);
         }
 
         // Stream password directly in RAM and wipe immediately upon consumption
@@ -305,7 +544,7 @@ public sealed class FreeRdpSession : IDisposable
             try
             {
                 string passStr = Encoding.UTF8.GetString(passBytes);
-                NativeFreeRdp.freerdp_settings_set_string(_settings, NativeFreeRdp.FreeRDP_Password, passStr);
+                SetSettingString(_settings, "Password", NativeFreeRdp.FreeRDP_Password, passStr);
             }
             finally
             {
@@ -315,42 +554,78 @@ public sealed class FreeRdpSession : IDisposable
         }
 
         // Dimensions and color
-        NativeFreeRdp.freerdp_settings_set_uint32(_settings, NativeFreeRdp.FreeRDP_DesktopWidth, (uint)RemoteWidth);
-        NativeFreeRdp.freerdp_settings_set_uint32(_settings, NativeFreeRdp.FreeRDP_DesktopHeight, (uint)RemoteHeight);
-        NativeFreeRdp.freerdp_settings_set_uint32(_settings, NativeFreeRdp.FreeRDP_ColorDepth, 32);
+        SetSettingUint(_settings, "DesktopWidth", NativeFreeRdp.FreeRDP_DesktopWidth, (uint)RemoteWidth);
+        SetSettingUint(_settings, "DesktopHeight", NativeFreeRdp.FreeRDP_DesktopHeight, (uint)RemoteHeight);
+        SetSettingUint(_settings, "ColorDepth", NativeFreeRdp.FreeRDP_ColorDepth, 32);
 
-        // Architectural invariants:
-        // 1. Strict default deny for clipboard sharing
-        NativeFreeRdp.freerdp_settings_set_bool(_settings, NativeFreeRdp.FreeRDP_RedirectClipboard, Config.AllowClipboard);
+        // Strict default deny for clipboard sharing
+        SetSettingBool(_settings, "RedirectClipboard", NativeFreeRdp.FreeRDP_RedirectClipboard, Config.AllowClipboard);
 
-        // 2. Prohibit dynamic display resizing (MS-RDPEDISP extension channel disabled)
-        NativeFreeRdp.freerdp_settings_set_bool(_settings, NativeFreeRdp.FreeRDP_SupportDisplayControl, false);
-        NativeFreeRdp.freerdp_settings_set_bool(_settings, NativeFreeRdp.FreeRDP_DynamicResolutionUpdate, false);
-        NativeFreeRdp.freerdp_settings_set_bool(_settings, NativeFreeRdp.FreeRDP_SmartSizing, false);
+        // Prohibit dynamic display resizing (avoid MS-RDPEDISP extension channel mismatch)
+        SetSettingBool(_settings, "SupportDisplayControl", NativeFreeRdp.FreeRDP_SupportDisplayControl, false);
+        SetSettingBool(_settings, "DynamicResolutionUpdate", NativeFreeRdp.FreeRDP_DynamicResolutionUpdate, false);
+        SetSettingBool(_settings, "SmartSizing", NativeFreeRdp.FreeRDP_SmartSizing, false);
 
-        // 3. Remote audio playback redirection enabled
-        NativeFreeRdp.freerdp_settings_set_bool(_settings, NativeFreeRdp.FreeRDP_AudioPlayback, true);
+        // Remote audio playback redirection enabled
+        SetSettingBool(_settings, "AudioPlayback", NativeFreeRdp.FreeRDP_AudioPlayback, true);
 
-        // 4. Certificate warning suppression
-        NativeFreeRdp.freerdp_settings_set_bool(_settings, NativeFreeRdp.FreeRDP_IgnoreCertificate, Config.SuppressCertWarnings);
+        // Certificate warning suppression
+        SetSettingBool(_settings, "IgnoreCertificate", NativeFreeRdp.FreeRDP_IgnoreCertificate, Config.SuppressCertWarnings);
 
         // RD Gateway if specified
         if (!string.IsNullOrWhiteSpace(Config.GatewayHost))
         {
-            NativeFreeRdp.freerdp_settings_set_string(_settings, NativeFreeRdp.FreeRDP_GatewayHostname, Config.GatewayHost);
-            NativeFreeRdp.freerdp_settings_set_uint32(_settings, NativeFreeRdp.FreeRDP_GatewayPort, (uint)(Config.GatewayPort > 0 ? Config.GatewayPort : 443));
-            NativeFreeRdp.freerdp_settings_set_uint32(_settings, NativeFreeRdp.FreeRDP_GatewayUsageMethod, 1);
+            string gwHost = Config.GatewayHost.Trim();
+            int gwPort = Config.GatewayPort > 0 ? Config.GatewayPort : 443;
+            if (gwHost.Contains(':') && !gwHost.StartsWith('['))
+            {
+                var gwParts = gwHost.Split(':');
+                gwHost = gwParts[0];
+                if (int.TryParse(gwParts[1], out int gp) && gp > 0) gwPort = gp;
+            }
+
+            SetSettingString(_settings, "GatewayHostname", NativeFreeRdp.FreeRDP_GatewayHostname, gwHost);
+            SetSettingUint(_settings, "GatewayPort", NativeFreeRdp.FreeRDP_GatewayPort, (uint)gwPort);
+            SetSettingUint(_settings, "GatewayUsageMethod", NativeFreeRdp.FreeRDP_GatewayUsageMethod, 1);
         }
+
+        global::Android.Util.Log.Info("RDPVault", $"FreeRDP settings applied: Host={targetHost}, Port={targetPort}, User={Config.Username}");
     }
 
     private bool OnPreConnect(IntPtr instance) => true;
+
+    private bool OnAuthenticate(IntPtr instance, ref IntPtr username, ref IntPtr password, ref IntPtr domain)
+    {
+        try
+        {
+            if (username == IntPtr.Zero && !string.IsNullOrEmpty(Config.Username))
+            {
+                username = Marshal.StringToCoTaskMemUTF8(Config.Username);
+            }
+            if (domain == IntPtr.Zero && !string.IsNullOrEmpty(Config.Domain))
+            {
+                domain = Marshal.StringToCoTaskMemUTF8(Config.Domain);
+            }
+        }
+        catch { }
+        return true;
+    }
 
     private bool OnPostConnect(IntPtr instance)
     {
         // Initialize GDI 32bpp framebuffer
         NativeFreeRdp.gdi_init(instance, NativeFreeRdp.CLRCONV_ALPHA);
 
-        IntPtr update = Marshal.ReadIntPtr(instance, 17 * IntPtr.Size);
+        IntPtr update = _update;
+        if (update == IntPtr.Zero && _context != IntPtr.Zero)
+        {
+            update = Marshal.ReadIntPtr(_context, 39 * IntPtr.Size);
+        }
+        if (update == IntPtr.Zero && instance != IntPtr.Zero)
+        {
+            update = Marshal.ReadIntPtr(instance, 17 * IntPtr.Size);
+        }
+
         if (update != IntPtr.Zero)
         {
             // Hook BeginPaint and EndPaint in rdp_update (BeginPaint=72, EndPaint=80)
@@ -371,17 +646,31 @@ public sealed class FreeRdpSession : IDisposable
         string fingerprint,
         bool hostMismatch)
     {
-        if (Config.SuppressCertWarnings)
-        {
-            return 2; // Accept for session
-        }
-
+        if (Config.SuppressCertWarnings) return 2; // Accept for session
         if (!string.IsNullOrEmpty(Config.PinnedFingerprint) &&
             string.Equals(Config.PinnedFingerprint, fingerprint, StringComparison.OrdinalIgnoreCase))
         {
             return 1; // Accept and match pinned
         }
+        return 0; // Reject
+    }
 
+    private uint OnVerifyCertificateEx(
+        IntPtr instance,
+        string host,
+        ushort port,
+        string commonName,
+        string subject,
+        string issuer,
+        string fingerprint,
+        uint flags)
+    {
+        if (Config.SuppressCertWarnings) return 2; // Accept for session
+        if (!string.IsNullOrEmpty(Config.PinnedFingerprint) &&
+            string.Equals(Config.PinnedFingerprint, fingerprint, StringComparison.OrdinalIgnoreCase))
+        {
+            return 1; // Accept and match pinned
+        }
         return 0; // Reject
     }
 

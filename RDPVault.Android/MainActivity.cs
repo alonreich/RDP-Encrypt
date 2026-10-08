@@ -92,6 +92,53 @@ public class MainActivity : AvaloniaMainActivity<App>
 
     private bool IsExternalActivitySuppressed => DateTime.UtcNow < _externalActivitySuppressUntilUtc;
 
+    private PowerManager.WakeLock? _connectingWakeLock;
+    public bool IsConnecting { get; private set; }
+
+    /// <summary>
+    /// Keeps Android display awake strictly during the RDP connection phase
+    /// (WOL, knock, preflight, handshake) until connected or failed.
+    /// </summary>
+    public void SetConnectingKeepAwake(bool keepAwake)
+    {
+        IsConnecting = keepAwake;
+        RunOnUiThread(() =>
+        {
+            try
+            {
+                if (keepAwake)
+                {
+                    Window?.AddFlags(WindowManagerFlags.KeepScreenOn);
+                    if (_connectingWakeLock == null)
+                    {
+                        var pm = (PowerManager?)GetSystemService(PowerService);
+                        if (pm != null)
+                        {
+                            _connectingWakeLock = pm.NewWakeLock(WakeLockFlags.Partial, "RDPVault:ConnectingWakeLock");
+                            _connectingWakeLock?.SetReferenceCounted(false);
+                        }
+                    }
+                    if (_connectingWakeLock != null && !_connectingWakeLock.IsHeld)
+                    {
+                        _connectingWakeLock.Acquire(120_000); // 2 minute maximum safety timeout
+                    }
+                }
+                else
+                {
+                    Window?.ClearFlags(WindowManagerFlags.KeepScreenOn);
+                    if (_connectingWakeLock != null && _connectingWakeLock.IsHeld)
+                    {
+                        _connectingWakeLock.Release();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                global::Android.Util.Log.Warn("RDPVault", "SetConnectingKeepAwake error: " + ex.Message);
+            }
+        });
+    }
+
     public void RequestNotificationPermissionIfNeeded()
     {
         try
@@ -190,7 +237,7 @@ public class MainActivity : AvaloniaMainActivity<App>
         {
             ResolveMainView()?.SuspendIdleTimer();
 
-            if (LockImmediatelyOnBackground && !IsExternalActivitySuppressed && !IsSessionActive)
+            if (LockImmediatelyOnBackground && !IsExternalActivitySuppressed && !IsSessionActive && !IsConnecting)
             {
                 Avalonia.Threading.Dispatcher.UIThread.Post(() =>
                 {
@@ -396,6 +443,11 @@ public class MainActivity : AvaloniaMainActivity<App>
 
     protected override void OnDestroy()
     {
+        if (_connectingWakeLock != null && _connectingWakeLock.IsHeld)
+        {
+            try { _connectingWakeLock.Release(); } catch { }
+            _connectingWakeLock = null;
+        }
         if (Instance == this) Instance = null;
         if (_serviceBound && _serviceConnection != null)
         {

@@ -2,15 +2,15 @@
 PROJECT_STRUCTURE.TXT  —  RDP VAULT
 SOURCE OF TRUTH & GUIDANCE FOR ANY AI AGENT (OR HUMAN) WORKING ON THIS PROJECT
 ================================================================================
-Last updated : 2026-10-07
-Version      : 2026.10.07  (Windows 1.1.0, Android companion 2.0.0 Embedded FreeRDP Engine)
+Last updated : 2026-10-08
+Version      : 2026.10.08  (Windows 1.1.0, Android companion 2.0.0 Embedded FreeRDP Engine)
 Status       : Windows: production release, compiled and tested with .NET 9 SDK on Windows 10/11 x64.
                SHA-256 (compiled\RDPVault.exe): 374957D9961DFCBA405BFD2F75AB972ADF047395B2AF34CF2D9BD5863E9F131C
                Android: 2.0.0 migration to native embedded FreeRDP engine (aFreeRDP) — BUILT AND VERIFIED.
-               compiled\RDPVault.apk ~66.7 MiB (70,014,616 bytes), versionCode 3 / versionName 2.0.0,
-               SHA-256: 692E2D80922A3DE2676FC9104283D894F4EF2E98E32E3CAF3486487D5DAB1AF6.
+               compiled\RDPVault.apk ~66.8 MiB (70,031,000 bytes), versionCode 3 / versionName 2.0.0,
+               SHA-256: 4DFA3D47C7D7C74FB7523A12E57DC3A4C2FA8BF3121AC0FA1AD5F19FA4836561.
                Minimum Android is 9 (API 28); built against API 34/35 with native ABIs arm64-v8a & x86_64.
-               SECTION 30 supersedes all prior statements regarding external intent handoff,
+               SECTIONS 30 & 31 supersede all prior statements regarding external intent handoff,
                RdpAutoTypeService, and Android Accessibility Service requirements.
 
 --------------------------------------------------------------------------------
@@ -2188,7 +2188,55 @@ SECTION 30 — COMPLETE MIGRATION OF RDPVAULT.ANDROID TO EMBEDDED FREERDP ENGINE
      - Purged <service android:name=".services.RdpAutoTypeService"> and android.permission.BIND_ACCESSIBILITY_SERVICE.
   3. Build Verification:
      - build-apk.cmd compiles, links, optimizes (r8/d8), and signs single standalone APK at compiled\RDPVault.apk
-       (~66.7 MB, Exit code 0, 0 errors).
+       (~66.8 MB, Exit code 0, 0 errors).
+
+--------------------------------------------------------------------------------
+SECTION 31 — CONNECTION AWAKE LOCK, UI NOISE ELIMINATION & FREERDP HARDENING (2026-10-08)
+--------------------------------------------------------------------------------
+31.A - CONNECTION PHASE SCREEN KEEP-AWAKE & AUTO-LOCK BYPASS:
+  1. Display Stay-Awake During Connection Handshake:
+     - Implemented `MainActivity.SetConnectingKeepAwake(bool)` utilizing `Window.AddFlags(WindowManagerFlags.KeepScreenOn)`
+       and a reference-managed `PowerManager.WakeLock` with a 120-second safety timeout.
+     - Activated strictly from the instant the user taps "Connect" through the entire connection sequence
+       (port knocking, WOL, preflight TCP ping, FreeRDP handshake) until connection success or failure.
+     - Prevents Android display dimming and screen timeouts from aborting in-flight connections or resetting activity state.
+  2. In-Flight Backgrounding Guard:
+     - In `MainActivity.OnPause()`, the background auto-lock evaluation (`LockImmediatelyOnBackground`) is guarded
+       by `!IsConnecting`. If the screen dims or temporarily sleeps during WOL/handshake, the vault avoids slamming
+       shut mid-connection.
+
+31.B - CONNECTION LIST UI NOISE & CLUTTER ELIMINATION:
+  1. Minimalist Connection Cards:
+     - Completely removed all tags and chips (WOL, resolution preset, port knock, RD Gateway, password saved).
+     - Completely removed host:port and username subtitles from the connection list view.
+     - Each profile card renders strictly:
+       * Large connection name (18pt bold white).
+       * Three clear action buttons: [Connect] (blue accent), [✏ Edit], and [🗑 Delete].
+  2. Always-Collapsed Advanced Options:
+     - In `MainView.ShowProfileEditor()`, `SetAdvancedVisible(false)` is enforced unconditionally for both new
+       and existing profiles.
+     - Opening an existing profile editor never remembers or auto-expands the advanced section, eliminating
+       visual clutter while preserving all advanced settings underneath the "Advanced Options" toggle.
+
+31.C - EMBEDDED FREERDP ENGINE SETTINGS & CONNECTIVITY RESOLUTION:
+  1. Struct Pointer & Settings Resolution (`NativeFreeRdp.cs`):
+     - Implemented `ResolveSettings(instance, context)` to scan both `rdpContext` (offset 40) and `rdp_freerdp` (offset 18)
+       for the native `rdpSettings*` pointer, with defensive pointer probing via `freerdp_settings_get_key_for_name`.
+     - Resolved `rdpInput*` (context offset 38 / instance offset 16) and `rdpUpdate*` (context offset 39 / instance offset 17).
+  2. Dual-Write Dynamic Settings Configuration:
+     - Added P/Invoke bindings for `freerdp_settings_set_value_for_name` in `libfreerdp2.so`.
+     - Dual-writes all settings (`ServerHostname`, `ServerPort`, `Username`, `Password`, `DesktopWidth`, `DesktopHeight`,
+       `ColorDepth`, `RedirectClipboard`, `IgnoreCertificate`, `AudioPlayback`, etc.) via both string-name configuration
+       and dynamic enum key resolution (`freerdp_settings_get_key_for_name`).
+     - Corrects target port delivery: parses embedded host:port strings and sets `FreeRDP_ServerPort` explicitly to profile port.
+  3. Native Library Preloading:
+     - Added `NativeFreeRdp.EnsureNativeLibrariesLoaded()` using `Java.Lang.JavaSystem.LoadLibrary` to topologically preload
+       dependencies (`crypto`, `ssl`, `winpr2`, `freerdp2`, `freerdp-client2`), resolving transitive dependencies.
+  4. Certificate Verification Callbacks:
+     - Bound both legacy `VerifyCertificate` (offset 51) and modern `VerifyCertificateEx` (offset 66), as well as
+       `Authenticate` (offset 50) and `PreConnect` (offset 48) callbacks directly on `_instance`.
+     - When `SuppressCertWarnings` is true, certificate callbacks immediately return 2 (accept session certificate),
+       preventing TLS handshake rejections on self-signed server certificates.
 
 --------------------------------------------------------------------------------
 END OF FILE — keep synchronized with the code.

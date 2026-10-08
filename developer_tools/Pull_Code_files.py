@@ -28,13 +28,34 @@ def is_binary(file_path: Path) -> bool:
         pass
     return False
 
+def get_binary_description(relative_path: Path) -> str:
+    p_str = str(relative_path).lower().replace('/', '\\')
+    name = relative_path.name.lower()
+    ext = relative_path.suffix.lower()
+
+    if ext == '.so':
+        return "Embedded native FreeRDP/OpenSSL/FFmpeg C/C++ shared library packaged into APK for direct P/Invoke via NativeFreeRdp.cs (Section 30)."
+    if ext == '.keystore':
+        return "Production RSA-2048 signing keystore used by build-apk.cmd and apksigner for release APK signing."
+    if 'adb\\' in p_str:
+        return "Bundled Android Platform Tools binary (ADB/Fastboot) used for device deployment and diagnostics."
+    if name == 'rdpvault.exe':
+        return "Published single-file self-contained Windows desktop executable (Avalonia UI + .NET 9)."
+    if name == 'rdpvault.apk':
+        return "Production release Android APK (zipaligned, v1/v2/v3 signed with embedded FreeRDP engine)."
+    if ext in ('.ico', '.png', '.jpg', '.jpeg', '.webp', '.bmp'):
+        return "Application visual icon or launcher graphics asset."
+    if ext == '.dll':
+        return "Compiled native or managed dynamic link library dependency."
+    return "Binary asset indexed in directory tree; omitted from text bundle to conserve context window."
+
 def get_group_name(file_path: Path, project_root: Path) -> str:
     ext = file_path.suffix.lower()
     rel_path = str(file_path.relative_to(project_root)).lower()
     name = file_path.name.lower()
 
     # 00: Architecture, Specifications, and System Governance (Must be read first by AI)
-    if name in ['project_structure.txt', 'readme.md', 'android_architecture.md', 'spec_governance.md', 'index.md'] or rel_path.startswith("docs\\") or rel_path.startswith("docs/"):
+    if name in ['project_structure.txt', 'readme.md', 'android_architecture.md', 'spec_governance.md', 'index.md', 'third_party_licenses.md'] or rel_path.startswith("docs\\") or rel_path.startswith("docs/"):
         return "00_Specifications_and_Architecture"
 
     # 01: Core Security, Hardware KeyStore & Cryptography
@@ -50,7 +71,7 @@ def get_group_name(file_path: Path, project_root: Path) -> str:
         if ext == '.cs':
             return "02_Desktop_Windows_App"
 
-    # 03: Mobile Android Companion (Avalonia UI, Accessibility Auto-Type, Foreground Service)
+    # 03: Mobile Android Companion (Avalonia UI, Native FreeRDP Engine, Foreground Service)
     if rel_path.startswith("rdpvault.android\\") or rel_path.startswith("rdpvault.android/"):
         if ext == '.cs':
             return "03_Mobile_Android_App"
@@ -76,7 +97,7 @@ def get_group_name(file_path: Path, project_root: Path) -> str:
     # 07: Assets & Binary Stubs (Metadata and file size tracking)
     if ext in [
         '.ico', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.dll', '.exe',
-        '.traineddata', '.keystore', '.bmp', '.webp', '.apk'
+        '.traineddata', '.keystore', '.bmp', '.webp', '.apk', '.so'
     ]:
         return "07_Assets_and_Binaries"
 
@@ -118,7 +139,7 @@ def generate_project_manifest(project_root: Path, groups: dict, total_files: int
         "RDP VAULT — ARCHITECTURAL MANIFEST & SYSTEM CONTEXT",
         divider,
         f"Project Root:        {project_root}",
-        "Target Frameworks:   .NET 9 (Windows: net9.0-windows10.0.19041.0 | Android: net9.0-android35.0)",
+        "Target Frameworks:   .NET 9 (Windows: net9.0-windows10.0.19041.0 | Android: net9.0-android34.0)",
         "Architecture Style:  Avalonia UI Multi-Platform Security Vault (Windows Desktop + Android Mobile)",
         "Packaging Model:     Single-File Self-Contained WinExe (RDPVault.exe) & Signed APK (RDPVault.apk)",
         "",
@@ -132,20 +153,21 @@ def generate_project_manifest(project_root: Path, groups: dict, total_files: int
         "     BiometricPrompt.CryptoObject on Android. Master keys cannot be extracted even with root.",
         "  3. Host Trace Cleansing: Immediate post-session removal of mstsc registry history,",
         "     Default.rdp, jump lists, recent items, and temporary credentials.",
-        "  4. Desktop Topology Protection & 1080p Smart-Scroll: Mobile connections default strictly to",
-        "     1920x1080 landscape with dynamic resolution=i:0 and smart sizing:i:1, preventing remote",
-        "     Windows multi-monitor collapse or desktop icon scrambling.",
-        "  5. Zero-Clipboard Mobile Credential Isolation: Mobile passwords never touch the Android",
-        "     system clipboard or IME caches. Handled via scoped RdpAutoTypeService accessibility.",
+        "  4. Embedded FreeRDP Engine & Native 1:1 Canvas: Mobile companion runs native FreeRDP directly",
+        "     within the app rendering to hardware-accelerated SurfaceView with virtual trackpad,",
+        "     direct touch, and soft keyboard drawer. Zero external dependencies, zero ADB/accessibility.",
+        "  5. Zero-Clipboard & RAM Credential Stream: Mobile passwords stream directly in RAM into native",
+        "     FreeRDP NLA structures and are zeroed immediately; clipboard redirection disabled by default.",
         "  6. Perimeter Bypass & Stealth Knocking: Raw TCP SYN and HTTP GET port knocking precedes",
         "     Wake-on-LAN and RDP handoff to dynamically whitelist client IP on firewalls (MikroTik).",
         "",
         "SUBSYSTEM MAP & DIRECTORY HIERARCHY:",
         "  - project_structure.txt:            Source of truth, full architectural specifications and changelog.",
         "  - README.md:                         User documentation, quick-start, ADB setup and build instructions.",
-        "  - ANDROID_ARCHITECTURE.md:           Android subsystem architecture and Keystore/Accessibility specs.",
+        "  - ANDROID_ARCHITECTURE.md:           Android subsystem architecture and native FreeRDP engine spec.",
+        "  - THIRD_PARTY_LICENSES.md:           Open-source license notices (FreeRDP Apache 2.0, OpenSSL, LGPL).",
         "  - RDPVault\\:                         Windows Desktop application (Avalonia UI, MSTSC launcher, trace cleaner).",
-        "  - RDPVault.Android\\:                 Android companion application (Avalonia UI, Accessibility, StrongBox).",
+        "  - RDPVault.Android\\:                 Android companion application (Avalonia UI, FreeRDP, StrongBox).",
         "  - RDPVault.Core\\:                    Shared cryptographic models and vault envelope definitions.",
         "  - developer_tools\\:                 Automation scripts, bytecode purgers, code cleaner, and AI exporters.",
         "  - compiled\\:                        Release binaries (RDPVault.exe and RDPVault.apk).",
@@ -227,7 +249,7 @@ def run_aggregator():
 
     binary_whitelist = {
         '.ico', '.png', '.jpg', '.jpeg', '.gif', '.mp3', '.mp4', '.wav',
-        '.dll', '.exe', '.traineddata', '.keystore', '.bmp', '.webp', '.apk'
+        '.dll', '.exe', '.traineddata', '.keystore', '.bmp', '.webp', '.apk', '.so'
     }
 
     print(f"Aggregating grouped code into {download_dir}...")
@@ -256,11 +278,13 @@ def run_aggregator():
             if is_bin or is_binary(file_path):
                 file_size = file_path.stat().st_size
                 sz_str = f"{file_size / (1024 * 1024):.2f} MB" if file_size >= 1024 * 1024 else f"{file_size / 1024:.1f} KB"
+                desc = get_binary_description(relative_path)
                 content_text = (
                     f"[BINARY / ASSET OMITTED FROM TEXT EXPORT]\n"
                     f"Relative Path: {relative_path}\n"
                     f"File Size:     {sz_str} ({file_size:,} bytes)\n"
                     f"Type:          {ext.upper() if ext else 'Binary'} Asset\n"
+                    f"Role / Target: {desc}\n"
                     f"Note:          Full path indexed in 00_file_structure.txt. Kept on disk.\n\n"
                 )
                 line_count = 0

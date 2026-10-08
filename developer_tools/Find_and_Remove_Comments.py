@@ -87,68 +87,176 @@ def display_path(filepath):
     except Exception:
         return str(filepath)
 
-def is_line_string_safe(line):
-    if 'http:' in line or 'https:' in line: return False
-    if ':\\' in line or ':/' in line: return False
-    return True
-
 def analyze_comments(filepath):
-    items = []
     try:
         with open(filepath, 'r', encoding='utf-8-sig') as f:
             lines = f.readlines()
-        
-        actions = {}
-        in_block_comment = False
-        
-        for i, line in enumerate(lines):
-            stripped = line.strip()
-            
-            if in_block_comment:
-                actions[i] = {'action': 'DELETE', 'type': 'BLOCK COMMENT', 'line': i + 1, 'content': stripped}
-                if '*/' in stripped:
-                    in_block_comment = False
-                continue
-            
-            if stripped.startswith('/*'):
-                in_block_comment = True
-                actions[i] = {'action': 'DELETE', 'type': 'BLOCK COMMENT', 'line': i + 1, 'content': stripped}
-                if '*/' in stripped:
-                    in_block_comment = False
-                continue
-
-            if '//' in line:
-                if stripped.startswith('///'):
-                    continue
-                
-                if not is_line_string_safe(line):
-                    continue
-                
-                if stripped.startswith('//'):
-                    actions[i] = {'action': 'DELETE', 'type': 'COMMENT', 'line': i + 1, 'content': stripped}
-                else:
-                    parts = line.split('//', 1)
-                    if parts[0].count('"') % 2 == 0:
-                        nl = line[len(line.rstrip('\r\n')):]
-                        if not nl: nl = '\n'
-                        actions[i] = {'action': 'EDIT', 'type': 'INLINE COMMENT', 'line': i + 1, 'content': f"Rem: {parts[1].strip()}", 'new_content': parts[0].rstrip() + nl}
-
-        empty_count = 0
-        for i, line in enumerate(lines):
-            if i in actions: 
-                empty_count = 0
-                continue
-                
-            if not line.strip():
-                empty_count += 1
-                if empty_count >= 3:
-                    actions[i] = {'action': 'DELETE', 'type': 'EXCESSIVE EMPTY', 'line': i + 1, 'content': '<Excessive Empty>'}
-            else:
-                empty_count = 0
-
-        return [v for k, v in sorted(actions.items())]
     except Exception:
         return []
+
+    actions = {}
+    in_block = False
+    in_verbatim = False
+
+    for i, line in enumerate(lines):
+        nl = line[len(line.rstrip('\r\n')):]
+        if not nl:
+            nl = '\n'
+        stripped = line.strip()
+
+        if in_block:
+            end_idx = line.find('*/')
+            if end_idx == -1:
+                actions[i] = {'action': 'DELETE', 'type': 'BLOCK COMMENT', 'line': i + 1, 'content': stripped}
+                continue
+            else:
+                in_block = False
+                after = line[end_idx + 2:]
+                if not after.strip():
+                    actions[i] = {'action': 'DELETE', 'type': 'BLOCK COMMENT', 'line': i + 1, 'content': stripped}
+                    continue
+                else:
+                    cmt_text = line[:end_idx + 2].strip()
+                    actions[i] = {'action': 'EDIT', 'type': 'BLOCK COMMENT', 'line': i + 1, 'content': f'Rem: {cmt_text}', 'new_content': after.lstrip() + nl}
+                    line = after
+
+        n = len(line)
+        idx = 0
+        new_line_parts = []
+
+        while idx < n:
+            ch = line[idx]
+
+            # In verbatim string
+            if in_verbatim:
+                if ch == '"':
+                    if idx + 1 < n and line[idx + 1] == '"':
+                        new_line_parts.append('""')
+                        idx += 2
+                        continue
+                    else:
+                        in_verbatim = False
+                        new_line_parts.append('"')
+                        idx += 1
+                        continue
+                else:
+                    new_line_parts.append(ch)
+                    idx += 1
+                    continue
+
+            # Check verbatim string start (@" or $@" or @$")
+            if ch == '@' and idx + 1 < n and line[idx + 1] == '"':
+                new_line_parts.append('@"')
+                idx += 2
+                in_verbatim = True
+                continue
+            if ch == '$' and idx + 2 < n and line[idx:idx + 3] in ('$@"', '@$"'):
+                new_line_parts.append(line[idx:idx + 3])
+                idx += 3
+                in_verbatim = True
+                continue
+            if ch == '@' and idx + 2 < n and line[idx:idx + 3] == '@$"':
+                new_line_parts.append('@$"')
+                idx += 3
+                in_verbatim = True
+                continue
+
+            # Check regular or interpolated string
+            if ch == '"' or (ch == '$' and idx + 1 < n and line[idx + 1] == '"'):
+                if ch == '$':
+                    new_line_parts.append('$"')
+                    idx += 2
+                else:
+                    new_line_parts.append('"')
+                    idx += 1
+
+                while idx < n:
+                    c = line[idx]
+                    if c == '\\':
+                        new_line_parts.append(line[idx:idx + 2])
+                        idx += 2
+                        continue
+                    if c == '"':
+                        new_line_parts.append('"')
+                        idx += 1
+                        break
+                    new_line_parts.append(c)
+                    idx += 1
+                continue
+
+            # Check character literal
+            if ch == "'":
+                new_line_parts.append("'")
+                idx += 1
+                while idx < n:
+                    c = line[idx]
+                    if c == '\\':
+                        new_line_parts.append(line[idx:idx + 2])
+                        idx += 2
+                        continue
+                    if c == "'":
+                        new_line_parts.append("'")
+                        idx += 1
+                        break
+                    new_line_parts.append(c)
+                    idx += 1
+                continue
+
+            # Check single line comment (// or ///)
+            if ch == '/' and idx + 1 < n and line[idx + 1] == '/':
+                cmt = line[idx:]
+                before = ''.join(new_line_parts)
+                is_doc = cmt.strip().startswith('///')
+                cmt_type = 'DOC COMMENT' if is_doc else 'COMMENT'
+                if not before.strip():
+                    actions[i] = {'action': 'DELETE', 'type': cmt_type, 'line': i + 1, 'content': stripped}
+                else:
+                    actions[i] = {'action': 'EDIT', 'type': 'INLINE COMMENT', 'line': i + 1, 'content': f'Rem: {cmt.strip()}', 'new_content': before.rstrip() + nl}
+                break
+
+            # Check block comment (/* ... */)
+            if ch == '/' and idx + 1 < n and line[idx + 1] == '*':
+                close_idx = line.find('*/', idx + 2)
+                before = ''.join(new_line_parts)
+                if close_idx != -1:
+                    cmt = line[idx:close_idx + 2]
+                    after = line[close_idx + 2:]
+                    if not before.strip() and not after.strip():
+                        actions[i] = {'action': 'DELETE', 'type': 'BLOCK COMMENT', 'line': i + 1, 'content': stripped}
+                        break
+                    else:
+                        spacing = ' ' if before and not before.endswith((' ', '\t', '{', '(')) and after and not after.startswith((' ', '\t', '}', ')')) else ''
+                        new_content = before.rstrip() + spacing + after.lstrip()
+                        if not new_content.endswith(nl):
+                            new_content = new_content.rstrip() + nl
+                        actions[i] = {'action': 'EDIT', 'type': 'INLINE BLOCK COMMENT', 'line': i + 1, 'content': f'Rem: {cmt.strip()}', 'new_content': new_content}
+                        break
+                else:
+                    in_block = True
+                    cmt = line[idx:]
+                    if not before.strip():
+                        actions[i] = {'action': 'DELETE', 'type': 'BLOCK COMMENT', 'line': i + 1, 'content': stripped}
+                    else:
+                        actions[i] = {'action': 'EDIT', 'type': 'BLOCK COMMENT', 'line': i + 1, 'content': f'Rem: {cmt.strip()}', 'new_content': before.rstrip() + nl}
+                    break
+
+            new_line_parts.append(ch)
+            idx += 1
+
+    # Check excessive empty lines (>= 3 consecutive empty lines)
+    empty_count = 0
+    for i, line in enumerate(lines):
+        if i in actions:
+            empty_count = 0
+            continue
+        if not line.strip():
+            empty_count += 1
+            if empty_count >= 3:
+                actions[i] = {'action': 'DELETE', 'type': 'EXCESSIVE EMPTY', 'line': i + 1, 'content': '<Excessive Empty>'}
+        else:
+            empty_count = 0
+
+    return [v for k, v in sorted(actions.items(), key=lambda x: x[0])]
 
 def nuke_comments(filepath, items):
     try:

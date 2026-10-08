@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using RDPVault.Android.Platform;
 
 namespace RDPVault.Android.Rdp;
 
@@ -84,9 +85,12 @@ public static class NativeFreeRdp
     public const ushort KBD_FLAGS_DOWN = 0x4000;
     public const ushort KBD_FLAGS_RELEASE = 0x8000;
 
-    // GDI 32bpp format
+    // GDI 32bpp formats
     public const uint CLRCONV_ALPHA = 0x00000004;
     public const uint PIXEL_FORMAT_BGRX32 = 0x20040888;
+    public const uint PIXEL_FORMAT_BGRA32 = 0x20048888;
+    public const uint PIXEL_FORMAT_RGBA32 = 0x20038888;
+    public const uint PIXEL_FORMAT_RGBX32 = 0x20030888;
 
     // Delegates for native callbacks
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -770,8 +774,17 @@ public sealed class FreeRdpSession : IDisposable
 
     private bool OnPostConnect(IntPtr instance)
     {
-        // Initialize GDI 32bpp framebuffer
-        NativeFreeRdp.gdi_init(instance, NativeFreeRdp.CLRCONV_ALPHA);
+        // Initialize GDI 32bpp framebuffer with RGBA32 format matching Android bitmap buffer
+        bool gdiOk = NativeFreeRdp.gdi_init(instance, NativeFreeRdp.PIXEL_FORMAT_RGBA32);
+        if (!gdiOk)
+        {
+            gdiOk = NativeFreeRdp.gdi_init(instance, NativeFreeRdp.PIXEL_FORMAT_BGRA32);
+        }
+        if (!gdiOk)
+        {
+            gdiOk = NativeFreeRdp.gdi_init(instance, NativeFreeRdp.PIXEL_FORMAT_BGRX32);
+        }
+        AppLog.Info($"FreeRDP gdi_init status: {gdiOk}");
 
         IntPtr update = _update;
         if (update == IntPtr.Zero && _context != IntPtr.Zero)
@@ -848,7 +861,7 @@ public sealed class FreeRdpSession : IDisposable
                 int stride = Marshal.ReadInt32(gdi, 16);
                 IntPtr buffer = Marshal.ReadIntPtr(gdi, 64);
 
-                if (w > 0 && h > 0 && buffer != IntPtr.Zero)
+                if (w > 0 && h > 0 && buffer != IntPtr.Zero && stride > 0)
                 {
                     RemoteWidth = w;
                     RemoteHeight = h;
@@ -856,7 +869,10 @@ public sealed class FreeRdpSession : IDisposable
                 }
             }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            AppLog.Warn("OnEndPaint exception: " + ex.Message);
+        }
 
         return true;
     }

@@ -185,6 +185,7 @@ public class MainActivity : AvaloniaMainActivity<App>
     protected override void OnCreate(Bundle? savedInstanceState)
     {
         Instance = this;
+        AppLog.Initialize(this);
         base.OnCreate(savedInstanceState);
 
         ApplyScreenSecurity();

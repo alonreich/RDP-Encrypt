@@ -12,6 +12,7 @@ using Android.Views.InputMethods;
 using Android.Widget;
 using AndroidX.AppCompat.App;
 using AndroidX.Core.View;
+using RDPVault.Android.Platform;
 using RDPVault.Android.Rdp;
 using RDPVault.Android.Services;
 
@@ -225,11 +226,14 @@ public class RdpSessionActivity : AppCompatActivity, ISurfaceHolderCallback, Vie
 
     private void OnFramebufferUpdated(int x, int y, int width, int height, IntPtr buffer, int stride)
     {
-        if (_surfaceHolder?.Surface?.IsValid != true) return;
+        var holder = _surfaceHolder;
+        if (holder?.Surface?.IsValid != true || buffer == IntPtr.Zero || width <= 0 || height <= 0 || stride <= 0) return;
 
         try
         {
             int requiredBytes = stride * height;
+            int pixelBytes = width * height * 4;
+
             if (_pixelBuffer == null || _pixelBuffer.Length != requiredBytes)
             {
                 _pixelBuffer = new byte[requiredBytes];
@@ -237,48 +241,65 @@ public class RdpSessionActivity : AppCompatActivity, ISurfaceHolderCallback, Vie
 
             System.Runtime.InteropServices.Marshal.Copy(buffer, _pixelBuffer, 0, requiredBytes);
 
-            if (_frameBitmap == null || _frameBitmap.Width != width || _frameBitmap.Height != height)
+            if (_frameBitmap == null || _frameBitmap.Width != width || _frameBitmap.Height != height || _frameBitmap.IsRecycled)
             {
                 _frameBitmap?.Recycle();
                 _frameBitmap = Bitmap.CreateBitmap(width, height, Bitmap.Config.Argb8888!);
             }
 
-            var byteBuffer = Java.Nio.ByteBuffer.Wrap(_pixelBuffer);
-            _frameBitmap?.CopyPixelsFromBuffer(byteBuffer);
-
-            var canvas = _surfaceHolder.LockCanvas();
-            if (canvas != null)
+            if (_frameBitmap != null)
             {
-                try
+                if (stride == width * 4)
                 {
-                    canvas.DrawColor(Color.Black);
-
-                    var matrix = new Matrix();
-                    float scaleX = (float)_screenWidth / width;
-                    float scaleY = (float)_screenHeight / height;
-                    float baseScale = Math.Min(scaleX, scaleY);
-
-                    float fitW = width * baseScale;
-                    float fitH = height * baseScale;
-                    float offsetX = (_screenWidth - fitW) / 2f;
-                    float offsetY = (_screenHeight - fitH) / 2f;
-
-                    matrix.PostScale(baseScale * _scale, baseScale * _scale);
-                    matrix.PostTranslate(offsetX + _panX, offsetY + _panY);
-
-                    if (_frameBitmap != null)
+                    var byteBuffer = Java.Nio.ByteBuffer.Wrap(_pixelBuffer, 0, pixelBytes);
+                    _frameBitmap.CopyPixelsFromBuffer(byteBuffer);
+                }
+                else
+                {
+                    byte[] packed = new byte[pixelBytes];
+                    int rowBytes = width * 4;
+                    for (int row = 0; row < height; row++)
                     {
+                        Buffer.BlockCopy(_pixelBuffer, row * stride, packed, row * rowBytes, rowBytes);
+                    }
+                    var byteBuffer = Java.Nio.ByteBuffer.Wrap(packed);
+                    _frameBitmap.CopyPixelsFromBuffer(byteBuffer);
+                }
+
+                var canvas = holder.LockCanvas();
+                if (canvas != null)
+                {
+                    try
+                    {
+                        canvas.DrawColor(Color.Black);
+
+                        var matrix = new Matrix();
+                        float scaleX = (float)_screenWidth / width;
+                        float scaleY = (float)_screenHeight / height;
+                        float baseScale = Math.Min(scaleX, scaleY);
+
+                        float fitW = width * baseScale;
+                        float fitH = height * baseScale;
+                        float offsetX = (_screenWidth - fitW) / 2f;
+                        float offsetY = (_screenHeight - fitH) / 2f;
+
+                        matrix.PostScale(baseScale * _scale, baseScale * _scale);
+                        matrix.PostTranslate(offsetX + _panX, offsetY + _panY);
+
                         var paint = new Paint { FilterBitmap = true, AntiAlias = true };
                         canvas.DrawBitmap(_frameBitmap, matrix, paint);
                     }
-                }
-                finally
-                {
-                    _surfaceHolder.UnlockCanvasAndPost(canvas);
+                    finally
+                    {
+                        holder.UnlockCanvasAndPost(canvas);
+                    }
                 }
             }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            AppLog.Warn("OnFramebufferUpdated error: " + ex.Message);
+        }
     }
 
     public void SurfaceCreated(ISurfaceHolder holder)

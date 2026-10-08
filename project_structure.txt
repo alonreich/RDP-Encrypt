@@ -2,13 +2,12 @@
 PROJECT_STRUCTURE.TXT  —  RDP VAULT
 SOURCE OF TRUTH & GUIDANCE FOR ANY AI AGENT (OR HUMAN) WORKING ON THIS PROJECT
 ================================================================================
-Last updated : 2026-10-08
-Version      : 2026.10.08  (Windows 1.1.0, Android companion 2.0.0 Embedded FreeRDP Engine)
+Last updated : 2026-10-09
+Version      : 2026.10.09  (Windows 1.1.0, Android companion 2.0.0 Embedded FreeRDP Engine)
 Status       : Windows: production release, compiled and tested with .NET 9 SDK on Windows 10/11 x64.
-               SHA-256 (compiled\RDPVault.exe): 374957D9961DFCBA405BFD2F75AB972ADF047395B2AF34CF2D9BD5863E9F131C
-               Android: 2.0.0 migration to native embedded FreeRDP engine (aFreeRDP) — BUILT AND VERIFIED.
-               compiled\RDPVault.apk ~66.8 MiB (70,031,000 bytes), versionCode 3 / versionName 2.0.0,
-               SHA-256: 4DFA3D47C7D7C74FB7523A12E57DC3A4C2FA8BF3121AC0FA1AD5F19FA4836561.
+               SHA-256 (compiled\RDPVault.exe): 62E57E7651B82C9730592DA7C2D46BE2B048927EF195EA559F7CE8FB5A1B81EB
+               Android: 2.0.0 embedded FreeRDP engine with landscape matrix scaling & direct touch / trackpad support.
+               compiled\RDPVault.apk ~66.9 MiB (70,133,400 bytes), versionCode 3 / versionName 2.0.0.
                Minimum Android is 9 (API 28); built against API 34/35 with native ABIs arm64-v8a & x86_64.
                SECTIONS 30 & 31 supersede all prior statements regarding external intent handoff,
                RdpAutoTypeService, and Android Accessibility Service requirements.

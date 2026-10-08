@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -65,6 +65,7 @@ public partial class ProfileEditorWindow : Window
     private void LoadProfileToUI()
     {
         var settings = SessionManager.Current.Payload?.Settings;
+        ExpAdvanced.IsExpanded = false;
 
         TxtName.Text = Profile.Name;
         TxtHost.Text = Profile.Host;

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -56,6 +56,8 @@ public sealed class LaunchProgressUpdate
     public int? SecondsRemaining { get; init; }
     public double? ProgressPercent { get; init; }
     public bool IsIndeterminate { get; init; } = true;
+    public bool CanSkip { get; init; }
+    public string? SkipStageLabel { get; init; }
 }
 
 /// <summary>
@@ -66,6 +68,9 @@ public sealed class LaunchProgressUpdate
 /// </summary>
 public static class RdpLauncher
 {
+    public static volatile bool SkipWaitRequested;
+    public static void RequestSkipCurrentWait() => SkipWaitRequested = true;
+
     private static readonly List<ActiveSessionInfo> LiveSessions = new();
     private static readonly object Gate = new();
 
@@ -365,17 +370,44 @@ public static class RdpLauncher
         {
             bool isTcp = string.Equals(p.KnockProtocol, "TCP", StringComparison.OrdinalIgnoreCase);
             int delaySec = p.KnockDelaySeconds >= 0 ? p.KnockDelaySeconds : 2;
+            SkipWaitRequested = false;
             progress?.Invoke(new LaunchProgressUpdate
             {
                 Step = "Port Knocking",
                 Details = isTcp
-                    ? $"Sending TCP knock to {p.Host}:{p.KnockTcpPort}; waiting {delaySec}s before connecting."
-                    : $"Sending ICMP magic packet to {p.Host}; waiting {delaySec}s before connecting.",
+                    ? $"Sending TCP knock to {p.Host}:{p.KnockTcpPort}..."
+                    : $"Sending ICMP magic packet to {p.Host}...",
                 IsIndeterminate = true
             });
-            try { await IcmpKnock.SendBeforeConnectAsync(p, IcmpKnock.SendWindowsAsync, ct); }
+            try
+            {
+                await IcmpKnock.SendKnockAsync(p, IcmpKnock.SendWindowsAsync, ct);
+                if (delaySec > 0)
+                {
+                    for (int s = delaySec; s > 0; s--)
+                    {
+                        if (ct.IsCancellationRequested || SkipWaitRequested) break;
+                        double percent = 100.0 * (delaySec - s) / delaySec;
+                        progress?.Invoke(new LaunchProgressUpdate
+                        {
+                            Step = "Port Knocking",
+                            Details = $"Port knock sent. Waiting {s}s before connecting...",
+                            SecondsRemaining = s,
+                            ProgressPercent = percent,
+                            IsIndeterminate = false,
+                            CanSkip = true,
+                            SkipStageLabel = "SKIP PORT KNOCKING"
+                        });
+                        await Task.Delay(1000, ct);
+                    }
+                }
+            }
             catch (OperationCanceledException) { LaunchFailed?.Invoke("Connection cancelled."); return false; }
             catch (Exception ex) { LaunchFailed?.Invoke("Port knock could not be sent: " + ex.Message); return false; }
+            finally
+            {
+                progress?.Invoke(new LaunchProgressUpdate { CanSkip = false, IsIndeterminate = true });
+            }
         }
 
         if (ct.IsCancellationRequested)
@@ -422,6 +454,7 @@ public static class RdpLauncher
             if (p.WolWaitSeconds > 0)
             {
                 int total = p.WolWaitSeconds;
+                SkipWaitRequested = false;
                 for (int s = total; s > 0; s--)
                 {
                     if (ct.IsCancellationRequested)
@@ -429,6 +462,7 @@ public static class RdpLauncher
                         LaunchFailed?.Invoke("Connection cancelled by user during Wake-on-LAN wait.");
                         return false;
                     }
+                    if (SkipWaitRequested) break;
 
                     double percent = 100.0 * (total - s) / total;
                     progress?.Invoke(new LaunchProgressUpdate
@@ -437,7 +471,9 @@ public static class RdpLauncher
                         Details = $"Wake packet broadcasted. Waiting for remote host to boot ({s}s remaining)...",
                         SecondsRemaining = s,
                         ProgressPercent = percent,
-                        IsIndeterminate = false
+                        IsIndeterminate = false,
+                        CanSkip = true,
+                        SkipStageLabel = "SKIP WAKE-ON-LAN"
                     });
 
                     try
@@ -450,6 +486,7 @@ public static class RdpLauncher
                         return false;
                     }
                 }
+                progress?.Invoke(new LaunchProgressUpdate { CanSkip = false, IsIndeterminate = true });
             }
         }
 

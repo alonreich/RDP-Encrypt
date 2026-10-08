@@ -41,8 +41,10 @@ public partial class MainView : UserControl
     private string _activeRecoveryCode = "";
     private CancellationTokenSource? _connectCts;
     private CancellationTokenSource? _searchCts;
+    private const string KeyLastAuthMethod = "rdpvault_last_auth_method";
     private bool _biometricPromptSuppressed;
     private volatile bool _skipWolWait;
+    private volatile bool _skipWait;
     private bool _isFormattingRecovery;
     private byte[]? _stagedRestoreBytes;
     private VaultFile? _stagedRestoreVaultFile;
@@ -226,6 +228,19 @@ public partial class MainView : UserControl
         BtnBiometricUnlock.Click += async (_, _) =>
         {
             _biometricPromptSuppressed = false;
+            await UnlockWithBiometricsAsync();
+        };
+        BtnSwitchToPassword.Click += (_, _) =>
+        {
+            CardPasswordUnlock.IsVisible = true;
+            PnlBiometricCard.IsVisible = false;
+            TxtPassword.Focus();
+        };
+        BtnSwitchToBiometric.Click += async (_, _) =>
+        {
+            _biometricPromptSuppressed = false;
+            PnlBiometricCard.IsVisible = true;
+            CardPasswordUnlock.IsVisible = false;
             await UnlockWithBiometricsAsync();
         };
         BtnUnlock.Click += async (_, _) => await UnlockWithPasswordAsync();
@@ -922,11 +937,31 @@ public partial class MainView : UserControl
         }
 
         var seal = FindDeviceSeal();
-        PnlBiometricCard.IsVisible = seal != null;
+        string lastAuth = AppPrefs.GetString(KeyLastAuthMethod, "Biometric");
 
-        if (seal != null && !_biometricPromptSuppressed && MainActivity.Instance != null)
+        if (seal != null)
         {
-            Dispatcher.UIThread.Post(async () => await UnlockWithBiometricsAsync(), DispatcherPriority.Background);
+            BtnSwitchToBiometric.IsVisible = true;
+            if (lastAuth == "Biometric")
+            {
+                PnlBiometricCard.IsVisible = true;
+                CardPasswordUnlock.IsVisible = false;
+                if (!_biometricPromptSuppressed && MainActivity.Instance != null)
+                {
+                    Dispatcher.UIThread.Post(async () => await UnlockWithBiometricsAsync(), DispatcherPriority.Background);
+                }
+            }
+            else
+            {
+                PnlBiometricCard.IsVisible = false;
+                CardPasswordUnlock.IsVisible = true;
+            }
+        }
+        else
+        {
+            PnlBiometricCard.IsVisible = false;
+            CardPasswordUnlock.IsVisible = true;
+            BtnSwitchToBiometric.IsVisible = false;
         }
     }
 
@@ -947,6 +982,8 @@ public partial class MainView : UserControl
         {
             TxtLockError.Text = "Fingerprint unlock is not set up on this device. Use your master password.";
             TxtLockError.IsVisible = true;
+            CardPasswordUnlock.IsVisible = true;
+            PnlBiometricCard.IsVisible = false;
             return;
         }
 
@@ -966,6 +1003,7 @@ public partial class MainView : UserControl
                 _masterKey = result.MasterKey;
                 _payload = payload;
                 _biometricPromptSuppressed = false;
+                AppPrefs.SetString(KeyLastAuthMethod, "Biometric");
                 ApplyLockSettingsToActivity();
                 SwitchToUnlocked();
             }
@@ -974,16 +1012,19 @@ public partial class MainView : UserControl
                 CryptographicOperations.ZeroMemory(result.MasterKey);
                 TxtLockError.Text = "The vault could not be opened with the stored key: " + ex.Message;
                 TxtLockError.IsVisible = true;
+                CardPasswordUnlock.IsVisible = true;
+                PnlBiometricCard.IsVisible = false;
             }
             return;
         }
 
         _biometricPromptSuppressed = true;
+        CardPasswordUnlock.IsVisible = true;
+        PnlBiometricCard.IsVisible = false;
 
         if (result.Invalidated)
         {
             _pendingSealRepair = true;
-            PnlBiometricCard.IsVisible = false;
             TxtLockError.Text = "Fingerprint unlock stopped working - a new fingerprint or face was added to this phone, or Android was updated. Unlock with your master password and RDP Vault will offer to set it up again.";
             TxtLockError.IsVisible = true;
             return;
@@ -1041,6 +1082,7 @@ public partial class MainView : UserControl
 
             TxtPassword.Text = "";
             _biometricPromptSuppressed = false;
+            AppPrefs.SetString(KeyLastAuthMethod, "Password");
 
             string machineId = VaultCrypto.CurrentMachineId();
             var deviceSeal = file.Seals?.FirstOrDefault(s => s.MachineId == machineId);
@@ -2322,7 +2364,24 @@ public partial class MainView : UserControl
                     : $"Sending ICMP knock to {host}...";
                 try
                 {
-                    await IcmpKnock.SendBeforeConnectAsync(profile, ct);
+                    await IcmpKnock.SendKnockAsync(profile, null, ct);
+                    if (delaySec > 0)
+                    {
+                        _skipWait = false;
+                        _skipWolWait = false;
+                        BtnSkipWolWait.Content = "SKIP PORT KNOCKING";
+                        BtnSkipWolWait.IsVisible = true;
+                        for (int s = delaySec; s > 0; s--)
+                        {
+                            if (ct.IsCancellationRequested || _skipWait || _skipWolWait) break;
+                            ProgLaunch.IsIndeterminate = false;
+                            ProgLaunch.Value = 100.0 * (delaySec - s) / delaySec;
+                            TxtLaunchCountdown.Text = $"{s}s remaining";
+                            TxtLaunchCountdown.IsVisible = true;
+                            TxtLaunchStep.Text = $"Port knock sent. Waiting for firewall ({s}s remaining)...";
+                            await Task.Delay(1000, ct);
+                        }
+                    }
                 }
                 catch (OperationCanceledException) { return; }
                 catch (Exception ex)
@@ -2330,6 +2389,12 @@ public partial class MainView : UserControl
                     TxtLaunchSubStatus.Text = "Knock warning";
                     TxtLaunchStep.Text = $"Knock packet warning: {ex.Message}";
                     await Task.Delay(1000, ct);
+                }
+                finally
+                {
+                    BtnSkipWolWait.IsVisible = false;
+                    TxtLaunchCountdown.IsVisible = false;
+                    ProgLaunch.IsIndeterminate = true;
                 }
             }
 
@@ -2360,14 +2425,12 @@ public partial class MainView : UserControl
 
             ProgLaunch.IsIndeterminate = false;
             ProgLaunch.Value = 100;
-            TxtLaunchSubStatus.Text = result == RdpLaunchStatus.Failed ? "Connection failed" : "Connected";
+            TxtLaunchSubStatus.Text = result == RdpLaunchStatus.Failed ? "Connection failed" : "Connecting session";
             TxtLaunchStep.Text = message;
 
             if (result == RdpLaunchStatus.Success)
             {
                 MainActivity.Instance?.BeginExternalActivity(30);
-                MainActivity.Instance?.StartForegroundSession(profile);
-                UpdateSessionBanner(profile.Name, host, port, unreachable: false, profile);
                 OverlayLaunch.IsVisible = false;
             }
             else
@@ -2416,11 +2479,14 @@ public partial class MainView : UserControl
 
         if (profile.WolWaitSeconds <= 0) return;
 
+        _skipWait = false;
+        _skipWolWait = false;
+        BtnSkipWolWait.Content = "SKIP WAKE-ON-LAN";
         BtnSkipWolWait.IsVisible = true;
         int total = profile.WolWaitSeconds;
         for (int s = total; s > 0; s--)
         {
-            if (ct.IsCancellationRequested || _skipWolWait) break;
+            if (ct.IsCancellationRequested || _skipWait || _skipWolWait) break;
 
             ProgLaunch.IsIndeterminate = false;
             ProgLaunch.Value = 100.0 * (total - s) / total;
@@ -2433,6 +2499,7 @@ public partial class MainView : UserControl
         }
         BtnSkipWolWait.IsVisible = false;
         TxtLaunchCountdown.IsVisible = false;
+        ProgLaunch.IsIndeterminate = true;
     }
 
     /// <summary>
@@ -2656,11 +2723,18 @@ public partial class MainView : UserControl
 
     private void SkipWolWait()
     {
+        _skipWait = true;
         _skipWolWait = true;
         BtnSkipWolWait.IsVisible = false;
-        TxtLaunchStep.Text = "Skipping the countdown, connecting now...";
+        TxtLaunchStep.Text = "Skipping wait countdown, proceeding...";
     }
 
+    public void OnSessionEstablished(RdpProfile profile)
+    {
+        string host = profile.Host ?? "";
+        int port = profile.Port > 0 ? profile.Port : 3389;
+        UpdateSessionBanner(profile.Name, host, port, unreachable: false, profile);
+    }
 
     private void UpdateSessionBanner(string name, string host, int port, bool unreachable, RdpProfile? profile = null)
     {
@@ -2683,33 +2757,8 @@ public partial class MainView : UserControl
             BannerActiveSession.BorderBrush = new SolidColorBrush(Color.Parse("#2FBF71"));
             TxtActiveSessionDot.Foreground = new SolidColorBrush(Color.Parse("#2FBF71"));
             TxtActiveSessionHeading.Foreground = new SolidColorBrush(Color.Parse("#2FBF71"));
-            TxtActiveSessionHeading.Text = "HANDED OFF TO REMOTE DESKTOP";
-
-            if (profile != null)
-            {
-                var (width, height, isDeviceNative) = profile.ResolveResolution(_payload?.Settings);
-                bool smartSizing = profile.ResolveSmartSizing(_payload?.Settings);
-                bool effectiveSmartSizing = profile.SmartSizingOverride switch
-                {
-                    TriStateOverride.Enabled => true,
-                    TriStateOverride.Disabled => false,
-                    _ => smartSizing
-                };
-
-                if (!isDeviceNative && width > 0 && height > 0 && !effectiveSmartSizing)
-                {
-                    TxtActiveSessionSub.Text = "Remote session active inside external RDP client.";
-                }
-                else
-                {
-                    TxtActiveSessionSub.Text = "Remote session active inside external RDP client.";
-                }
-            }
-            else
-            {
-                TxtActiveSessionSub.Text = "Your session is running inside Remote Desktop.";
-            }
-
+            TxtActiveSessionHeading.Text = "CONNECTED VIA EMBEDDED FREERDP";
+            TxtActiveSessionSub.Text = "Remote session is actively running in embedded FreeRDP.";
             TxtActiveSessionSub.Foreground = new SolidColorBrush(Color.Parse("#9FC7A6"));
         }
     }

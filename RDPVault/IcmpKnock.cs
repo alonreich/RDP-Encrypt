@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -40,7 +40,7 @@ public static class IcmpKnock
         await SendBeforeConnectAsync(profile, null, ct).ConfigureAwait(false);
     }
 
-    public static async Task SendBeforeConnectAsync(
+    public static async Task SendKnockAsync(
         RdpProfile profile,
         Func<string, byte[], CancellationToken, Task>? customIcmpSend,
         CancellationToken ct)
@@ -49,7 +49,6 @@ public static class IcmpKnock
         ct.ThrowIfCancellationRequested();
 
         string host = ConnectionEndpoint.FromProfile(profile).Host;
-        int delayMs = (profile.KnockDelaySeconds >= 0 ? profile.KnockDelaySeconds : 2) * 1000;
 
         if (string.Equals(profile.KnockProtocol, "TCP", StringComparison.OrdinalIgnoreCase))
         {
@@ -75,7 +74,17 @@ public static class IcmpKnock
                 CryptographicOperations.ZeroMemory(bytes);
             }
         }
+    }
 
+    public static async Task SendBeforeConnectAsync(
+        RdpProfile profile,
+        Func<string, byte[], CancellationToken, Task>? customIcmpSend,
+        CancellationToken ct)
+    {
+        if (!profile.EnableIcmpKnock) return;
+        await SendKnockAsync(profile, customIcmpSend, ct).ConfigureAwait(false);
+
+        int delayMs = (profile.KnockDelaySeconds >= 0 ? profile.KnockDelaySeconds : 2) * 1000;
         if (delayMs > 0)
         {
             await Task.Delay(delayMs, ct).ConfigureAwait(false);

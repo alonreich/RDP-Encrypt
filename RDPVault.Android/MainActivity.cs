@@ -385,9 +385,38 @@ public class MainActivity : AvaloniaMainActivity<App>
         catch { }
     }
 
-    public bool IsSessionActive => _sessionService?.IsConnected == true || Rdp.RdpSessionBridge.ActiveSession != null || Rdp.RdpSessionBridge.HasPendingConfig;
-    public RdpProfile? ActiveSessionProfile => _sessionService?.ActiveProfile;
+    public bool IsSessionActive => Rdp.RdpSessionBridge.IsConnected && Rdp.RdpSessionBridge.ActiveSession != null;
+    public RdpProfile? ActiveSessionProfile => Rdp.RdpSessionBridge.ConnectedProfile ?? _sessionService?.ActiveProfile;
     public bool ActiveSessionHostUnreachable => _sessionService?.HostUnreachable == true;
+
+    public void OnSessionConnected(RdpProfile? profile)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            try
+            {
+                if (profile != null)
+                {
+                    StartForegroundSession(profile);
+                    ResolveMainView()?.OnSessionEstablished(profile);
+                }
+            }
+            catch { }
+        });
+    }
+
+    public void OnSessionEnded()
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            try
+            {
+                EndForegroundSession();
+                ResolveMainView()?.OnSessionEnded();
+            }
+            catch { }
+        });
+    }
 
     public void StartForegroundSession(RdpProfile profile)
     {

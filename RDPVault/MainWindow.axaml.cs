@@ -1,4 +1,4 @@
-﻿using Avalonia.Controls;
+using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Input;
 using Avalonia.Threading;
@@ -504,6 +504,7 @@ public partial class MainWindow : Window
         ProgLaunch.IsIndeterminate = true;
         ProgLaunch.Value = 0;
         TxtLaunchCountdown.IsVisible = false;
+        BtnSkipStage.IsVisible = false;
         TxtLaunchStep.Text = "Initializing connection...";
         TxtLaunchSubStatus.Text = "";
         BtnCancelLaunch.IsEnabled = true;
@@ -516,6 +517,15 @@ public partial class MainWindow : Window
             {
                 TxtLaunchStep.Text = u.Details;
                 TxtLaunchSubStatus.Text = u.Step;
+                if (u.CanSkip)
+                {
+                    BtnSkipStage.Content = u.SkipStageLabel ?? "SKIP";
+                    BtnSkipStage.IsVisible = true;
+                }
+                else
+                {
+                    BtnSkipStage.IsVisible = false;
+                }
                 if (u.IsIndeterminate)
                 {
                     ProgLaunch.IsIndeterminate = true;
@@ -576,6 +586,7 @@ public partial class MainWindow : Window
         finally
         {
             _busy = false;
+            BtnSkipStage.IsVisible = false;
             await Task.Delay(350);
             OverlayLaunch.IsVisible = false;
         }
@@ -599,6 +610,12 @@ public partial class MainWindow : Window
             SetStatus($"Remote Desktop launched for {p.Name}.");
             BringToForeground();
         }
+    }
+
+    private void BtnSkipStage_Click(object? sender, RoutedEventArgs e)
+    {
+        BtnSkipStage.IsEnabled = false;
+        RdpLauncher.RequestSkipCurrentWait();
     }
 
     private void BtnCancelLaunch_Click(object? sender, RoutedEventArgs e)

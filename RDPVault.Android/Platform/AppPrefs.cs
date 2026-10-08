@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Android.Content;
 
 namespace RDPVault.Android.Platform;
@@ -67,6 +67,23 @@ public static class AppPrefs
         {
             var editor = Store?.Edit();
             editor?.PutLong(key, value);
+            editor?.Apply();
+        }
+        catch { }
+    }
+
+    public static string GetString(string key, string fallback = "")
+    {
+        try { return Store?.GetString(key, fallback) ?? fallback; }
+        catch { return fallback; }
+    }
+
+    public static void SetString(string key, string value)
+    {
+        try
+        {
+            var editor = Store?.Edit();
+            editor?.PutString(key, value);
             editor?.Apply();
         }
         catch { }

@@ -185,6 +185,10 @@ public class RdpSessionActivity : AppCompatActivity, ISurfaceHolderCallback, Vie
 
     private void OnSessionConnected()
     {
+        RdpSessionBridge.IsConnected = true;
+        RdpSessionBridge.ConnectedProfile = _session?.Config.Profile;
+        RdpSessionBridge.SessionStateChanged?.Invoke();
+        MainActivity.Instance?.OnSessionConnected(_session?.Config.Profile);
         RunOnUiThread(() =>
         {
             if (_progressBar != null) _progressBar.Visibility = ViewStates.Gone;
@@ -196,6 +200,10 @@ public class RdpSessionActivity : AppCompatActivity, ISurfaceHolderCallback, Vie
 
     private void OnSessionConnectionFailed(string reason)
     {
+        RdpSessionBridge.IsConnected = false;
+        RdpSessionBridge.ConnectedProfile = null;
+        RdpSessionBridge.SessionStateChanged?.Invoke();
+        MainActivity.Instance?.OnSessionEnded();
         RunOnUiThread(() =>
         {
             Toast.MakeText(this, $"Connection failed: {reason}", ToastLength.Long)?.Show();
@@ -205,6 +213,10 @@ public class RdpSessionActivity : AppCompatActivity, ISurfaceHolderCallback, Vie
 
     private void OnSessionDisconnected()
     {
+        RdpSessionBridge.IsConnected = false;
+        RdpSessionBridge.ConnectedProfile = null;
+        RdpSessionBridge.SessionStateChanged?.Invoke();
+        MainActivity.Instance?.OnSessionEnded();
         RunOnUiThread(() =>
         {
             Finish();
@@ -724,9 +736,13 @@ public class RdpSessionActivity : AppCompatActivity, ISurfaceHolderCallback, Vie
 
     protected override void OnDestroy()
     {
+        RdpSessionBridge.IsConnected = false;
+        RdpSessionBridge.ConnectedProfile = null;
         _session?.Dispose();
         _session = null;
         RdpSessionBridge.ActiveSession = null;
+        RdpSessionBridge.SessionStateChanged?.Invoke();
+        MainActivity.Instance?.OnSessionEnded();
         _frameBitmap?.Recycle();
         _frameBitmap = null;
         _pixelBuffer = null;

@@ -41,11 +41,14 @@ public static class RdpSessionBridge
     }
 
     public static FreeRdpSession? ActiveSession { get; set; }
+    public static bool IsConnected { get; set; }
+    public static RdpProfile? ConnectedProfile { get; set; }
     public static Action? SessionStateChanged { get; set; }
 }
 
 public class RdpSessionConfig
 {
+    public RdpProfile? Profile { get; set; }
     public required string Host { get; set; }
     public int Port { get; set; } = 3389;
     public string Username { get; set; } = "";

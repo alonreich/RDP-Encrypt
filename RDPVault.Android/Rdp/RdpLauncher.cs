@@ -52,6 +52,7 @@ public static class RdpLauncher
             AllowClipboard = allowClipboard,
             SuppressCertWarnings = suppressCert,
             ProfileName = profile.Name,
+            Profile = profile,
             GatewayHost = profile.GatewayHost,
             GatewayPort = 443
         };

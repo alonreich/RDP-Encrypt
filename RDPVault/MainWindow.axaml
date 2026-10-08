@@ -174,26 +174,21 @@
                         <DataTemplate x:DataType="local:RdpProfile">
                             <Border Background="#121215" BorderBrush="#2E2E35" BorderThickness="1"
                                     CornerRadius="6" Padding="16">
-                                <Grid ColumnDefinitions="*,Auto">
-                                    <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,16,0">
-                                        <TextBlock Text="{Binding Name}" FontSize="16" FontWeight="SemiBold"
-                                                   TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Name}"/>
-                                        <TextBlock Text="{Binding DisplayHost}" FontSize="13" Foreground="#8A8A93" Margin="0,4,0,0"
-                                                   TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding DisplayHost}"/>
-                                        <TextBlock Text="{Binding Username}" FontSize="12" Foreground="#6A6A73" Margin="0,2,0,0"
-                                                   TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Username}"/>
-                                    </StackPanel>
-                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                <StackPanel Spacing="12">
+                                    <TextBlock Text="{Binding Name}" FontSize="18" FontWeight="Bold" Foreground="#FFFFFF"
+                                               TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Name}"/>
+                                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                                         <Button Content="Connect" Classes="Accent" Click="BtnConnect_Click" Tag="{Binding .}"
+                                                VerticalAlignment="Center" VerticalContentAlignment="Center" HorizontalContentAlignment="Center"
                                                 AutomationProperties.Name="Connect to Remote Desktop"/>
-                                        <Button Content="Shortcut" Click="BtnShortcut_Click" Tag="{Binding .}"
-                                                AutomationProperties.Name="Create Desktop Shortcut"/>
                                         <Button Content="Edit" Click="BtnEdit_Click" Tag="{Binding .}"
+                                                VerticalAlignment="Center" VerticalContentAlignment="Center" HorizontalContentAlignment="Center"
                                                 AutomationProperties.Name="Edit Profile"/>
                                         <Button Content="Delete" Classes="Danger" Click="BtnDelete_Click" Tag="{Binding .}"
+                                                VerticalAlignment="Center" VerticalContentAlignment="Center" HorizontalContentAlignment="Center"
                                                 AutomationProperties.Name="Delete Profile"/>
                                     </StackPanel>
-                                </Grid>
+                                </StackPanel>
                             </Border>
                         </DataTemplate>
                     </ListBox.ItemTemplate>
@@ -237,10 +232,15 @@
                     </Border>
 
                     <!-- Action buttons -->
-                    <Grid ColumnDefinitions="*,Auto">
-                        <TextBlock Name="TxtLaunchSubStatus" Grid.Column="0" Text="" FontSize="11" Foreground="#6A6A73"
+                    <Grid ColumnDefinitions="Auto,*,Auto">
+                        <Button Grid.Column="0" Name="BtnSkipStage" Content="SKIP" Classes="Accent"
+                                Click="BtnSkipStage_Click" IsVisible="False" Margin="0,0,8,0"
+                                VerticalAlignment="Center" VerticalContentAlignment="Center" HorizontalContentAlignment="Center"
+                                AutomationProperties.Name="Skip wait and proceed"/>
+                        <TextBlock Name="TxtLaunchSubStatus" Grid.Column="1" Text="" FontSize="11" Foreground="#6A6A73"
                                    VerticalAlignment="Center" TextWrapping="Wrap"/>
-                        <Button Grid.Column="1" Name="BtnCancelLaunch" Content="Cancel" Click="BtnCancelLaunch_Click"
+                        <Button Grid.Column="2" Name="BtnCancelLaunch" Content="Cancel" Click="BtnCancelLaunch_Click"
+                                VerticalAlignment="Center" VerticalContentAlignment="Center" HorizontalContentAlignment="Center"
                                 AutomationProperties.Name="Cancel Connection"/>
                     </Grid>
                 </StackPanel>

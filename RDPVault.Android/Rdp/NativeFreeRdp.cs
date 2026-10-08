@@ -529,6 +529,33 @@ public sealed class FreeRdpSession : IDisposable
         try { NativeFreeRdp.freerdp_settings_set_bool(settings, key, val); } catch { }
     }
 
+    public static (string User, string Domain) SplitUserAndDomain(string? rawUser, string? rawDomain)
+    {
+        string u = rawUser?.Trim() ?? "";
+        string d = rawDomain?.Trim() ?? "";
+
+        if (u.Contains('\\'))
+        {
+            var parts = u.Split('\\', 2);
+            if (string.IsNullOrWhiteSpace(d))
+            {
+                d = parts[0].Trim();
+            }
+            u = parts[1].Trim();
+        }
+        else if (u.Contains('@'))
+        {
+            var parts = u.Split('@', 2);
+            u = parts[0].Trim();
+            if (string.IsNullOrWhiteSpace(d))
+            {
+                d = parts[1].Trim();
+            }
+        }
+
+        return (u, d);
+    }
+
     private static void ParseCommandLineArgs(
         IntPtr settings,
         string host,
@@ -537,6 +564,7 @@ public sealed class FreeRdpSession : IDisposable
         int height,
         string? user,
         string? domain,
+        char[]? passwordChars,
         bool allowClipboard,
         bool suppressCert,
         string? gateway)
@@ -557,6 +585,10 @@ public sealed class FreeRdpSession : IDisposable
 
             if (!string.IsNullOrEmpty(user)) args.Add($"/u:{user}");
             if (!string.IsNullOrEmpty(domain)) args.Add($"/d:{domain}");
+            if (passwordChars != null && passwordChars.Length > 0)
+            {
+                args.Add($"/p:{new string(passwordChars)}");
+            }
             if (width > 0 && height > 0) args.Add($"/size:{width}x{height}");
             args.Add(allowClipboard ? "+clipboard" : "-clipboard");
             if (suppressCert) args.Add("/cert:ignore");
@@ -570,7 +602,7 @@ public sealed class FreeRdpSession : IDisposable
                     argvPointers[i] = Marshal.StringToCoTaskMemUTF8(args[i]);
                 }
                 int status = NativeFreeRdp.freerdp_client_settings_parse_command_line(settings, args.Count, argvPointers, false);
-                global::Android.Util.Log.Info("RDPVault", $"FreeRDP parse_command_line: status={status}, args=[/v:{host}:{port}]");
+                global::Android.Util.Log.Info("RDPVault", $"FreeRDP parse_command_line: status={status}, args=[/v:{host}:{port}, /u:{user}, /d:{domain}]");
             }
             finally
             {
@@ -605,21 +637,27 @@ public sealed class FreeRdpSession : IDisposable
             if (int.TryParse(parts[1], out int p) && p > 0) targetPort = p;
         }
 
-        // 1. Invoke FreeRDP client CLI parser (sets /v:host:port and /port:port)
-        ParseCommandLineArgs(settings, targetHost, targetPort, RemoteWidth, RemoteHeight, Config.Username, Config.Domain, Config.AllowClipboard, Config.SuppressCertWarnings, Config.GatewayHost);
+        var (cleanUser, cleanDomain) = SplitUserAndDomain(Config.Username, Config.Domain);
+
+        // 1. Invoke FreeRDP client CLI parser (sets /v:host:port, /u:user, /d:domain, /p:password)
+        ParseCommandLineArgs(settings, targetHost, targetPort, RemoteWidth, RemoteHeight, cleanUser, cleanDomain, Config.PasswordChars, Config.AllowClipboard, Config.SuppressCertWarnings, Config.GatewayHost);
 
         // 2. Explicitly apply settings properties
         SetSettingString(settings, "ServerHostname", NativeFreeRdp.FreeRDP_ServerHostname, targetHost);
         SetSettingUint(settings, "ServerPort", NativeFreeRdp.FreeRDP_ServerPort, (uint)targetPort);
 
-        if (!string.IsNullOrEmpty(Config.Username))
+        if (!string.IsNullOrEmpty(cleanUser))
         {
-            SetSettingString(settings, "Username", NativeFreeRdp.FreeRDP_Username, Config.Username);
+            SetSettingString(settings, "Username", NativeFreeRdp.FreeRDP_Username, cleanUser);
         }
 
-        if (!string.IsNullOrEmpty(Config.Domain))
+        if (!string.IsNullOrEmpty(cleanDomain))
         {
-            SetSettingString(settings, "Domain", NativeFreeRdp.FreeRDP_Domain, Config.Domain);
+            SetSettingString(settings, "Domain", NativeFreeRdp.FreeRDP_Domain, cleanDomain);
+        }
+        else
+        {
+            SetSettingString(settings, "Domain", NativeFreeRdp.FreeRDP_Domain, "");
         }
 
         // Stream password directly in RAM and wipe immediately upon consumption
@@ -675,7 +713,7 @@ public sealed class FreeRdpSession : IDisposable
 
         uint readBack = NativeFreeRdp.freerdp_settings_get_uint32(settings, (nuint)NativeFreeRdp.FreeRDP_ServerPort);
         int directMem = Marshal.ReadInt32(settings, NativeFreeRdp.FreeRDP_ServerPort * IntPtr.Size);
-        global::Android.Util.Log.Info("RDPVault", $"FreeRDP settings applied: Host={targetHost}, Port={targetPort} (readBack={readBack}, directMem={directMem}), User={Config.Username}");
+        global::Android.Util.Log.Info("RDPVault", $"FreeRDP settings applied: Host={targetHost}, Port={targetPort} (readBack={readBack}, directMem={directMem}), User={cleanUser}, Domain={cleanDomain}");
     }
 
     private void ApplySettings()
@@ -707,16 +745,26 @@ public sealed class FreeRdpSession : IDisposable
     {
         try
         {
-            if (username == IntPtr.Zero && !string.IsNullOrEmpty(Config.Username))
+            var (cleanUser, cleanDomain) = SplitUserAndDomain(Config.Username, Config.Domain);
+
+            if (!string.IsNullOrEmpty(cleanUser))
             {
-                username = Marshal.StringToCoTaskMemUTF8(Config.Username);
+                username = Marshal.StringToCoTaskMemUTF8(cleanUser);
             }
-            if (domain == IntPtr.Zero && !string.IsNullOrEmpty(Config.Domain))
+            if (!string.IsNullOrEmpty(cleanDomain))
             {
-                domain = Marshal.StringToCoTaskMemUTF8(Config.Domain);
+                domain = Marshal.StringToCoTaskMemUTF8(cleanDomain);
             }
+            if (Config.PasswordChars != null && Config.PasswordChars.Length > 0)
+            {
+                password = Marshal.StringToCoTaskMemUTF8(new string(Config.PasswordChars));
+            }
+            global::Android.Util.Log.Info("RDPVault", $"FreeRDP OnAuthenticate provided: User={cleanUser}, Domain={cleanDomain}, HasPassword={(Config.PasswordChars != null && Config.PasswordChars.Length > 0)}");
         }
-        catch { }
+        catch (Exception ex)
+        {
+            global::Android.Util.Log.Warn("RDPVault", "OnAuthenticate warning: " + ex.Message);
+        }
         return true;
     }
 

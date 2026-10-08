@@ -40,12 +40,14 @@ public static class RdpLauncher
             passChars = profile.Password.ToCharArray();
         }
 
+        var (cleanUser, cleanDomain) = FreeRdpSession.SplitUserAndDomain(profile.Username, "");
+
         var config = new RdpSessionConfig
         {
             Host = endpoint.Host,
             Port = endpoint.Port,
-            Username = profile.Username ?? "",
-            Domain = "",
+            Username = cleanUser,
+            Domain = cleanDomain,
             PasswordChars = passChars,
             Width = targetWidth,
             Height = targetHeight,

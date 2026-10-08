@@ -40,9 +40,24 @@ Write-Host "Target Release ID: $releaseId"
 
 $fileLength = ([System.IO.FileInfo]$FilePath).Length
 Write-Host "Uploading $fileName ($fileLength bytes) via gh release upload..."
-gh release upload "$Tag" "$FilePath" --repo "$Repo" --clobber
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "gh release upload failed with exit code $LASTEXITCODE"
+
+$maxRetries = 4
+$attempt = 0
+$uploadOk = $false
+while (-not $uploadOk -and $attempt -lt $maxRetries) {
+    $attempt++
+    gh release upload "$Tag" "$FilePath" --repo "$Repo" --clobber
+    if ($LASTEXITCODE -eq 0) {
+        $uploadOk = $true
+    } else {
+        if ($attempt -lt $maxRetries) {
+            Write-Host "Upload attempt $attempt failed, retrying in 4 seconds..."
+            Start-Sleep -Seconds 4
+        }
+    }
+}
+if (-not $uploadOk) {
+    Write-Error "gh release upload failed after $maxRetries attempts."
     exit 1
 }
 

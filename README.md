@@ -25,8 +25,8 @@ Both links always resolve to the newest release online.
 - **Auto-lock.** The vault re-locks after a period of inactivity (60 minutes by default). Open Remote Desktop windows are never closed by this.
 - **Removable-drive safety.** If you run it from a USB stick and pull the stick, the vault locks, optionally closes the open sessions, and the app exits. The drive has to stay missing for about six seconds first, so a momentary hiccup — an antivirus scan, waking from sleep — does not drop your open desktops.
 - **Server identity is checked by default.** Windows verifies host certificates by default (`authentication level: 2`). RDP Vault remembers your answer *inside the encrypted vault* and replays it, so you are asked once per host rather than on every connection, and nothing is left on the PC. If a host's certificate ever changes you are warned again — which is how you find out something is impersonating it. You can turn the check off per profile, but then your saved password is sent to whatever answers at that address.
-- **Tactical connection overlay & Wake-on-LAN.** Shows a real-time progress overlay during unlock and connection sequences. When Wake-on-LAN is enabled, a live countdown with an instant Cancel button tracks remote host initialization so you are never left waiting in the dark.
-- **Stealth Port Knocking & WAN Wake-on-LAN.** Bypasses hardened perimeter firewalls (such as MikroTik RouterOS) using configurable TCP port knocks or ICMP magic payloads before dispatching connections. Port knocking executes first to dynamically whitelist the client source IP, allowing subsequent unicast Wake-on-LAN magic packets across cellular/WAN as well as local subnet broadcasts on Wi-Fi.
+- **Tactical connection overlay, Wake-on-LAN & Stage Skips.** Shows a real-time progress overlay during unlock and connection sequences with live countdowns and instant stage skip buttons (`SKIP WAKE-ON-LAN`, `SKIP PORT KNOCKING`). You can advance immediately if the target machine is already awake or whitelisted without aborting the sequence.
+- **Wake-on-LAN First, Stealth Port Knocking Second.** Dispatches Wake-on-LAN magic packets first to boot physical hosts (via local broadcast or cellular WAN unicast), followed immediately by configurable TCP port knocks or ICMP magic payloads to dynamically whitelist the client IP on hardened perimeter firewalls (such as MikroTik RouterOS `action=add-src-to-address-list`) right as the machine starts up.
 - **Desktop shortcuts.** One click per connection. These are ordinary Windows `.lnk` shortcuts pointing at `RDPVault.exe --launch <id>`; they contain no host name.
 - **Optional self-destruct.** Off by default. Repeated wrong passwords are always slowed down with an escalating delay, which is the real protection. If you deliberately arm self-destruct, the vault is erased after the limit you set — you have to save a Recovery Code and type `ERASE` to turn it on.
 
@@ -70,14 +70,19 @@ In version 2.0.0, RDP Vault incorporates a **fully embedded, self-contained nati
 - **Mobile TPM Equivalent (Hardware Root of Trust)**: Master keys are sealed inside the phone's hardware Secure Element (StrongBox Keymaster) or ARM TrustZone TEE and released exclusively by Class 3 Strong Biometrics (Fingerprint / 3D Face Unlock) bound through `BiometricPrompt.CryptoObject`. Keys cannot be exported even from rooted devices. Adding a new biometric enrollee cancels the seal intentionally, prompting master password verification to re-seal.
 - **Mobile Input Controls & Virtual Trackpad**:
   - **Relative Virtual Trackpad (Default)**: Phone screen functions as a precision laptop trackpad controlling an on-screen mouse pointer with smooth acceleration. Single tap for Left Click, two-finger tap for Right Click, and tap-and-drag for selecting text or moving windows.
+  - **One-Shot Click Flipper**: Top toolbar button (`[🖱 Left / Right Click]`) switches to an armed Right Click state in amber; the next tap/click executes a right-click and auto-reverts to Left Click.
   - **Direct Touch Mode**: Tap directly on remote UI elements with instant coordinate mapping.
-  - **Virtual Mouse Wheel**: Vertical edge-scroll gesture transmitting smooth mouse wheel rotation PDUs to the remote host.
-  - **Soft Keyboard & Modifier Drawer**: Integrated soft keyboard with an expandable on-screen modifier toolbar providing one-tap access to Ctrl, Alt, Shift, Win, Esc, Tab, Enter, Backspace, Delete, and F1–F12 keys.
+  - **Smart-Collapsing Toolbar**: Top controls (`[Mode]` → `[Click Flipper]` → `[Keyboard]` → `[Keys]` → `[Disconnect]`) auto-collapse after 3.5s into a sleek top mini-tab (`[ ☰ ]`) to avoid blocking remote desktop windows.
+  - **Zoomed-In Edge Auto-Scrolling**: When zoomed in (`> 1.05x`), moving the pointer within 28dp of any screen edge smoothly pans the desktop, strictly stopping at physical remote boundaries.
+  - **Soft Keyboard & Modifier Drawer**: Integrated soft keyboard with an expandable modifier drawer providing one-tap access to Ctrl, Alt, Shift, Win, Esc, Tab, Enter, Backspace, Delete, Ctrl+Alt+Del, and F1–F12 keys.
+  - **Physical Mouse & Keyboard Forwarding**: Bluetooth and USB mice (left, right, middle click, scroll wheel) and physical keyboards forward directly 1:1 to the remote machine.
   - **Pinch-to-Zoom & Pan**: Smooth two-finger pinch-zoom and pan navigation across the complete remote desktop.
+  - **Disconnect Confirmation Guard**: Android Back gesture presents a confirmation dialog to prevent accidental session drops.
   - **Haptic Feedback**: Crisp tactile response on mouse clicks and modifier drawer toggles.
 - **Host Desktop Layout Protection**: Locks remote desktop dimensions to native resolution with dynamic resize PDUs disabled (`dynamic resolution = 0`). Connecting from mobile will never squash application windows or scramble multi-monitor desktop icons.
-- **Sensor Orientation Freedom**: Full screen rotation freedom (`ScreenOrientation.Sensor`), adapting in-place to portrait or landscape holding positions without dropping active sessions.
-- **Stealth Port Knocking & WAN Wake-on-LAN**: Raw TCP SYN and HTTP GET port knocking engine executes before pre-flight checks to open dynamic perimeter firewall rules (e.g. MikroTik `action=add-src-to-address-list`), followed by local subnet broadcast or cellular WAN unicast Wake-on-LAN.
+- **Sensor Orientation Freedom & TextureView Rendering**: Hardware-accelerated `TextureView` rendering with full screen rotation freedom (`ScreenOrientation.Sensor`), adapting in-place to portrait or landscape holding positions without aspect distortion or buffer desynchronization.
+- **Wake-on-LAN First, Stealth Port Knocking Second**: Dispatches Wake-on-LAN magic packets first, followed by raw TCP SYN and HTTP GET port knocking to dynamically open perimeter firewall rules (e.g. MikroTik `action=add-src-to-address-list`). Interactive skip buttons (`SKIP WAKE-ON-LAN`, `SKIP PORT KNOCKING`) allow skipping stages at any time.
+- **Zero False-Positive Notification & Biometric Session Resume**: Ongoing foreground notification appears strictly after FreeRDP connection succeeds (`OnSessionConnected`). Tapping notification requires biometric (fingerprint/3D face) vault authentication before resuming the session. Tapping `[Disconnect]` immediately terminates the connection without unlocking the vault.
 - **Vault Portability & Backup**: Open or save the same `vault.rdpv` file used on Windows. Settings includes a one-tap **Share backup** (Quick Share, Drive, email) of the encrypted vault file.
 
 ## Android Installation & Quick Start Guide
@@ -104,13 +109,18 @@ Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\W
 |---|---|---|
 | **Move Cursor** | Drag one finger across screen | Cursor moves to touch location |
 | **Left Click** | Single tap | Single tap |
-| **Right Click** | Two-finger tap | Long press |
+| **Right Click** | Two-finger tap (or arm Click Flipper) | Long press (or arm Click Flipper) |
+| **One-Shot Click Flipper** | Tap `[🖱 Left / Right Click]` on top bar to arm Right Click (amber); next tap right-clicks and auto-reverts to Left Click | Same |
 | **Drag & Select** | Double-tap and drag | Long press and drag |
 | **Scroll Wheel** | Slide one finger along right edge | Two-finger vertical drag |
 | **Zoom Canvas** | Two-finger pinch / spread | Two-finger pinch / spread |
-| **Pan Canvas** | Two-finger drag | Two-finger drag |
-| **Modifier Keys** | Tap floating modifier drawer handle to toggle Ctrl, Alt, Shift, Win, Esc, Tab, F1-F12 |
-| **Keyboard** | Tap keyboard icon in modifier toolbar to toggle Android soft keyboard |
+| **Pan Canvas** | Two-finger drag (or edge auto-scroll when cursor hits bezel) | Two-finger drag |
+| **Edge Auto-Scroll** | When zoomed in, move cursor within 28dp of bezel to auto-pan with physical border clamping | N/A |
+| **Smart Toolbar** | Top bar auto-collapses after 3.5s into top mini-tab `[ ☰ ]`; tap tab to expand | Same |
+| **Modifier Keys** | Tap `[☰ Keys]` to open drawer for Ctrl, Alt, Shift, Win, Esc, Tab, Ctrl+Alt+Del, F1-F12 | Same |
+| **Keyboard** | Tap `[⌨ Keyboard]` to toggle Android soft keyboard | Same |
+| **Physical Mouse & Keys** | Native Bluetooth/USB mouse clicks, wheel scrolling, and physical keys forwarded 1:1 | Same |
+| **Disconnect Guard** | Back button triggers confirmation dialog: *"Disconnect Remote Desktop?"* | Same |
 
 ### Developer Sideloading via ADB (Optional)
 
@@ -179,7 +189,7 @@ The build outputs are `compiled\RDPVault.exe` (Windows desktop) and `compiled\RD
 | Recovery Code | 256-bit secret, 52 Crockford-Base32 characters, wrapped over the master key |
 | Quick unlock (PC) | TPM signature → Argon2id → AES-GCM seal, bound to machine + Windows account |
 | Quick unlock (Android) | Android Keystore / StrongBox Keymaster → Class 3 BiometricPrompt (Hardware TEE) |
-| Android Engine | Embedded native FreeRDP (aFreeRDP), ARM64 / x86_64, SurfaceView rendering |
+| Android Engine | Embedded native FreeRDP (aFreeRDP), ARM64 / x86_64, TextureView rendering |
 | Runtime | .NET 9, Avalonia UI, Windows single-file & Android APK |
 
 Detailed design notes live in `project_structure.txt` and `ANDROID_ARCHITECTURE.md`.

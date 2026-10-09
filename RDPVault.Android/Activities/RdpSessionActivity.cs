@@ -6,6 +6,7 @@ using Android.Content;
 using Android.Content.PM;
 using Android.Content.Res;
 using Android.Graphics;
+using Android.Graphics.Drawables;
 using Android.OS;
 using Android.Views;
 using Android.Views.InputMethods;
@@ -26,13 +27,14 @@ namespace RDPVault.Android.Activities;
     ScreenOrientation = ScreenOrientation.Sensor,
     Theme = "@style/Theme.AppCompat.NoActionBar.FullScreen"
 )]
-public class RdpSessionActivity : AppCompatActivity, ISurfaceHolderCallback, View.IOnTouchListener
+public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTextureListener, View.IOnTouchListener
 {
     private FreeRdpSession? _session;
-    private SurfaceView? _surfaceView;
-    private ISurfaceHolder? _surfaceHolder;
+    private TextureView? _textureView;
+    private volatile bool _isSurfaceAvailable;
     private Bitmap? _frameBitmap;
     private byte[]? _pixelBuffer;
+    private readonly object _renderLock = new();
 
     // Viewport transform
     private float _scale = 1.0f;
@@ -49,7 +51,14 @@ public class RdpSessionActivity : AppCompatActivity, ISurfaceHolderCallback, Vie
     private long _lastTapTime = 0;
     private float _lastTouchX = 0;
     private float _lastTouchY = 0;
-    private int _touchPointerCount = 0;
+    private float _touchStartX = 0;
+    private float _touchStartY = 0;
+    private long _touchStartTime = 0;
+    private bool _hasMoved = false;
+    private bool _isTwoFingerGesture = false;
+    private bool _isScaling = false;
+    private float _prevFocusX = 0;
+    private float _prevFocusY = 0;
     private ScaleGestureDetector? _scaleDetector;
 
     // UI elements
@@ -61,7 +70,6 @@ public class RdpSessionActivity : AppCompatActivity, ISurfaceHolderCallback, Vie
     private ProgressBar? _progressBar;
     private TextView? _statusText;
     private Button? _topModeBtn;
-    private Button? _drawerModeBtn;
 
     // Modifier states
     private bool _ctrlActive = false;
@@ -77,17 +85,7 @@ public class RdpSessionActivity : AppCompatActivity, ISurfaceHolderCallback, Vie
         Window?.AddFlags(WindowManagerFlags.KeepScreenOn);
         ApplyImmersiveFullscreen();
 
-        if (Build.VERSION.SdkInt >= BuildVersionCodes.R)
-        {
-            var bounds = WindowManager?.CurrentWindowMetrics?.Bounds;
-            _screenWidth = bounds?.Width() ?? Resources?.DisplayMetrics?.WidthPixels ?? 1920;
-            _screenHeight = bounds?.Height() ?? Resources?.DisplayMetrics?.HeightPixels ?? 1080;
-        }
-        else
-        {
-            _screenWidth = Resources?.DisplayMetrics?.WidthPixels ?? 1920;
-            _screenHeight = Resources?.DisplayMetrics?.HeightPixels ?? 1080;
-        }
+        UpdateScreenMetrics();
 
         _rootLayout = new FrameLayout(this)
         {
@@ -96,17 +94,17 @@ public class RdpSessionActivity : AppCompatActivity, ISurfaceHolderCallback, Vie
                 ViewGroup.LayoutParams.MatchParent)
         };
         _rootLayout.SetBackgroundColor(Color.Black);
-        _rootLayout.SetOnTouchListener(this);
 
-        _surfaceView = new SurfaceView(this)
+        // TextureView provides seamless rotation, hardware acceleration, and zero surface buffer freezing
+        _textureView = new TextureView(this)
         {
             LayoutParameters = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MatchParent,
                 FrameLayout.LayoutParams.MatchParent)
         };
-        _surfaceView.Holder?.AddCallback(this);
-        _surfaceView.SetOnTouchListener(this);
-        _rootLayout.AddView(_surfaceView);
+        _textureView.SurfaceTextureListener = this;
+        _textureView.SetOnTouchListener(this);
+        _rootLayout.AddView(_textureView);
 
         // Floating cursor indicator (virtual mouse pointer)
         _cursorView = CreateCursorView();
@@ -116,13 +114,13 @@ public class RdpSessionActivity : AppCompatActivity, ISurfaceHolderCallback, Vie
         _scrollWheelBar = CreateScrollWheelBar();
         _rootLayout.AddView(_scrollWheelBar);
 
-        // Desktop modifier drawer
-        _modifierDrawer = CreateModifierDrawer();
-        _rootLayout.AddView(_modifierDrawer);
-
-        // Top controls bar (Keys + Mode toggle)
+        // Top controls bar (Keys + Mode + Keyboard + 1:1 Reset + Disconnect)
         var topControls = CreateTopControls();
         _rootLayout.AddView(topControls);
+
+        // Desktop modifier drawer (anchored below top controls)
+        _modifierDrawer = CreateModifierDrawer();
+        _rootLayout.AddView(_modifierDrawer);
 
         // Connecting progress overlay
         _loadingOverlay = CreateLoadingOverlay(out _progressBar, out _statusText);
@@ -145,6 +143,21 @@ public class RdpSessionActivity : AppCompatActivity, ISurfaceHolderCallback, Vie
         _cursorY = config.Height / 2f;
 
         InitializeAndConnect(config);
+    }
+
+    private void UpdateScreenMetrics()
+    {
+        if (Build.VERSION.SdkInt >= BuildVersionCodes.R)
+        {
+            var bounds = WindowManager?.CurrentWindowMetrics?.Bounds;
+            _screenWidth = bounds?.Width() ?? Resources?.DisplayMetrics?.WidthPixels ?? 1920;
+            _screenHeight = bounds?.Height() ?? Resources?.DisplayMetrics?.HeightPixels ?? 1080;
+        }
+        else
+        {
+            _screenWidth = Resources?.DisplayMetrics?.WidthPixels ?? 1920;
+            _screenHeight = Resources?.DisplayMetrics?.HeightPixels ?? 1080;
+        }
     }
 
     private void ApplyImmersiveFullscreen()
@@ -210,6 +223,7 @@ public class RdpSessionActivity : AppCompatActivity, ISurfaceHolderCallback, Vie
             if (_statusText != null) _statusText.Visibility = ViewStates.Gone;
             Toast.MakeText(this, "Connected", ToastLength.Short)?.Show();
             UpdateCursorPosition();
+            RedrawCurrentFrame();
         });
     }
 
@@ -240,8 +254,7 @@ public class RdpSessionActivity : AppCompatActivity, ISurfaceHolderCallback, Vie
 
     private void OnFramebufferUpdated(int x, int y, int width, int height, IntPtr buffer, int stride)
     {
-        var holder = _surfaceHolder;
-        if (holder?.Surface?.IsValid != true || buffer == IntPtr.Zero || width <= 0 || height <= 0 || stride <= 0) return;
+        if (!_isSurfaceAvailable || buffer == IntPtr.Zero || width <= 0 || height <= 0 || stride <= 0) return;
 
         try
         {
@@ -265,7 +278,7 @@ public class RdpSessionActivity : AppCompatActivity, ISurfaceHolderCallback, Vie
             {
                 if (stride == width * 4)
                 {
-                    var byteBuffer = Java.Nio.ByteBuffer.Wrap(_pixelBuffer, 0, pixelBytes);
+                    using var byteBuffer = Java.Nio.ByteBuffer.Wrap(_pixelBuffer, 0, pixelBytes);
                     _frameBitmap.CopyPixelsFromBuffer(byteBuffer);
                 }
                 else
@@ -276,60 +289,11 @@ public class RdpSessionActivity : AppCompatActivity, ISurfaceHolderCallback, Vie
                     {
                         Buffer.BlockCopy(_pixelBuffer, row * stride, packed, row * rowBytes, rowBytes);
                     }
-                    var byteBuffer = Java.Nio.ByteBuffer.Wrap(packed);
+                    using var byteBuffer = Java.Nio.ByteBuffer.Wrap(packed);
                     _frameBitmap.CopyPixelsFromBuffer(byteBuffer);
                 }
 
-                var canvas = holder.LockCanvas();
-                if (canvas != null)
-                {
-                    try
-                    {
-                        int canvasW = canvas.Width;
-                        int canvasH = canvas.Height;
-                        if (canvasW > 0 && canvasH > 0)
-                        {
-                            _screenWidth = canvasW;
-                            _screenHeight = canvasH;
-                        }
-
-                        canvas.DrawColor(Color.Black);
-
-                        float scaleX = (float)canvasW / width;
-                        float scaleY = (float)canvasH / height;
-                        float baseScale = Math.Min(scaleX, scaleY);
-
-                        float fitW = width * baseScale;
-                        float fitH = height * baseScale;
-                        float offsetX = (canvasW - fitW) / 2f;
-                        float offsetY = (canvasH - fitH) / 2f;
-
-                        // Clamp pan offsets so the desktop cannot drift away or be pushed off-screen
-                        if (_scale <= 1.0f)
-                        {
-                            _panX = 0f;
-                            _panY = 0f;
-                        }
-                        else
-                        {
-                            float maxPanX = Math.Max(0, (fitW * _scale - canvasW) / 2f);
-                            float maxPanY = Math.Max(0, (fitH * _scale - canvasH) / 2f);
-                            _panX = Math.Clamp(_panX, -maxPanX, maxPanX);
-                            _panY = Math.Clamp(_panY, -maxPanY, maxPanY);
-                        }
-
-                        var matrix = new Matrix();
-                        matrix.PostScale(baseScale * _scale, baseScale * _scale);
-                        matrix.PostTranslate(offsetX + _panX, offsetY + _panY);
-
-                        var paint = new Paint { FilterBitmap = true, AntiAlias = true };
-                        canvas.DrawBitmap(_frameBitmap, matrix, paint);
-                    }
-                    finally
-                    {
-                        holder.UnlockCanvasAndPost(canvas);
-                    }
-                }
+                RenderBitmapToView(_frameBitmap);
             }
         }
         catch (Exception ex)
@@ -338,55 +302,142 @@ public class RdpSessionActivity : AppCompatActivity, ISurfaceHolderCallback, Vie
         }
     }
 
-    public void SurfaceCreated(ISurfaceHolder holder)
+    /// <summary>
+    /// Interactive frame renderer that draws the cached desktop bitmap onto TextureView canvas
+    /// with strict aspect ratio matching, centered letterboxing/pillarboxing, and boundary-clamped pan/zoom.
+    /// </summary>
+    private void RenderBitmapToView(Bitmap? bmp)
     {
-        _surfaceHolder = holder;
+        if (bmp == null || bmp.IsRecycled || !_isSurfaceAvailable || _textureView == null) return;
+
+        lock (_renderLock)
+        {
+            Canvas? canvas = null;
+            try
+            {
+                canvas = _textureView.LockCanvas();
+                if (canvas == null) return;
+
+                int canvasW = canvas.Width;
+                int canvasH = canvas.Height;
+                if (canvasW <= 0 || canvasH <= 0) return;
+
+                _screenWidth = canvasW;
+                _screenHeight = canvasH;
+
+                canvas.DrawColor(Color.Black);
+
+                int rw = bmp.Width;
+                int rh = bmp.Height;
+                if (rw <= 0 || rh <= 0) return;
+
+                float scaleX = (float)canvasW / rw;
+                float scaleY = (float)canvasH / rh;
+                float baseScale = Math.Min(scaleX, scaleY);
+
+                float fitW = rw * baseScale;
+                float fitH = rh * baseScale;
+                float offsetX = (canvasW - fitW) / 2f;
+                float offsetY = (canvasH - fitH) / 2f;
+
+                float currentW = fitW * _scale;
+                float currentH = fitH * _scale;
+
+                if (currentW <= canvasW)
+                {
+                    _panX = 0f;
+                }
+                else
+                {
+                    float maxPanX = (currentW - canvasW) / 2f;
+                    _panX = Math.Clamp(_panX, -maxPanX, maxPanX);
+                }
+
+                if (currentH <= canvasH)
+                {
+                    _panY = 0f;
+                }
+                else
+                {
+                    float maxPanY = (currentH - canvasH) / 2f;
+                    _panY = Math.Clamp(_panY, -maxPanY, maxPanY);
+                }
+
+                using var matrix = new Matrix();
+                matrix.PostScale(baseScale * _scale, baseScale * _scale);
+                matrix.PostTranslate(offsetX + _panX, offsetY + _panY);
+
+                using var paint = new Paint { FilterBitmap = true, AntiAlias = true };
+                canvas.DrawBitmap(bmp, matrix, paint);
+            }
+            catch (Exception ex)
+            {
+                AppLog.Warn("RenderBitmapToView: " + ex.Message);
+            }
+            finally
+            {
+                if (canvas != null)
+                {
+                    try { _textureView.UnlockCanvasAndPost(canvas); } catch { }
+                }
+            }
+        }
     }
 
-    public void SurfaceChanged(ISurfaceHolder holder, [global::Android.Runtime.GeneratedEnum] Format format, int width, int height)
+    private void RedrawCurrentFrame()
     {
-        _surfaceHolder = holder;
+        if (_frameBitmap != null && !_frameBitmap.IsRecycled)
+        {
+            RenderBitmapToView(_frameBitmap);
+        }
+    }
+
+    // TextureView.ISurfaceTextureListener implementation
+    public void OnSurfaceTextureAvailable(SurfaceTexture surface, int width, int height)
+    {
+        _isSurfaceAvailable = true;
         if (width > 0 && height > 0)
         {
             _screenWidth = width;
             _screenHeight = height;
         }
+        RedrawCurrentFrame();
+        UpdateCursorPosition();
     }
 
-    public void SurfaceDestroyed(ISurfaceHolder holder)
+    public void OnSurfaceTextureSizeChanged(SurfaceTexture surface, int width, int height)
     {
-        _surfaceHolder = null;
+        if (width > 0 && height > 0)
+        {
+            _screenWidth = width;
+            _screenHeight = height;
+        }
+        _scale = 1.0f;
+        _panX = 0f;
+        _panY = 0f;
+        RedrawCurrentFrame();
+        UpdateCursorPosition();
     }
+
+    public bool OnSurfaceTextureDestroyed(SurfaceTexture surface)
+    {
+        _isSurfaceAvailable = false;
+        return true;
+    }
+
+    public void OnSurfaceTextureUpdated(SurfaceTexture surface) { }
 
     public override void OnConfigurationChanged(Configuration newConfig)
     {
         base.OnConfigurationChanged(newConfig);
         ApplyImmersiveFullscreen();
 
-        // Screen rotated: reset scale and pan so the desktop neatly centers and fits to screen
         _scale = 1.0f;
         _panX = 0f;
         _panY = 0f;
 
-        if (Build.VERSION.SdkInt >= BuildVersionCodes.R)
-        {
-            var bounds = WindowManager?.CurrentWindowMetrics?.Bounds;
-            if (bounds != null && bounds.Width() > 0 && bounds.Height() > 0)
-            {
-                _screenWidth = bounds.Width();
-                _screenHeight = bounds.Height();
-            }
-        }
-        else
-        {
-            var dm = Resources?.DisplayMetrics;
-            if (dm != null && dm.WidthPixels > 0 && dm.HeightPixels > 0)
-            {
-                _screenWidth = dm.WidthPixels;
-                _screenHeight = dm.HeightPixels;
-            }
-        }
-
+        UpdateScreenMetrics();
+        RedrawCurrentFrame();
         UpdateCursorPosition();
     }
 
@@ -396,48 +447,27 @@ public class RdpSessionActivity : AppCompatActivity, ISurfaceHolderCallback, Vie
         if (e == null || _session == null || !_session.IsConnected) return false;
 
         _scaleDetector?.OnTouchEvent(e);
+
         int action = (int)e.ActionMasked;
-        _touchPointerCount = e.PointerCount;
-
-        float tx = e.GetX();
-        float ty = e.GetY();
-
-        if (_touchPointerCount >= 2 && action == (int)MotionEventActions.PointerDown)
-        {
-            // Two-finger tap = Right Click
-            TriggerHaptic();
-            ushort rx, ry;
-            if (_directTouchMode)
-            {
-                ScreenToRemote(tx, ty, out float rxf, out float ryf);
-                rx = (ushort)rxf;
-                ry = (ushort)ryf;
-            }
-            else
-            {
-                rx = (ushort)Math.Clamp(_cursorX, 0, _session.RemoteWidth);
-                ry = (ushort)Math.Clamp(_cursorY, 0, _session.RemoteHeight);
-            }
-
-            _session.SendMouseMove(rx, ry);
-            _session.SendMouseButton(NativeFreeRdp.PTR_FLAGS_BUTTON2, true, rx, ry);
-            Task.Delay(35).ContinueWith(_ =>
-            {
-                _session?.SendMouseButton(NativeFreeRdp.PTR_FLAGS_BUTTON2, false, rx, ry);
-            });
-            return true;
-        }
+        int pointerCount = e.PointerCount;
+        float x = e.GetX();
+        float y = e.GetY();
+        long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
         switch (action)
         {
             case (int)MotionEventActions.Down:
-                _lastTouchX = tx;
-                _lastTouchY = ty;
-                long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                _touchStartTime = now;
+                _touchStartX = x;
+                _touchStartY = y;
+                _lastTouchX = x;
+                _lastTouchY = y;
+                _hasMoved = false;
+                _isTwoFingerGesture = false;
 
                 if (_directTouchMode)
                 {
-                    ScreenToRemote(tx, ty, out _cursorX, out _cursorY);
+                    ScreenToRemote(x, y, out _cursorX, out _cursorY);
                     ushort cx = (ushort)_cursorX;
                     ushort cy = (ushort)_cursorY;
                     _session.SendMouseMove(cx, cy);
@@ -446,9 +476,9 @@ public class RdpSessionActivity : AppCompatActivity, ISurfaceHolderCallback, Vie
                 }
                 else
                 {
+                    // Double-tap and hold initiates drag in trackpad mode
                     if (now - _lastTapTime < 300)
                     {
-                        // Double tap and hold = Left Click Drag
                         _isDragging = true;
                         TriggerHaptic();
                         ushort cx = (ushort)Math.Clamp(_cursorX, 0, _session.RemoteWidth);
@@ -456,52 +486,125 @@ public class RdpSessionActivity : AppCompatActivity, ISurfaceHolderCallback, Vie
                         _session.SendMouseMove(cx, cy);
                         _session.SendMouseButton(NativeFreeRdp.PTR_FLAGS_BUTTON1, true, cx, cy);
                     }
-                    _lastTapTime = now;
+                }
+                break;
+
+            case (int)MotionEventActions.PointerDown:
+                if (pointerCount >= 2)
+                {
+                    _isTwoFingerGesture = true;
+                    _prevFocusX = _scaleDetector?.FocusX ?? x;
+                    _prevFocusY = _scaleDetector?.FocusY ?? y;
                 }
                 break;
 
             case (int)MotionEventActions.Move:
-                float dx = tx - _lastTouchX;
-                float dy = ty - _lastTouchY;
-                _lastTouchX = tx;
-                _lastTouchY = ty;
+                float dx = x - _lastTouchX;
+                float dy = y - _lastTouchY;
+                _lastTouchX = x;
+                _lastTouchY = y;
 
-                if (_touchPointerCount == 1)
+                float distFromStart = (float)Math.Sqrt(Math.Pow(x - _touchStartX, 2) + Math.Pow(y - _touchStartY, 2));
+                if (distFromStart > 12)
+                {
+                    _hasMoved = true;
+                }
+
+                if (pointerCount == 1 && !_isTwoFingerGesture)
                 {
                     if (_directTouchMode)
                     {
-                        ScreenToRemote(tx, ty, out _cursorX, out _cursorY);
+                        ScreenToRemote(x, y, out _cursorX, out _cursorY);
+                        ushort cx = (ushort)_cursorX;
+                        ushort cy = (ushort)_cursorY;
+                        _session.SendMouseMove(cx, cy);
                     }
                     else
                     {
-                        // Relative virtual trackpad with acceleration
+                        // Relative virtual trackpad with smooth acceleration
                         float speed = (float)Math.Sqrt(dx * dx + dy * dy);
-                        float accel = speed > 15f ? 1.6f : 1.1f;
+                        float accel = speed > 20f ? 1.6f : 1.15f;
                         _cursorX += dx * accel;
                         _cursorY += dy * accel;
+                        _cursorX = Math.Clamp(_cursorX, 0, _session.RemoteWidth);
+                        _cursorY = Math.Clamp(_cursorY, 0, _session.RemoteHeight);
+
+                        ushort mx = (ushort)_cursorX;
+                        ushort my = (ushort)_cursorY;
+                        _session.SendMouseMove(mx, my);
+                        UpdateCursorPosition();
                     }
-
-                    _cursorX = Math.Clamp(_cursorX, 0, _session.RemoteWidth);
-                    _cursorY = Math.Clamp(_cursorY, 0, _session.RemoteHeight);
-
-                    ushort mx = (ushort)_cursorX;
-                    ushort my = (ushort)_cursorY;
-                    _session.SendMouseMove(mx, my);
-                    UpdateCursorPosition();
                 }
-                else if (_touchPointerCount == 2 && !_scaleDetector!.IsInProgress && _scale > 1.05f)
+                else if (pointerCount >= 2)
                 {
-                    // Two finger drag = Panning (only active when zoomed in)
-                    _panX += dx;
-                    _panY += dy;
+                    _hasMoved = true;
+                    if (!_isScaling)
+                    {
+                        float focusX = _scaleDetector?.FocusX ?? x;
+                        float focusY = _scaleDetector?.FocusY ?? y;
+                        float fdx = focusX - _prevFocusX;
+                        float fdy = focusY - _prevFocusY;
+                        _prevFocusX = focusX;
+                        _prevFocusY = focusY;
+
+                        if (_scale > 1.05f)
+                        {
+                            // Two-finger drag pans the zoomed remote desktop viewport
+                            _panX += fdx;
+                            _panY += fdy;
+                            RedrawCurrentFrame();
+                            UpdateCursorPosition();
+                        }
+                        else
+                        {
+                            // Two-finger vertical swipe acts as mouse scroll wheel
+                            if (Math.Abs(fdy) > 16)
+                            {
+                                bool up = fdy > 0;
+                                ushort cx = (ushort)Math.Clamp(_cursorX, 0, _session.RemoteWidth);
+                                ushort cy = (ushort)Math.Clamp(_cursorY, 0, _session.RemoteHeight);
+                                _session.SendMouseWheel(up, 120, cx, cy);
+                            }
+                        }
+                    }
+                }
+                break;
+
+            case (int)MotionEventActions.PointerUp:
+                if (_isTwoFingerGesture && !_hasMoved && !_isScaling)
+                {
+                    long duration = now - _touchStartTime;
+                    if (duration < 350)
+                    {
+                        // Two-finger quick tap = Right Click
+                        TriggerHaptic();
+                        ushort rx, ry;
+                        if (_directTouchMode)
+                        {
+                            ScreenToRemote(x, y, out float rxf, out float ryf);
+                            rx = (ushort)rxf;
+                            ry = (ushort)ryf;
+                        }
+                        else
+                        {
+                            rx = (ushort)Math.Clamp(_cursorX, 0, _session.RemoteWidth);
+                            ry = (ushort)Math.Clamp(_cursorY, 0, _session.RemoteHeight);
+                        }
+
+                        _session.SendMouseMove(rx, ry);
+                        _session.SendMouseButton(NativeFreeRdp.PTR_FLAGS_BUTTON2, true, rx, ry);
+                        Task.Delay(35).ContinueWith(_ =>
+                        {
+                            _session?.SendMouseButton(NativeFreeRdp.PTR_FLAGS_BUTTON2, false, rx, ry);
+                        });
+                    }
                 }
                 break;
 
             case (int)MotionEventActions.Up:
-            case (int)MotionEventActions.Cancel:
                 if (_directTouchMode)
                 {
-                    ScreenToRemote(tx, ty, out _cursorX, out _cursorY);
+                    ScreenToRemote(x, y, out _cursorX, out _cursorY);
                     ushort cx = (ushort)_cursorX;
                     ushort cy = (ushort)_cursorY;
                     _session.SendMouseMove(cx, cy);
@@ -517,20 +620,39 @@ public class RdpSessionActivity : AppCompatActivity, ISurfaceHolderCallback, Vie
                         ushort cy = (ushort)Math.Clamp(_cursorY, 0, _session.RemoteHeight);
                         _session.SendMouseButton(NativeFreeRdp.PTR_FLAGS_BUTTON1, false, cx, cy);
                     }
-                    else
+                    else if (!_isTwoFingerGesture && !_hasMoved)
                     {
-                        // Single tap = Left Click
-                        TriggerHaptic();
-                        ushort cx = (ushort)Math.Clamp(_cursorX, 0, _session.RemoteWidth);
-                        ushort cy = (ushort)Math.Clamp(_cursorY, 0, _session.RemoteHeight);
-                        _session.SendMouseMove(cx, cy);
-                        _session.SendMouseButton(NativeFreeRdp.PTR_FLAGS_BUTTON1, true, cx, cy);
-                        Task.Delay(35).ContinueWith(_ =>
+                        // Quick single tap without movement = Left Click
+                        long duration = now - _touchStartTime;
+                        if (duration < 300)
                         {
-                            _session?.SendMouseButton(NativeFreeRdp.PTR_FLAGS_BUTTON1, false, cx, cy);
-                        });
+                            TriggerHaptic();
+                            ushort cx = (ushort)Math.Clamp(_cursorX, 0, _session.RemoteWidth);
+                            ushort cy = (ushort)Math.Clamp(_cursorY, 0, _session.RemoteHeight);
+                            _session.SendMouseMove(cx, cy);
+                            _session.SendMouseButton(NativeFreeRdp.PTR_FLAGS_BUTTON1, true, cx, cy);
+                            Task.Delay(35).ContinueWith(_ =>
+                            {
+                                _session?.SendMouseButton(NativeFreeRdp.PTR_FLAGS_BUTTON1, false, cx, cy);
+                            });
+                            _lastTapTime = now;
+                        }
                     }
                 }
+                _isTwoFingerGesture = false;
+                _hasMoved = false;
+                break;
+
+            case (int)MotionEventActions.Cancel:
+                if (_isDragging)
+                {
+                    _isDragging = false;
+                    ushort cx = (ushort)Math.Clamp(_cursorX, 0, _session.RemoteWidth);
+                    ushort cy = (ushort)Math.Clamp(_cursorY, 0, _session.RemoteHeight);
+                    _session.SendMouseButton(NativeFreeRdp.PTR_FLAGS_BUTTON1, false, cx, cy);
+                }
+                _isTwoFingerGesture = false;
+                _hasMoved = false;
                 break;
         }
 
@@ -607,7 +729,7 @@ public class RdpSessionActivity : AppCompatActivity, ISurfaceHolderCallback, Vie
     private View CreateCursorView()
     {
         float density = Resources?.DisplayMetrics?.Density ?? 2.0f;
-        int sizePx = Math.Max(32, (int)(24 * density));
+        int sizePx = Math.Max(28, (int)(22 * density));
         var cursor = new ImageView(this)
         {
             Clickable = false,
@@ -616,8 +738,8 @@ public class RdpSessionActivity : AppCompatActivity, ISurfaceHolderCallback, Vie
         };
 
         var bmp = Bitmap.CreateBitmap(sizePx, sizePx, Bitmap.Config.Argb8888!);
-        var canvas = new Canvas(bmp);
-        var path = new global::Android.Graphics.Path();
+        using var canvas = new Canvas(bmp);
+        using var path = new global::Android.Graphics.Path();
         float scale = sizePx / 24f;
         path.MoveTo(0 * scale, 0 * scale);
         path.LineTo(0 * scale, 20 * scale);
@@ -628,9 +750,9 @@ public class RdpSessionActivity : AppCompatActivity, ISurfaceHolderCallback, Vie
         path.LineTo(16 * scale, 13 * scale);
         path.Close();
 
-        var fillPaint = new Paint { Color = Color.White, AntiAlias = true };
+        using var fillPaint = new Paint { Color = Color.White, AntiAlias = true };
         fillPaint.SetStyle(Paint.Style.Fill);
-        var strokePaint = new Paint { Color = Color.Black, AntiAlias = true, StrokeWidth = Math.Max(2f, 2f * scale) };
+        using var strokePaint = new Paint { Color = Color.Black, AntiAlias = true, StrokeWidth = Math.Max(2f, 2f * scale) };
         strokePaint.SetStyle(Paint.Style.Stroke);
 
         canvas.DrawPath(path, fillPaint);
@@ -642,14 +764,24 @@ public class RdpSessionActivity : AppCompatActivity, ISurfaceHolderCallback, Vie
 
     private View CreateScrollWheelBar()
     {
+        float density = Resources?.DisplayMetrics?.Density ?? 2.0f;
+        int barW = (int)(20 * density);
+        int barH = (int)(160 * density);
+
         var bar = new View(this);
-        var lp = new FrameLayout.LayoutParams(40, 300)
+        var lp = new FrameLayout.LayoutParams(barW, barH)
         {
             Gravity = GravityFlags.Right | GravityFlags.CenterVertical,
-            RightMargin = 8
+            RightMargin = (int)(6 * density)
         };
         bar.LayoutParameters = lp;
-        bar.SetBackgroundColor(Color.Argb(80, 255, 255, 255));
+
+        var bg = new GradientDrawable();
+        bg.SetShape(ShapeType.Rectangle);
+        bg.SetCornerRadius(10 * density);
+        bg.SetColor(Color.Argb(80, 255, 255, 255));
+        bg.SetStroke((int)(1 * density), Color.Argb(40, 0, 0, 0));
+        bar.Background = bg;
 
         float lastY = 0;
         bar.SetOnTouchListener(new CustomTouchListener((v, e) =>
@@ -662,7 +794,7 @@ public class RdpSessionActivity : AppCompatActivity, ISurfaceHolderCallback, Vie
             if (e.Action == MotionEventActions.Move)
             {
                 float delta = e.GetY() - lastY;
-                if (Math.Abs(delta) > 16)
+                if (Math.Abs(delta) > 12)
                 {
                     bool up = delta < 0;
                     TriggerHaptic();
@@ -681,27 +813,45 @@ public class RdpSessionActivity : AppCompatActivity, ISurfaceHolderCallback, Vie
 
     private View CreateTopControls()
     {
-        var container = new LinearLayout(this)
+        float density = Resources?.DisplayMetrics?.Density ?? 2.0f;
+        int safeTop = (int)(28 * density);
+        if (Build.VERSION.SdkInt >= BuildVersionCodes.R)
+        {
+            var insets = WindowManager?.CurrentWindowMetrics?.WindowInsets?.GetInsetsIgnoringVisibility(
+                WindowInsetsCompat.Type.StatusBars() | WindowInsetsCompat.Type.DisplayCutout());
+            if (insets != null && insets.Top > safeTop)
+            {
+                safeTop = insets.Top + (int)(4 * density);
+            }
+        }
+
+        var topBar = new LinearLayout(this)
         {
             Orientation = global::Android.Widget.Orientation.Horizontal,
-            LayoutParameters = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WrapContent,
-                ViewGroup.LayoutParams.WrapContent)
-            {
-                Gravity = GravityFlags.Top | GravityFlags.CenterHorizontal,
-                TopMargin = 8
-            }
+            Elevation = 20f
         };
-
-        var keysBtn = new Button(this)
+        var lpTop = new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WrapContent,
+            ViewGroup.LayoutParams.WrapContent)
         {
-            Text = "☰ Keys",
-            TextSize = 11,
-            LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, 80)
+            Gravity = GravityFlags.Top | GravityFlags.CenterHorizontal,
+            TopMargin = safeTop
         };
-        keysBtn.SetBackgroundColor(Color.Argb(180, 20, 20, 25));
-        keysBtn.SetTextColor(Color.White);
-        keysBtn.Click += (_, _) =>
+        topBar.LayoutParameters = lpTop;
+        topBar.SetPadding((int)(8 * density), (int)(4 * density), (int)(8 * density), (int)(4 * density));
+
+        var bg = new GradientDrawable();
+        bg.SetShape(ShapeType.Rectangle);
+        bg.SetCornerRadius(18 * density);
+        bg.SetColor(Color.Argb(215, 20, 20, 25));
+        bg.SetStroke((int)(1 * density), Color.Argb(80, 255, 255, 255));
+        topBar.Background = bg;
+
+        int btnHeight = (int)(32 * density);
+        int padH = (int)(10 * density);
+
+        // Keys drawer toggle button
+        var keysBtn = CreatePillButton("☰ Keys", btnHeight, padH, () =>
         {
             if (_modifierDrawer != null)
             {
@@ -709,24 +859,67 @@ public class RdpSessionActivity : AppCompatActivity, ISurfaceHolderCallback, Vie
                     ? ViewStates.Gone
                     : ViewStates.Visible;
             }
-        };
-        container.AddView(keysBtn);
+        });
+        topBar.AddView(keysBtn);
 
-        _topModeBtn = new Button(this)
+        // Input Mode toggle button
+        _topModeBtn = CreatePillButton(_directTouchMode ? "👆 Touch" : "🖱 Trackpad", btnHeight, padH, () => ToggleInputMode());
+        var lpMode = (LinearLayout.LayoutParams)_topModeBtn.LayoutParameters!;
+        lpMode.LeftMargin = (int)(6 * density);
+        topBar.AddView(_topModeBtn);
+
+        // Soft keyboard toggle button
+        var kbdBtn = CreatePillButton("⌨ Kbd", btnHeight, padH, ToggleSoftKeyboard);
+        var lpKbd = (LinearLayout.LayoutParams)kbdBtn.LayoutParameters!;
+        lpKbd.LeftMargin = (int)(6 * density);
+        topBar.AddView(kbdBtn);
+
+        // 1:1 Fit/Reset Zoom
+        var zoomResetBtn = CreatePillButton("🔍 1:1", btnHeight, padH, () =>
         {
-            Text = _directTouchMode ? "👆 Touch" : "🖱 Trackpad",
-            TextSize = 11,
-            LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, 80)
-            {
-                LeftMargin = 8
-            }
-        };
-        _topModeBtn.SetBackgroundColor(Color.Argb(180, 20, 20, 25));
-        _topModeBtn.SetTextColor(Color.White);
-        _topModeBtn.Click += (_, _) => ToggleInputMode();
-        container.AddView(_topModeBtn);
+            _scale = 1.0f;
+            _panX = 0f;
+            _panY = 0f;
+            RedrawCurrentFrame();
+            UpdateCursorPosition();
+            Toast.MakeText(this, "Zoom reset (1:1 Fit)", ToastLength.Short)?.Show();
+        });
+        var lpZoom = (LinearLayout.LayoutParams)zoomResetBtn.LayoutParameters!;
+        lpZoom.LeftMargin = (int)(6 * density);
+        topBar.AddView(zoomResetBtn);
 
-        return container;
+        // Disconnect button
+        var discBtn = CreatePillButton("✕", btnHeight, (int)(12 * density), () =>
+        {
+            _session?.Disconnect();
+            Finish();
+        }, isDanger: true);
+        var lpDisc = (LinearLayout.LayoutParams)discBtn.LayoutParameters!;
+        lpDisc.LeftMargin = (int)(6 * density);
+        topBar.AddView(discBtn);
+
+        return topBar;
+    }
+
+    private Button CreatePillButton(string text, int height, int padH, Action onClick, bool isDanger = false)
+    {
+        float density = Resources?.DisplayMetrics?.Density ?? 2.0f;
+        var btn = new Button(this)
+        {
+            Text = text,
+            TextSize = 10,
+            LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, height)
+        };
+        btn.SetPadding(padH, 0, padH, 0);
+
+        var bg = new GradientDrawable();
+        bg.SetShape(ShapeType.Rectangle);
+        bg.SetCornerRadius(16 * density);
+        bg.SetColor(isDanger ? Color.Argb(200, 160, 30, 30) : Color.Argb(180, 45, 45, 55));
+        btn.Background = bg;
+        btn.SetTextColor(Color.White);
+        btn.Click += (_, _) => onClick();
+        return btn;
     }
 
     private void ToggleInputMode()
@@ -734,95 +927,129 @@ public class RdpSessionActivity : AppCompatActivity, ISurfaceHolderCallback, Vie
         _directTouchMode = !_directTouchMode;
         string modeLabel = _directTouchMode ? "👆 Touch" : "🖱 Trackpad";
         if (_topModeBtn != null) _topModeBtn.Text = modeLabel;
-        if (_drawerModeBtn != null) _drawerModeBtn.Text = _directTouchMode ? "Touch Mode" : "Trackpad Mode";
         UpdateCursorPosition();
         Toast.MakeText(this, _directTouchMode ? "Direct Touch Mode" : "Virtual Trackpad Mode", ToastLength.Short)?.Show();
     }
 
     private LinearLayout CreateModifierDrawer()
     {
+        float density = Resources?.DisplayMetrics?.Density ?? 2.0f;
+        int safeTop = (int)(28 * density);
+        if (Build.VERSION.SdkInt >= BuildVersionCodes.R)
+        {
+            var insets = WindowManager?.CurrentWindowMetrics?.WindowInsets?.GetInsetsIgnoringVisibility(
+                WindowInsetsCompat.Type.StatusBars() | WindowInsetsCompat.Type.DisplayCutout());
+            if (insets != null && insets.Top > safeTop)
+            {
+                safeTop = insets.Top + (int)(4 * density);
+            }
+        }
+        int drawerTopMargin = safeTop + (int)(46 * density);
+
         var drawer = new LinearLayout(this)
         {
             Orientation = global::Android.Widget.Orientation.Vertical,
             Visibility = ViewStates.Gone,
+            Elevation = 25f,
             LayoutParameters = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MatchParent,
+                ViewGroup.LayoutParams.WrapContent,
                 ViewGroup.LayoutParams.WrapContent)
             {
-                Gravity = GravityFlags.Top
+                Gravity = GravityFlags.Top | GravityFlags.CenterHorizontal,
+                TopMargin = drawerTopMargin
             }
         };
-        drawer.SetPadding(12, 12, 12, 12);
-        drawer.SetBackgroundColor(Color.Argb(230, 14, 14, 16));
+        drawer.SetPadding((int)(10 * density), (int)(8 * density), (int)(10 * density), (int)(8 * density));
 
-        // Row 1: Esc, Tab, Ctrl, Alt, Shift, Win, CAD, Disconnect
-        var row1 = new LinearLayout(this) { Orientation = global::Android.Widget.Orientation.Horizontal };
-        AddKeyButton(row1, "Esc", () => SendScanCode(0x01));
-        AddKeyButton(row1, "Tab", () => SendScanCode(0x0F));
-        var btnCtrl = AddToggleKeyButton(row1, "Ctrl", ref _ctrlActive, 0x1D);
-        var btnAlt = AddToggleKeyButton(row1, "Alt", ref _altActive, 0x38);
-        var btnShift = AddToggleKeyButton(row1, "Shift", ref _shiftActive, 0x2A);
-        var btnWin = AddToggleKeyButton(row1, "Win", ref _winActive, 0x5B, extended: true);
-        AddKeyButton(row1, "Ctrl+Alt+Del", SendCtrlAltDel);
+        var bg = new GradientDrawable();
+        bg.SetShape(ShapeType.Rectangle);
+        bg.SetCornerRadius(14 * density);
+        bg.SetColor(Color.Argb(240, 18, 18, 24));
+        bg.SetStroke((int)(1 * density), Color.Argb(100, 255, 255, 255));
+        drawer.Background = bg;
 
-        var btnDisc = new Button(this) { Text = "✕ Disconnect", TextSize = 11 };
-        btnDisc.SetTextColor(Color.Red);
-        btnDisc.SetBackgroundColor(Color.Argb(180, 50, 20, 20));
-        btnDisc.Click += (_, _) =>
+        int keyH = (int)(32 * density);
+
+        // Row 1: Modifier and Special Keys
+        var row1 = new LinearLayout(this)
         {
-            _session?.Disconnect();
-            Finish();
+            Orientation = global::Android.Widget.Orientation.Horizontal,
+            LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent)
         };
-        row1.AddView(btnDisc);
+        AddDrawerKey(row1, "Esc", keyH, () => SendScanCode(0x01));
+        AddDrawerKey(row1, "Tab", keyH, () => SendScanCode(0x0F));
+        AddToggleKeyButton(row1, "Ctrl", keyH, ref _ctrlActive, 0x1D);
+        AddToggleKeyButton(row1, "Alt", keyH, ref _altActive, 0x38);
+        AddToggleKeyButton(row1, "Shift", keyH, ref _shiftActive, 0x2A);
+        AddToggleKeyButton(row1, "Win", keyH, ref _winActive, 0x5B, extended: true);
+        AddDrawerKey(row1, "Ctrl+Alt+Del", keyH, SendCtrlAltDel, isAccent: true);
         drawer.AddView(row1);
 
-        // Row 2: F1 - F12
-        var row2 = new LinearLayout(this) { Orientation = global::Android.Widget.Orientation.Horizontal };
+        // Row 2: F1 - F12 inside a HorizontalScrollView
+        var fScroll = new HorizontalScrollView(this)
+        {
+            LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent)
+            {
+                TopMargin = (int)(6 * density)
+            },
+            HorizontalScrollBarEnabled = false
+        };
+        var rowF = new LinearLayout(this) { Orientation = global::Android.Widget.Orientation.Horizontal };
         ushort[] fCodes = [0x3B, 0x3C, 0x3D, 0x3E, 0x3F, 0x40, 0x41, 0x42, 0x43, 0x44, 0x57, 0x58];
         for (int i = 0; i < 12; i++)
         {
             ushort code = fCodes[i];
-            AddKeyButton(row2, $"F{i + 1}", () => SendScanCode(code));
+            AddDrawerKey(rowF, $"F{i + 1}", keyH, () => SendScanCode(code));
         }
-        drawer.AddView(row2);
-
-        // Row 3: Soft keyboard, Mouse Mode toggle, Zoom 1:1 Reset
-        var row3 = new LinearLayout(this) { Orientation = global::Android.Widget.Orientation.Horizontal };
-        AddKeyButton(row3, "⌨ Keyboard", ToggleSoftKeyboard);
-        _drawerModeBtn = new Button(this)
-        {
-            Text = _directTouchMode ? "Touch Mode" : "Trackpad Mode",
-            TextSize = 10
-        };
-        _drawerModeBtn.SetBackgroundColor(Color.Argb(180, 35, 35, 42));
-        _drawerModeBtn.SetTextColor(Color.White);
-        _drawerModeBtn.Click += (_, _) => ToggleInputMode();
-        row3.AddView(_drawerModeBtn);
-
-        AddKeyButton(row3, "🔍 1:1 Reset", () =>
-        {
-            _scale = 1.0f;
-            _panX = 0f;
-            _panY = 0f;
-        });
-        drawer.AddView(row3);
+        fScroll.AddView(rowF);
+        drawer.AddView(fScroll);
 
         return drawer;
     }
 
-    private void AddKeyButton(LinearLayout row, string label, Action action)
+    private void AddDrawerKey(LinearLayout row, string label, int height, Action action, bool isAccent = false)
     {
-        var btn = new Button(this) { Text = label, TextSize = 10 };
-        btn.SetBackgroundColor(Color.Argb(180, 35, 35, 42));
+        float density = Resources?.DisplayMetrics?.Density ?? 2.0f;
+        var btn = new Button(this)
+        {
+            Text = label,
+            TextSize = 10,
+            LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, height)
+            {
+                RightMargin = (int)(4 * density)
+            }
+        };
+        btn.SetPadding((int)(8 * density), 0, (int)(8 * density), 0);
+
+        var bg = new GradientDrawable();
+        bg.SetShape(ShapeType.Rectangle);
+        bg.SetCornerRadius(8 * density);
+        bg.SetColor(isAccent ? Color.Argb(200, 180, 50, 40) : Color.Argb(180, 40, 40, 48));
+        btn.Background = bg;
         btn.SetTextColor(Color.White);
         btn.Click += (_, _) => action();
         row.AddView(btn);
     }
 
-    private Button AddToggleKeyButton(LinearLayout row, string label, ref bool flagRef, ushort code, bool extended = false)
+    private Button AddToggleKeyButton(LinearLayout row, string label, int height, ref bool flagRef, ushort code, bool extended = false)
     {
-        var btn = new Button(this) { Text = label, TextSize = 10 };
-        btn.SetBackgroundColor(Color.Argb(180, 35, 35, 42));
+        float density = Resources?.DisplayMetrics?.Density ?? 2.0f;
+        var btn = new Button(this)
+        {
+            Text = label,
+            TextSize = 10,
+            LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, height)
+            {
+                RightMargin = (int)(4 * density)
+            }
+        };
+        btn.SetPadding((int)(8 * density), 0, (int)(8 * density), 0);
+
+        var bg = new GradientDrawable();
+        bg.SetShape(ShapeType.Rectangle);
+        bg.SetCornerRadius(8 * density);
+        bg.SetColor(Color.Argb(180, 40, 40, 48));
+        btn.Background = bg;
         btn.SetTextColor(Color.White);
 
         btn.Click += (_, _) =>
@@ -837,7 +1064,12 @@ public class RdpSessionActivity : AppCompatActivity, ISurfaceHolderCallback, Vie
                           (label == "Shift" && _shiftActive) ||
                           (label == "Win" && _winActive);
 
-            btn.SetBackgroundColor(active ? Color.Argb(220, 0, 95, 184) : Color.Argb(180, 35, 35, 42));
+            var activeBg = new GradientDrawable();
+            activeBg.SetShape(ShapeType.Rectangle);
+            activeBg.SetCornerRadius(8 * density);
+            activeBg.SetColor(active ? Color.Argb(230, 0, 120, 215) : Color.Argb(180, 40, 40, 48));
+            btn.Background = activeBg;
+
             _session?.SendKeyboardScanCode(code, active, extended);
         };
         row.AddView(btn);
@@ -933,11 +1165,41 @@ public class RdpSessionActivity : AppCompatActivity, ISurfaceHolderCallback, Vie
         private readonly RdpSessionActivity _act;
         public ScaleListener(RdpSessionActivity act) => _act = act;
 
+        public override bool OnScaleBegin(ScaleGestureDetector detector)
+        {
+            _act._isScaling = true;
+            return true;
+        }
+
         public override bool OnScale(ScaleGestureDetector detector)
         {
-            _act._scale *= detector.ScaleFactor;
-            _act._scale = Math.Clamp(_act._scale, 1.0f, 4.0f);
+            float factor = detector.ScaleFactor;
+            if (factor <= 0 || float.IsNaN(factor) || float.IsInfinity(factor)) return true;
+
+            float oldScale = _act._scale;
+            float newScale = Math.Clamp(oldScale * factor, 1.0f, 5.0f);
+            if (Math.Abs(newScale - oldScale) < 0.001f) return true;
+
+            float focusX = detector.FocusX;
+            float focusY = detector.FocusY;
+
+            // Zoom around touch focal point
+            float scaleRatio = newScale / oldScale;
+            float screenCenterX = _act._screenWidth / 2f;
+            float screenCenterY = _act._screenHeight / 2f;
+
+            _act._panX = (focusX - screenCenterX) - scaleRatio * (focusX - screenCenterX - _act._panX);
+            _act._panY = (focusY - screenCenterY) - scaleRatio * (focusY - screenCenterY - _act._panY);
+            _act._scale = newScale;
+
+            _act.RedrawCurrentFrame();
+            _act.UpdateCursorPosition();
             return true;
+        }
+
+        public override void OnScaleEnd(ScaleGestureDetector detector)
+        {
+            _act._isScaling = false;
         }
     }
 

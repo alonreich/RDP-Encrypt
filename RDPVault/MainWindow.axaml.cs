@@ -520,6 +520,7 @@ public partial class MainWindow : Window
                 if (u.CanSkip)
                 {
                     BtnSkipStage.Content = u.SkipStageLabel ?? "SKIP";
+                    BtnSkipStage.IsEnabled = true;
                     BtnSkipStage.IsVisible = true;
                 }
                 else

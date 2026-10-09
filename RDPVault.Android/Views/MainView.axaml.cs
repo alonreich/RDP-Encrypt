@@ -2354,6 +2354,13 @@ public partial class MainView : UserControl
         {
             await Task.Delay(150, ct);
 
+            if (profile.EnableWol && !string.IsNullOrWhiteSpace(profile.WolMacAddress))
+            {
+                await RunWolSequenceAsync(profile, host, ct);
+            }
+
+            if (ct.IsCancellationRequested) return;
+
             if (profile.EnableIcmpKnock)
             {
                 bool isTcp = string.Equals(profile.KnockProtocol, "TCP", StringComparison.OrdinalIgnoreCase);
@@ -2370,6 +2377,7 @@ public partial class MainView : UserControl
                         _skipWait = false;
                         _skipWolWait = false;
                         BtnSkipWolWait.Content = "SKIP PORT KNOCKING";
+                        BtnSkipWolWait.IsEnabled = true;
                         BtnSkipWolWait.IsVisible = true;
                         for (int s = delaySec; s > 0; s--)
                         {
@@ -2396,13 +2404,6 @@ public partial class MainView : UserControl
                     TxtLaunchCountdown.IsVisible = false;
                     ProgLaunch.IsIndeterminate = true;
                 }
-            }
-
-            if (ct.IsCancellationRequested) return;
-
-            if (profile.EnableWol && !string.IsNullOrWhiteSpace(profile.WolMacAddress))
-            {
-                await RunWolSequenceAsync(profile, host, ct);
             }
 
             if (ct.IsCancellationRequested) return;
@@ -2482,6 +2483,7 @@ public partial class MainView : UserControl
         _skipWait = false;
         _skipWolWait = false;
         BtnSkipWolWait.Content = "SKIP WAKE-ON-LAN";
+        BtnSkipWolWait.IsEnabled = true;
         BtnSkipWolWait.IsVisible = true;
         int total = profile.WolWaitSeconds;
         for (int s = total; s > 0; s--)

@@ -366,56 +366,6 @@ public static class RdpLauncher
         }
         catch (ArgumentException ex) { LaunchFailed?.Invoke(ex.Message); return false; }
 
-        if (p.EnableIcmpKnock)
-        {
-            bool isTcp = string.Equals(p.KnockProtocol, "TCP", StringComparison.OrdinalIgnoreCase);
-            int delaySec = p.KnockDelaySeconds >= 0 ? p.KnockDelaySeconds : 2;
-            SkipWaitRequested = false;
-            progress?.Invoke(new LaunchProgressUpdate
-            {
-                Step = "Port Knocking",
-                Details = isTcp
-                    ? $"Sending TCP knock to {p.Host}:{p.KnockTcpPort}..."
-                    : $"Sending ICMP magic packet to {p.Host}...",
-                IsIndeterminate = true
-            });
-            try
-            {
-                await IcmpKnock.SendKnockAsync(p, IcmpKnock.SendWindowsAsync, ct);
-                if (delaySec > 0)
-                {
-                    for (int s = delaySec; s > 0; s--)
-                    {
-                        if (ct.IsCancellationRequested || SkipWaitRequested) break;
-                        double percent = 100.0 * (delaySec - s) / delaySec;
-                        progress?.Invoke(new LaunchProgressUpdate
-                        {
-                            Step = "Port Knocking",
-                            Details = $"Port knock sent. Waiting {s}s before connecting...",
-                            SecondsRemaining = s,
-                            ProgressPercent = percent,
-                            IsIndeterminate = false,
-                            CanSkip = true,
-                            SkipStageLabel = "SKIP PORT KNOCKING"
-                        });
-                        await Task.Delay(1000, ct);
-                    }
-                }
-            }
-            catch (OperationCanceledException) { LaunchFailed?.Invoke("Connection cancelled."); return false; }
-            catch (Exception ex) { LaunchFailed?.Invoke("Port knock could not be sent: " + ex.Message); return false; }
-            finally
-            {
-                progress?.Invoke(new LaunchProgressUpdate { CanSkip = false, IsIndeterminate = true });
-            }
-        }
-
-        if (ct.IsCancellationRequested)
-        {
-            LaunchFailed?.Invoke("Connection cancelled by user.");
-            return false;
-        }
-
         if (p.EnableWol && !string.IsNullOrWhiteSpace(p.WolMacAddress))
         {
             SessionStarted?.Invoke($"{p.Name} (Sending Wake-on-LAN magic packet...)");
@@ -486,6 +436,56 @@ public static class RdpLauncher
                         return false;
                     }
                 }
+                progress?.Invoke(new LaunchProgressUpdate { CanSkip = false, IsIndeterminate = true });
+            }
+        }
+
+        if (ct.IsCancellationRequested)
+        {
+            LaunchFailed?.Invoke("Connection cancelled by user.");
+            return false;
+        }
+
+        if (p.EnableIcmpKnock)
+        {
+            bool isTcp = string.Equals(p.KnockProtocol, "TCP", StringComparison.OrdinalIgnoreCase);
+            int delaySec = p.KnockDelaySeconds >= 0 ? p.KnockDelaySeconds : 2;
+            SkipWaitRequested = false;
+            progress?.Invoke(new LaunchProgressUpdate
+            {
+                Step = "Port Knocking",
+                Details = isTcp
+                    ? $"Sending TCP knock to {p.Host}:{p.KnockTcpPort}..."
+                    : $"Sending ICMP magic packet to {p.Host}...",
+                IsIndeterminate = true
+            });
+            try
+            {
+                await IcmpKnock.SendKnockAsync(p, IcmpKnock.SendWindowsAsync, ct);
+                if (delaySec > 0)
+                {
+                    for (int s = delaySec; s > 0; s--)
+                    {
+                        if (ct.IsCancellationRequested || SkipWaitRequested) break;
+                        double percent = 100.0 * (delaySec - s) / delaySec;
+                        progress?.Invoke(new LaunchProgressUpdate
+                        {
+                            Step = "Port Knocking",
+                            Details = $"Port knock sent. Waiting {s}s before connecting...",
+                            SecondsRemaining = s,
+                            ProgressPercent = percent,
+                            IsIndeterminate = false,
+                            CanSkip = true,
+                            SkipStageLabel = "SKIP PORT KNOCKING"
+                        });
+                        await Task.Delay(1000, ct);
+                    }
+                }
+            }
+            catch (OperationCanceledException) { LaunchFailed?.Invoke("Connection cancelled."); return false; }
+            catch (Exception ex) { LaunchFailed?.Invoke("Port knock could not be sent: " + ex.Message); return false; }
+            finally
+            {
                 progress?.Invoke(new LaunchProgressUpdate { CanSkip = false, IsIndeterminate = true });
             }
         }

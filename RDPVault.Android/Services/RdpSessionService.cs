@@ -190,12 +190,13 @@ public class RdpSessionService : Service
 
     private Notification BuildNotification()
     {
-        var launchIntent = new Intent(this, typeof(RdpSessionActivity));
-        launchIntent.AddFlags(ActivityFlags.SingleTop);
-        var pendingIntent = PendingIntent.GetActivity(
+        var resumeIntent = new Intent(this, typeof(MainActivity));
+        resumeIntent.SetAction(ActionResumeRemoteDesktop);
+        resumeIntent.AddFlags(ActivityFlags.SingleTop | ActivityFlags.ClearTop);
+        var resumePendingIntent = PendingIntent.GetActivity(
             this,
             0,
-            launchIntent,
+            resumeIntent,
             PendingIntentFlags.UpdateCurrent | PendingIntentFlags.Immutable);
 
         var endIntent = new Intent(this, typeof(RdpSessionService));
@@ -223,12 +224,12 @@ public class RdpSessionService : Service
         builder.SetCategory(NotificationCompat.CategoryService);
         builder.SetVisibility(NotificationCompat.VisibilitySecret);
 
-        if (pendingIntent != null)
+        if (resumePendingIntent != null)
         {
-            builder.SetContentIntent(pendingIntent);
+            builder.SetContentIntent(resumePendingIntent);
         }
 
-        builder.AddAction(Resource.Drawable.ic_stat_vault, "Open Session", pendingIntent);
+        builder.AddAction(Resource.Drawable.ic_stat_vault, "Resume", resumePendingIntent);
         builder.AddAction(Resource.Drawable.ic_stat_vault, "Disconnect", endPendingIntent);
 
         var notification = builder.Build();

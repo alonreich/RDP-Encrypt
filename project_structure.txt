@@ -2280,10 +2280,39 @@ SECTION 32 — PRE-CONNECT SEQUENCING, VIEWPORT REPAIR & INTERACTIVE GESTURES (2
 32.D - TOP CONTROLS & MODIFIER DRAWER ERGONOMICS:
   1. Safe Inset & Display Cutout Protection:
      - Top pill bar calculates safe status bar and camera notch insets via WindowInsetsCompat, preventing top buttons from clipping into display edges.
-     - Centered floating pill contains: [☰ Keys], [Mode Toggle], [⌨ Keyboard], [🔍 1:1], and [✕ Disconnect].
   2. Anchored Modifier Drawer:
      - Modifier drawer is anchored strictly below the top pill bar with dedicated vertical margin, completely eliminating overlap.
      - Drawer hosts modifier keys (Esc, Tab, Ctrl, Alt, Shift, Win, Ctrl+Alt+Del) and a horizontally scrollable container for F1-F12 keys.
+
+32.E - SECURE RESUME FLOW, SMART-COLLAPSE TOOLBAR, ONE-SHOT CLICK FLIPPER & EDGE SCROLLING (2026-10-09):
+  1. Zero False-Positive Session Notification & Service Lifecycle:
+     - RdpSessionService foreground notification is initiated strictly upon receiving `OnSessionConnected()` callback
+       from the embedded FreeRDP engine. Pre-connection, port knocking, and authentication handshake stages never create
+       premature "connected" indicators or false-positive resume states.
+     - Notification teardown occurs immediately inside `OnSessionDisconnected()` or `OnDestroy()`.
+  2. Cryptographic Vault Protection on Session Resume:
+     - When switching apps or backgrounding during an active session, `MainActivity` enforces immediate vault re-locking
+       in memory. Master keys and profiles remain sealed in hardware KeyStore / StrongBox.
+     - Tapping the ongoing notification or in-app resume banner routes through `MainActivity`, requiring biometric
+       (fingerprint / 3D face) or master password re-authentication before transferring the user back to the live remote desktop.
+     - The notification's [Disconnect] action executes directly via background service intent, terminating the session
+       without unlocking the vault or exposing credentials.
+  3. Re-Ordered Top Toolbar & Smart Auto-Collapse:
+     - Button layout from left to right: `[🖱 Pointer / 👆 Touchpad]` -> `[🖱 Left / Right Click]` -> `[⌨ Keyboard]` -> `[☰ Keys]` -> `[✕ Disconnect]`.
+     - Zoom reset button completely removed; users control viewport magnification freely via pinch-to-zoom.
+     - Floating toolbar auto-collapses after 3.5 seconds of inactivity into an unobtrusive top mini-tab (`[ ☰ ]`, 46x18dp)
+       to avoid obstructing remote windows, taskbars, or menus. Tapping the mini-tab smoothly expands the toolbar.
+  4. One-Shot Right/Left Click Flipper:
+     - Located prominently on the top toolbar (avoiding clumsy cursor-attached overlays).
+     - Tapping toggles to armed Right Click state (highlighted in vivid amber).
+     - The next touch or click executes a remote right-click and immediately auto-reverts to Left Click (One-Shot design).
+  5. Zoomed-In Edge Auto-Scrolling:
+     - When viewport is zoomed in (`_scale > 1.05f`), moving the virtual cursor within 28dp of the screen boundary triggers
+       smooth, accelerating viewport panning.
+     - Clamped strictly to physical PC boundaries `(0..rw, 0..rh)`, preventing false scrolling past desktop borders.
+  6. Back Gesture Confirmation Guard & Native Mouse Forwarding:
+     - Android Back navigation intercepted with native confirmation dialog ("Disconnect Remote Desktop? [Disconnect] / [Keep Connected]").
+     - Physical Bluetooth/USB mouse buttons and scroll wheel events forwarded directly 1:1 to the remote PC.
 
 --------------------------------------------------------------------------------
 END OF FILE — keep synchronized with the code.

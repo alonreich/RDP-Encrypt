@@ -662,18 +662,34 @@ public partial class MainView : UserControl
         return false;
     }
 
+    public bool IsVaultUnlocked => _masterKey != null;
+    private bool _pendingResumeAfterUnlock;
+
     /// <summary>Locks the vault if it is currently open. Safe to call from any state.</summary>
     public void AutoLockIfUnlocked()
     {
-        if (MainActivity.Instance?.IsSessionActive == true || RdpSessionBridge.ActiveSession != null)
-        {
-            return;
-        }
-
         if (_masterKey != null)
         {
             LockVault();
         }
+    }
+
+    public void PromptUnlockForSessionResume()
+    {
+        _pendingResumeAfterUnlock = true;
+        if (_masterKey != null)
+        {
+            _pendingResumeAfterUnlock = false;
+            RdpLauncher.ResumeRemoteDesktop(AndroidContext);
+            return;
+        }
+
+        if (!PanelLocked.IsVisible)
+        {
+            ShowLockScreen();
+        }
+        _biometricPromptSuppressed = false;
+        _ = UnlockWithBiometricsAsync();
     }
 
     private void ShowPanel(Control panel)
@@ -1279,6 +1295,13 @@ public partial class MainView : UserControl
         ShowPanel(PanelUnlocked);
         ApplyLockSettingsToActivity();
         NotifyUserActivity();
+
+        if (_pendingResumeAfterUnlock)
+        {
+            _pendingResumeAfterUnlock = false;
+            RdpLauncher.ResumeRemoteDesktop(AndroidContext);
+            return;
+        }
 
         bool hasBio = FindDeviceSeal() != null;
         TxtUnlockedStatus.Text = hasBio

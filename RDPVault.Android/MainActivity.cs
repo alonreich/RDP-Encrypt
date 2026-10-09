@@ -238,7 +238,7 @@ public class MainActivity : AvaloniaMainActivity<App>
         {
             ResolveMainView()?.SuspendIdleTimer();
 
-            if (LockImmediatelyOnBackground && !IsExternalActivitySuppressed && !IsSessionActive && !IsConnecting)
+            if (LockImmediatelyOnBackground && !IsExternalActivitySuppressed && !IsConnecting)
             {
                 Avalonia.Threading.Dispatcher.UIThread.Post(() =>
                 {
@@ -310,6 +310,12 @@ public class MainActivity : AvaloniaMainActivity<App>
                     catch { }
                 });
             });
+
+            if (Intent?.Action == RdpSessionService.ActionResumeRemoteDesktop)
+            {
+                Intent.SetAction("");
+                HandleResumeRemoteDesktopIntent();
+            }
         }
         catch (Exception ex)
         {
@@ -326,6 +332,33 @@ public class MainActivity : AvaloniaMainActivity<App>
             EndForegroundSession();
             OnSessionEndedFromNotification();
         }
+        else if (intent?.Action == RdpSessionService.ActionResumeRemoteDesktop)
+        {
+            HandleResumeRemoteDesktopIntent();
+        }
+    }
+
+    public void HandleResumeRemoteDesktopIntent()
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            var mainView = ResolveMainView();
+            if (mainView != null)
+            {
+                if (mainView.IsVaultUnlocked)
+                {
+                    Rdp.RdpLauncher.ResumeRemoteDesktop(this);
+                }
+                else
+                {
+                    mainView.PromptUnlockForSessionResume();
+                }
+            }
+            else if (IsSessionActive)
+            {
+                Rdp.RdpLauncher.ResumeRemoteDesktop(this);
+            }
+        });
     }
 
     /// <summary>

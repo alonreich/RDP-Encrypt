@@ -5,11 +5,11 @@ SOURCE OF TRUTH & GUIDANCE FOR ANY AI AGENT (OR HUMAN) WORKING ON THIS PROJECT
 Last updated : 2026-10-09
 Version      : 2026.10.09  (Windows 1.1.0, Android companion 2.0.0 Embedded FreeRDP Engine)
 Status       : Windows: production release, compiled and tested with .NET 9 SDK on Windows 10/11 x64.
-               SHA-256 (compiled\RDPVault.exe): 62E57E7651B82C9730592DA7C2D46BE2B048927EF195EA559F7CE8FB5A1B81EB
-               Android: 2.0.0 embedded FreeRDP engine with landscape matrix scaling & direct touch / trackpad support.
-               compiled\RDPVault.apk ~66.9 MiB (70,133,400 bytes), versionCode 3 / versionName 2.0.0.
+               SHA-256 (compiled\RDPVault.exe): 9C44DEDA59047C6D35209068D79A1B34C28A6698FC0715435C13B5663B153794
+               Android: 2.0.0 embedded FreeRDP engine with landscape matrix scaling, TextureView & direct touch / trackpad support.
+               compiled\RDPVault.apk ~66.9 MiB (70,157,976 bytes), versionCode 3 / versionName 2.0.0.
                Minimum Android is 9 (API 28); built against API 34/35 with native ABIs arm64-v8a & x86_64.
-               SECTIONS 30 & 31 supersede all prior statements regarding external intent handoff,
+               SECTIONS 30, 31 & 32 supersede all prior statements regarding external intent handoff,
                RdpAutoTypeService, and Android Accessibility Service requirements.
 
 --------------------------------------------------------------------------------
@@ -2236,6 +2236,54 @@ SECTION 31 — CONNECTION AWAKE LOCK, UI NOISE ELIMINATION & FREERDP HARDENING (
        `Authenticate` (offset 50) and `PreConnect` (offset 48) callbacks directly on `_instance`.
      - When `SuppressCertWarnings` is true, certificate callbacks immediately return 2 (accept session certificate),
        preventing TLS handshake rejections on self-signed server certificates.
+
+--------------------------------------------------------------------------------
+SECTION 32 — PRE-CONNECT SEQUENCING, VIEWPORT REPAIR & INTERACTIVE GESTURES (2026-10-09)
+--------------------------------------------------------------------------------
+32.A - PRE-CONNECTION EXECUTION ORDER (WINDOWS & ANDROID):
+  1. Wake-on-LAN First, Port Knocking Second Mandate:
+     - Enforced strictly in both Windows (RdpLauncher.cs) and Android (MainView.axaml.cs) pipelines.
+     - The physical machine is awakened first via Wake-on-LAN magic packet dispatch.
+     - Port Knocking executes second, triggering the firewall / packet-filter whitelist right as the remote host boots up.
+  2. Dynamic Interactive Stage Skips:
+     - Each stage features dynamic, context-aware skip buttons ("SKIP WAKE-ON-LAN" and "SKIP PORT KNOCKING").
+     - Clicking skip immediately advances to the subsequent stage without aborting the connection pipeline.
+     - Re-enables stage skip buttons between transitions so skipping WOL does not prevent skipping Port Knocking.
+
+32.B - ANDROID VIEWPORT, ROTATION & TEXTUREVIEW MIGRATION (RdpSessionActivity.cs):
+  1. Migration from SurfaceView to TextureView:
+     - SurfaceView had an architectural flaw where orientation changes without activity recreation left the hardware
+       Surface buffer frozen in portrait dimensions (e.g. 1220x2712), pushing the landscape remote desktop into the
+       bottom-left corner as a tiny squished rectangle.
+     - TextureView integrates directly with the Android view hierarchy, automatically matching window geometry on
+       rotation (e.g. 2712x1220) with zero buffer desynchronization or letterboxing distortion.
+  2. Fluid Pinch-to-Zoom Engine:
+     - Integrated ScaleGestureDetector with custom ScaleListener supporting 1.0x to 5.0x zoom.
+     - Zooms smoothly around the touch focal point (FocusX, FocusY), adjusting viewport pan offsets (_panX, _panY).
+     - Directly triggers RedrawCurrentFrame() and UpdateCursorPosition() on each scale tick, giving instant 60 FPS visual feedback without waiting for incoming remote frames.
+  3. Interactive Viewport Pan & Boundary Clamping:
+     - Panning is strictly constrained so the remote desktop can never drift off-screen or into black space.
+     - Zoom reset (1:1 Fit) button immediately restores default fit-to-screen view.
+
+32.C - TOUCH, TRACKPAD & VIRTUAL POINTER STABILIZATION:
+  1. Decoupled Click vs Move (Eliminated Accidental Clicks):
+     - Previously, every finger lift in trackpad mode triggered a left-click, causing unintended clicks whenever the user moved the mouse.
+     - Trackpad touch engine now strictly distinguishes motion from taps: finger moves (>12px) never click on release.
+     - Quick single-tap (<300ms, <12px movement) issues Left Click.
+     - Double-tap and hold initiates Left Click Drag.
+     - Two-finger quick tap (<350ms, <12px movement) issues Right Click.
+     - Two-finger drag pans the viewport when zoomed in, or scrolls the virtual mouse wheel when at 1.0x fit.
+  2. Virtual Pointer Confinement:
+     - Pointer coordinates (_cursorX, _cursorY) are strictly clamped to [0..RemoteWidth, 0..RemoteHeight].
+     - RemoteToScreen translation ensures the pointer is always rendered cleanly inside the desktop display area and never in the black margins.
+
+32.D - TOP CONTROLS & MODIFIER DRAWER ERGONOMICS:
+  1. Safe Inset & Display Cutout Protection:
+     - Top pill bar calculates safe status bar and camera notch insets via WindowInsetsCompat, preventing top buttons from clipping into display edges.
+     - Centered floating pill contains: [☰ Keys], [Mode Toggle], [⌨ Keyboard], [🔍 1:1], and [✕ Disconnect].
+  2. Anchored Modifier Drawer:
+     - Modifier drawer is anchored strictly below the top pill bar with dedicated vertical margin, completely eliminating overlap.
+     - Drawer hosts modifier keys (Esc, Tab, Ctrl, Alt, Shift, Win, Ctrl+Alt+Del) and a horizontally scrollable container for F1-F12 keys.
 
 --------------------------------------------------------------------------------
 END OF FILE — keep synchronized with the code.

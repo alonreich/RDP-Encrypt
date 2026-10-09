@@ -2313,6 +2313,12 @@ SECTION 32 — PRE-CONNECT SEQUENCING, VIEWPORT REPAIR & INTERACTIVE GESTURES (2
   6. Back Gesture Confirmation Guard & Native Mouse Forwarding:
      - Android Back navigation intercepted with native confirmation dialog ("Disconnect Remote Desktop? [Disconnect] / [Keep Connected]").
      - Physical Bluetooth/USB mouse buttons and scroll wheel events forwarded directly 1:1 to the remote PC.
+  7. Home-Button / Background Continuity, Dedicated Task Affinity & Reattachment:
+     - Separated `RdpSessionActivity` into a dedicated task via `TaskAffinity = "com.rdpvault.app.rdpsession"` and `LaunchMode.SingleTask`.
+     - When user hits Home or switches apps, `MainActivity`'s `SingleTask` launch lifecycle does not destroy `RdpSessionActivity`.
+     - Removed `FLAG_ACTIVITY_CLEAR_TOP` from notification resume intent, preventing destructive task clearing.
+     - `OnDestroy()` in `RdpSessionActivity` strictly guards `_session.Dispose()` with `_isExplicitDisconnect`: background activity recycling never drops the underlying FreeRDP TCP connection.
+     - Added native `RequestRedraw()` in `FreeRdpSession` reading unmanaged GDI primary buffer directly, and dynamic session reattachment in `OnCreate`, `OnNewIntent`, and `OnResume` for instant zero-delay restoration.
 
 --------------------------------------------------------------------------------
 END OF FILE — keep synchronized with the code.

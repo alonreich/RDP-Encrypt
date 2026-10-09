@@ -192,7 +192,7 @@ public class RdpSessionService : Service
     {
         var resumeIntent = new Intent(this, typeof(MainActivity));
         resumeIntent.SetAction(ActionResumeRemoteDesktop);
-        resumeIntent.AddFlags(ActivityFlags.SingleTop | ActivityFlags.ClearTop);
+        resumeIntent.AddFlags(ActivityFlags.NewTask | ActivityFlags.SingleTop);
         var resumePendingIntent = PendingIntent.GetActivity(
             this,
             0,

@@ -1021,6 +1021,32 @@ public sealed class FreeRdpSession : IDisposable
         return true;
     }
 
+    public void RequestRedraw()
+    {
+        if (_isDisposed || _context == IntPtr.Zero) return;
+        try
+        {
+            IntPtr gdi = Marshal.ReadIntPtr(_context, 33 * IntPtr.Size);
+            if (gdi != IntPtr.Zero)
+            {
+                int w = Marshal.ReadInt32(gdi, 8);
+                int h = Marshal.ReadInt32(gdi, 12);
+                int stride = Marshal.ReadInt32(gdi, 16);
+                IntPtr buffer = Marshal.ReadIntPtr(gdi, 64);
+                if (w > 0 && h > 0 && buffer != IntPtr.Zero && stride > 0)
+                {
+                    RemoteWidth = w;
+                    RemoteHeight = h;
+                    FramebufferUpdated?.Invoke(0, 0, w, h, buffer, stride);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn("RequestRedraw exception: " + ex.Message);
+        }
+    }
+
     private IntPtr EnsureInputResolved()
     {
         if (_input == IntPtr.Zero && _context != IntPtr.Zero)

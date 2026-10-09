@@ -21,6 +21,8 @@ namespace RDPVault.Android.Activities;
 
 [Activity(
     Label = "Remote Desktop",
+    LaunchMode = LaunchMode.SingleTask,
+    TaskAffinity = "com.rdpvault.app.rdpsession",
     ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize | ConfigChanges.ScreenLayout |
                            ConfigChanges.SmallestScreenSize | ConfigChanges.UiMode | ConfigChanges.Density | ConfigChanges.FontScale,
     WindowSoftInputMode = SoftInput.AdjustResize,
@@ -35,6 +37,7 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
     private Bitmap? _frameBitmap;
     private byte[]? _pixelBuffer;
     private readonly object _renderLock = new();
+    private bool _isExplicitDisconnect = false;
 
     // Viewport transform
     private float _scale = 1.0f;
@@ -149,19 +152,72 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
             }
         };
 
-        // Consume in-memory configuration without exposing to Intent extras
-        var config = RdpSessionBridge.ConsumePendingConfig();
-        if (config == null)
+        // Check if there is an existing active session running in the bridge to reattach
+        if (RdpSessionBridge.ActiveSession != null && RdpSessionBridge.ActiveSession.IsConnected)
         {
-            Toast.MakeText(this, "Session configuration expired.", ToastLength.Short)?.Show();
-            Finish();
-            return;
+            _session = RdpSessionBridge.ActiveSession;
+            _cursorX = _session.RemoteWidth / 2f;
+            _cursorY = _session.RemoteHeight / 2f;
+
+            _session.Connected += OnSessionConnected;
+            _session.ConnectionFailed += OnSessionConnectionFailed;
+            _session.Disconnected += OnSessionDisconnected;
+            _session.FramebufferUpdated += OnFramebufferUpdated;
+
+            if (_loadingOverlay != null) _loadingOverlay.Visibility = ViewStates.Gone;
+            if (_progressBar != null) _progressBar.Visibility = ViewStates.Gone;
+            if (_statusText != null) _statusText.Visibility = ViewStates.Gone;
+
+            _session.RequestRedraw();
+            UpdateCursorPosition();
+            RedrawCurrentFrame();
+            ScheduleCollapseTimer();
         }
+        else
+        {
+            // Consume in-memory configuration without exposing to Intent extras
+            var config = RdpSessionBridge.ConsumePendingConfig();
+            if (config == null)
+            {
+                Toast.MakeText(this, "No active session to resume.", ToastLength.Short)?.Show();
+                Finish();
+                return;
+            }
 
-        _cursorX = config.Width / 2f;
-        _cursorY = config.Height / 2f;
+            _cursorX = config.Width / 2f;
+            _cursorY = config.Height / 2f;
 
-        InitializeAndConnect(config);
+            InitializeAndConnect(config);
+        }
+    }
+
+    protected override void OnNewIntent(Intent? intent)
+    {
+        base.OnNewIntent(intent);
+        Intent = intent;
+        ApplyImmersiveFullscreen();
+        if (_session != null && _session.IsConnected)
+        {
+            if (_loadingOverlay != null) _loadingOverlay.Visibility = ViewStates.Gone;
+            _session.RequestRedraw();
+            UpdateCursorPosition();
+            RedrawCurrentFrame();
+            ScheduleCollapseTimer();
+        }
+    }
+
+    protected override void OnResume()
+    {
+        base.OnResume();
+        ApplyImmersiveFullscreen();
+        if (_session != null && _session.IsConnected)
+        {
+            if (_loadingOverlay != null) _loadingOverlay.Visibility = ViewStates.Gone;
+            _session.RequestRedraw();
+            UpdateCursorPosition();
+            RedrawCurrentFrame();
+            ScheduleCollapseTimer();
+        }
     }
 
     private void UpdateScreenMetrics()
@@ -253,9 +309,11 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
 
     private void OnSessionConnectionFailed(string reason)
     {
+        _isExplicitDisconnect = true;
         TearDownSessionNotification();
         RdpSessionBridge.IsConnected = false;
         RdpSessionBridge.ConnectedProfile = null;
+        RdpSessionBridge.ActiveSession = null;
         RdpSessionBridge.SessionStateChanged?.Invoke();
         MainActivity.Instance?.OnSessionEnded();
         RunOnUiThread(() =>
@@ -267,9 +325,11 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
 
     private void OnSessionDisconnected()
     {
+        _isExplicitDisconnect = true;
         TearDownSessionNotification();
         RdpSessionBridge.IsConnected = false;
         RdpSessionBridge.ConnectedProfile = null;
+        RdpSessionBridge.ActiveSession = null;
         RdpSessionBridge.SessionStateChanged?.Invoke();
         MainActivity.Instance?.OnSessionEnded();
         RunOnUiThread(() =>
@@ -438,6 +498,7 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
             _screenWidth = width;
             _screenHeight = height;
         }
+        _session?.RequestRedraw();
         RedrawCurrentFrame();
         UpdateCursorPosition();
     }
@@ -1415,6 +1476,7 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
         builder.SetMessage($"Do you want to disconnect from {_session?.Config.ProfileName ?? "the remote computer"}?");
         builder.SetPositiveButton("Disconnect", (_, _) =>
         {
+            _isExplicitDisconnect = true;
             _session?.Disconnect();
             Finish();
         });
@@ -1448,18 +1510,31 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
 
     protected override void OnDestroy()
     {
-        TearDownSessionNotification();
         if (_collapseRunnable != null)
         {
             _collapseHandler.RemoveCallbacks(_collapseRunnable);
         }
-        RdpSessionBridge.IsConnected = false;
-        RdpSessionBridge.ConnectedProfile = null;
-        _session?.Dispose();
-        _session = null;
-        RdpSessionBridge.ActiveSession = null;
-        RdpSessionBridge.SessionStateChanged?.Invoke();
-        MainActivity.Instance?.OnSessionEnded();
+
+        if (_session != null)
+        {
+            _session.Connected -= OnSessionConnected;
+            _session.ConnectionFailed -= OnSessionConnectionFailed;
+            _session.Disconnected -= OnSessionDisconnected;
+            _session.FramebufferUpdated -= OnFramebufferUpdated;
+
+            if (_isExplicitDisconnect || !_session.IsConnected)
+            {
+                TearDownSessionNotification();
+                RdpSessionBridge.IsConnected = false;
+                RdpSessionBridge.ConnectedProfile = null;
+                _session.Dispose();
+                _session = null;
+                RdpSessionBridge.ActiveSession = null;
+                RdpSessionBridge.SessionStateChanged?.Invoke();
+                MainActivity.Instance?.OnSessionEnded();
+            }
+        }
+
         _frameBitmap?.Recycle();
         _frameBitmap = null;
         _pixelBuffer = null;

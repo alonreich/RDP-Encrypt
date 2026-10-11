@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Text;
 using System.Threading.Tasks;
 using Android.App;
@@ -32,6 +33,7 @@ namespace RDPVault.Android.Activities;
 public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTextureListener, View.IOnTouchListener
 {
     private FreeRdpSession? _session;
+    private RdpSessionConfig? _config;
     private TextureView? _textureView;
     private volatile bool _isSurfaceAvailable;
     private Bitmap? _frameBitmap;
@@ -45,6 +47,7 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
     private float _panY = 0f;
     private int _screenWidth;
     private int _screenHeight;
+    private int _imeHeight = 0;
 
     // Virtual mouse pointer & trackpad state
     private float _cursorX = 960f;
@@ -52,6 +55,7 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
     private bool _directTouchMode = false;
     private bool _isRightClickArmed = false;
     private bool _isDragging = false;
+    private bool _isPotentialDoubleClick = false;
     private long _lastTapTime = 0;
     private float _lastTouchX = 0;
     private float _lastTouchY = 0;
@@ -65,29 +69,50 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
     private float _prevFocusY = 0;
     private ScaleGestureDetector? _scaleDetector;
 
+    // Text caret & cursor shapes
+    private bool _isTextCaretActive = false;
+    private Bitmap? _arrowCursorBitmap;
+    private Bitmap? _ibeamCursorBitmap;
+
     // UI elements
     private FrameLayout? _rootLayout;
     private View? _topControls;
     private LinearLayout? _topBar;
-    private View? _collapsedHandle;
-    private LinearLayout? _modifierDrawer;
-    private View? _cursorView;
+    private Button? _collapsedHandle;
+    private ImageView? _cursorView;
     private View? _scrollWheelBar;
     private View? _loadingOverlay;
     private ProgressBar? _progressBar;
     private TextView? _statusText;
     private Button? _topModeBtn;
     private Button? _clickFlipperBtn;
+    private Button? _floatingKeyboardBtn;
+    private View? _helpOverlay;
+
+    // Keyboard Assistant Strip (docked above soft keyboard)
+    private LinearLayout? _keyboardAssistantBar;
+    private EditText? _hiddenInput;
+
+    // Modifier states: Inactive -> Latched (one action) -> Locked (sticky) -> Inactive
+    private enum ModifierMode { Inactive, Latched, Locked }
+    private ModifierMode _ctrlMode = ModifierMode.Inactive;
+    private ModifierMode _altMode = ModifierMode.Inactive;
+    private ModifierMode _shiftMode = ModifierMode.Inactive;
+    private ModifierMode _winMode = ModifierMode.Inactive;
+    private Button? _btnCtrl;
+    private Button? _btnAlt;
+    private Button? _btnShift;
+    private Button? _btnWin;
 
     // Smart collapse handler
     private readonly Handler _collapseHandler = new(Looper.MainLooper!);
     private Action? _collapseRunnable;
 
-    // Modifier states
-    private bool _ctrlActive = false;
-    private bool _altActive = false;
-    private bool _shiftActive = false;
-    private bool _winActive = false;
+    // Continuous Edge Auto-Scroll Engine
+    private readonly Handler _edgeScrollHandler = new(Looper.MainLooper!);
+    private bool _isEdgeScrolling = false;
+    private float _edgeScrollSpeedX = 0f;
+    private float _edgeScrollSpeedY = 0f;
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
@@ -107,6 +132,9 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
         };
         _rootLayout.SetBackgroundColor(Color.Black);
 
+        // Listen for soft keyboard (IME) insets dynamically
+        ViewCompat.SetOnApplyWindowInsetsListener(_rootLayout, new InsetListener(this));
+
         // TextureView provides seamless hardware-accelerated rendering and rotation sync
         _textureView = new TextureView(this)
         {
@@ -118,7 +146,11 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
         _textureView.SetOnTouchListener(this);
         _rootLayout.AddView(_textureView);
 
-        // Floating cursor indicator (virtual mouse pointer)
+        // Hidden input view for 100% compliant IME text entry (predictive, swipe, voice, unicode)
+        _hiddenInput = CreateHiddenInput();
+        _rootLayout.AddView(_hiddenInput);
+
+        // Floating cursor indicator (virtual mouse pointer with Arrow / I-Beam support)
         _cursorView = CreateCursorView();
         _rootLayout.AddView(_cursorView);
 
@@ -126,13 +158,17 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
         _scrollWheelBar = CreateScrollWheelBar();
         _rootLayout.AddView(_scrollWheelBar);
 
+        // Floating 1-tap quick keyboard toggle button
+        _floatingKeyboardBtn = CreateFloatingKeyboardButton();
+        _rootLayout.AddView(_floatingKeyboardBtn);
+
+        // Keyboard Assistant Bar (docked above IME or bottom of screen)
+        _keyboardAssistantBar = CreateKeyboardAssistantBar();
+        _rootLayout.AddView(_keyboardAssistantBar);
+
         // Top controls container with smart auto-collapsing
         _topControls = CreateTopControls();
         _rootLayout.AddView(_topControls);
-
-        // Desktop modifier drawer (anchored below top controls)
-        _modifierDrawer = CreateModifierDrawer();
-        _rootLayout.AddView(_modifierDrawer);
 
         // Connecting progress overlay
         _loadingOverlay = CreateLoadingOverlay(out _progressBar, out _statusText);
@@ -144,7 +180,8 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
 
         _collapseRunnable = () =>
         {
-            if (_modifierDrawer != null && _modifierDrawer.Visibility == ViewStates.Visible) return;
+            if (_keyboardAssistantBar != null && _keyboardAssistantBar.Visibility == ViewStates.Visible) return;
+            if (_imeHeight > 0) return;
             if (_topBar != null && _collapsedHandle != null)
             {
                 _topBar.Visibility = ViewStates.Gone;
@@ -156,13 +193,11 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
         if (RdpSessionBridge.ActiveSession != null && RdpSessionBridge.ActiveSession.IsConnected)
         {
             _session = RdpSessionBridge.ActiveSession;
+            _config = _session.Config;
             _cursorX = _session.RemoteWidth / 2f;
             _cursorY = _session.RemoteHeight / 2f;
 
-            _session.Connected += OnSessionConnected;
-            _session.ConnectionFailed += OnSessionConnectionFailed;
-            _session.Disconnected += OnSessionDisconnected;
-            _session.FramebufferUpdated += OnFramebufferUpdated;
+            BindSessionEvents(_session);
 
             if (_loadingOverlay != null) _loadingOverlay.Visibility = ViewStates.Gone;
             if (_progressBar != null) _progressBar.Visibility = ViewStates.Gone;
@@ -172,6 +207,7 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
             UpdateCursorPosition();
             RedrawCurrentFrame();
             ScheduleCollapseTimer();
+            CheckAndShowFirstSessionGuide();
         }
         else
         {
@@ -184,11 +220,30 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
                 return;
             }
 
+            _config = config;
             _cursorX = config.Width / 2f;
             _cursorY = config.Height / 2f;
 
             InitializeAndConnect(config);
         }
+    }
+
+    private void BindSessionEvents(FreeRdpSession session)
+    {
+        session.Connected += OnSessionConnected;
+        session.ConnectionFailed += OnSessionConnectionFailed;
+        session.Disconnected += OnSessionDisconnected;
+        session.FramebufferUpdated += OnFramebufferUpdated;
+        session.PointerTypeChanged += OnPointerTypeChanged;
+    }
+
+    private void UnbindSessionEvents(FreeRdpSession session)
+    {
+        session.Connected -= OnSessionConnected;
+        session.ConnectionFailed -= OnSessionConnectionFailed;
+        session.Disconnected -= OnSessionDisconnected;
+        session.FramebufferUpdated -= OnFramebufferUpdated;
+        session.PointerTypeChanged -= OnPointerTypeChanged;
     }
 
     protected override void OnNewIntent(Intent? intent)
@@ -266,14 +321,25 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
 
     private void InitializeAndConnect(RdpSessionConfig config)
     {
+        if (_session != null)
+        {
+            UnbindSessionEvents(_session);
+            _session.Dispose();
+            _session = null;
+        }
+
+        if (_loadingOverlay != null) _loadingOverlay.Visibility = ViewStates.Visible;
+        if (_progressBar != null) _progressBar.Visibility = ViewStates.Visible;
+        if (_statusText != null)
+        {
+            _statusText.Visibility = ViewStates.Visible;
+            _statusText.Text = $"Connecting to {config.ProfileName}...";
+        }
+
         _session = new FreeRdpSession(config);
         RdpSessionBridge.ActiveSession = _session;
 
-        _session.Connected += OnSessionConnected;
-        _session.ConnectionFailed += OnSessionConnectionFailed;
-        _session.Disconnected += OnSessionDisconnected;
-        _session.FramebufferUpdated += OnFramebufferUpdated;
-
+        BindSessionEvents(_session);
         _session.Start();
     }
 
@@ -300,10 +366,11 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
             if (_loadingOverlay != null) _loadingOverlay.Visibility = ViewStates.Gone;
             if (_progressBar != null) _progressBar.Visibility = ViewStates.Gone;
             if (_statusText != null) _statusText.Visibility = ViewStates.Gone;
-            Toast.MakeText(this, "Connected", ToastLength.Short)?.Show();
+            Toast.MakeText(this, "Connected to Remote Desktop", ToastLength.Short)?.Show();
             UpdateCursorPosition();
             RedrawCurrentFrame();
             ScheduleCollapseTimer();
+            CheckAndShowFirstSessionGuide();
         });
     }
 
@@ -316,11 +383,56 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
         RdpSessionBridge.ActiveSession = null;
         RdpSessionBridge.SessionStateChanged?.Invoke();
         MainActivity.Instance?.OnSessionEnded();
+
         RunOnUiThread(() =>
         {
-            Toast.MakeText(this, $"Connection failed: {reason}", ToastLength.Long)?.Show();
+            if (_loadingOverlay != null) _loadingOverlay.Visibility = ViewStates.Gone;
+            ShowConnectionFailedDialog(reason);
+        });
+    }
+
+    private void ShowConnectionFailedDialog(string reason)
+    {
+        string guidance = "Could not establish connection to the remote computer.";
+        if (reason.Contains("auth", StringComparison.OrdinalIgnoreCase) ||
+            reason.Contains("password", StringComparison.OrdinalIgnoreCase) ||
+            reason.Contains("logon", StringComparison.OrdinalIgnoreCase))
+        {
+            guidance = "Authentication failed.\nPlease verify that your Windows username and password are correct in the profile.";
+        }
+        else if (reason.Contains("timeout", StringComparison.OrdinalIgnoreCase) ||
+                 reason.Contains("reach", StringComparison.OrdinalIgnoreCase) ||
+                 reason.Contains("connect", StringComparison.OrdinalIgnoreCase))
+        {
+            guidance = "Connection timed out.\nEnsure the remote workstation is powered on, connected to the local network or VPN, and listening on the configured RDP port.";
+        }
+        else if (reason.Contains("cert", StringComparison.OrdinalIgnoreCase) ||
+                 reason.Contains("nla", StringComparison.OrdinalIgnoreCase) ||
+                 reason.Contains("tls", StringComparison.OrdinalIgnoreCase))
+        {
+            guidance = "Security negotiation or NLA failed.\nVerify Network Level Authentication and TLS certificate settings on the host PC.";
+        }
+
+        var builder = new AndroidX.AppCompat.App.AlertDialog.Builder(this);
+        builder.SetTitle("Remote Connection Failed");
+        builder.SetMessage($"{guidance}\n\nTechnical details: {reason}");
+        builder.SetCancelable(false);
+        builder.SetPositiveButton("Retry Connection", (_, _) =>
+        {
+            if (_config != null)
+            {
+                InitializeAndConnect(_config);
+            }
+            else
+            {
+                Finish();
+            }
+        });
+        builder.SetNegativeButton("Return to Vault", (_, _) =>
+        {
             Finish();
         });
+        builder.Show();
     }
 
     private void OnSessionDisconnected()
@@ -399,10 +511,23 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
         }
     }
 
-    /// <summary>
-    /// Interactive frame renderer that draws the cached desktop bitmap onto TextureView canvas
-    /// with strict aspect ratio matching, centered letterboxing/pillarboxing, and boundary-clamped pan/zoom.
-    /// </summary>
+    private void OnPointerTypeChanged(uint pointerType)
+    {
+        // 0x7F01 = SYSPTR_IBEAM (Text caret)
+        bool isText = (pointerType == 0x7F01);
+        if (_isTextCaretActive != isText)
+        {
+            _isTextCaretActive = isText;
+            RunOnUiThread(() =>
+            {
+                if (_cursorView != null)
+                {
+                    _cursorView.SetImageBitmap(_isTextCaretActive ? _ibeamCursorBitmap : _arrowCursorBitmap);
+                }
+            });
+        }
+    }
+
     private void RenderBitmapToView(Bitmap? bmp)
     {
         if (bmp == null || bmp.IsRecycled || !_isSurfaceAvailable || _textureView == null) return;
@@ -437,28 +562,10 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
                 float offsetX = (canvasW - fitW) / 2f;
                 float offsetY = (canvasH - fitH) / 2f;
 
-                float currentW = fitW * _scale;
-                float currentH = fitH * _scale;
+                CalculateViewportBounds(out float maxPanX, out float maxPanY);
 
-                if (currentW <= canvasW)
-                {
-                    _panX = 0f;
-                }
-                else
-                {
-                    float maxPanX = (currentW - canvasW) / 2f;
-                    _panX = Math.Clamp(_panX, -maxPanX, maxPanX);
-                }
-
-                if (currentH <= canvasH)
-                {
-                    _panY = 0f;
-                }
-                else
-                {
-                    float maxPanY = (currentH - canvasH) / 2f;
-                    _panY = Math.Clamp(_panY, -maxPanY, maxPanY);
-                }
+                _panX = Math.Clamp(_panX, -maxPanX, maxPanX);
+                _panY = Math.Clamp(_panY, -maxPanY, maxPanY);
 
                 using var matrix = new Matrix();
                 matrix.PostScale(baseScale * _scale, baseScale * _scale);
@@ -479,6 +586,27 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
                 }
             }
         }
+    }
+
+    private void CalculateViewportBounds(out float maxPanX, out float maxPanY)
+    {
+        int rw = _session?.RemoteWidth > 0 ? _session.RemoteWidth : 1920;
+        int rh = _session?.RemoteHeight > 0 ? _session.RemoteHeight : 1080;
+
+        float scaleX = (float)_screenWidth / rw;
+        float scaleY = (float)_screenHeight / rh;
+        float baseScale = Math.Min(scaleX, scaleY);
+
+        float fitW = rw * baseScale;
+        float fitH = rh * baseScale;
+
+        float currentW = fitW * _scale;
+        float currentH = fitH * _scale;
+
+        int visibleH = _imeHeight > 0 ? Math.Max(100, _screenHeight - _imeHeight) : _screenHeight;
+
+        maxPanX = currentW > _screenWidth ? (currentW - _screenWidth) / 2f : 0f;
+        maxPanY = currentH > visibleH ? (currentH - visibleH) / 2f : (currentH > _screenHeight ? (currentH - _screenHeight) / 2f : 0f);
     }
 
     private void RedrawCurrentFrame()
@@ -544,6 +672,8 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
     {
         if (e == null || _session == null || !_session.IsConnected) return false;
 
+        ResetCollapseTimer();
+
         // Native physical mouse pass-through
         if (e.GetToolType(0) == MotionEventToolType.Mouse || e.IsFromSource(InputSourceType.Mouse))
         {
@@ -569,6 +699,16 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
                 _hasMoved = false;
                 _isTwoFingerGesture = false;
 
+                long tapInterval = now - _lastTapTime;
+                if (tapInterval < 300)
+                {
+                    _isPotentialDoubleClick = true;
+                }
+                else
+                {
+                    _isPotentialDoubleClick = false;
+                }
+
                 if (_directTouchMode)
                 {
                     ScreenToRemote(x, y, out _cursorX, out _cursorY);
@@ -586,25 +726,13 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
                     _session.SendMouseButton(downFlag, true, cx, cy);
                     _isDragging = true;
                 }
-                else
-                {
-                    // Double-tap and hold initiates drag in trackpad mode
-                    if (now - _lastTapTime < 300)
-                    {
-                        _isDragging = true;
-                        TriggerHaptic();
-                        ushort cx = (ushort)Math.Clamp(_cursorX, 0, _session.RemoteWidth);
-                        ushort cy = (ushort)Math.Clamp(_cursorY, 0, _session.RemoteHeight);
-                        _session.SendMouseMove(cx, cy);
-                        _session.SendMouseButton(NativeFreeRdp.PTR_FLAGS_BUTTON1, true, cx, cy);
-                    }
-                }
                 break;
 
             case (int)MotionEventActions.PointerDown:
                 if (pointerCount >= 2)
                 {
                     _isTwoFingerGesture = true;
+                    _isPotentialDoubleClick = false;
                     _prevFocusX = _scaleDetector?.FocusX ?? x;
                     _prevFocusY = _scaleDetector?.FocusY ?? y;
                 }
@@ -620,6 +748,17 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
                 if (distFromStart > 12)
                 {
                     _hasMoved = true;
+                    if (_isPotentialDoubleClick && !_directTouchMode)
+                    {
+                        // Double-tap and held drag initiates Left Drag
+                        _isDragging = true;
+                        _isPotentialDoubleClick = false;
+                        TriggerHaptic();
+                        ushort cx = (ushort)Math.Clamp(_cursorX, 0, _session.RemoteWidth);
+                        ushort cy = (ushort)Math.Clamp(_cursorY, 0, _session.RemoteHeight);
+                        _session.SendMouseMove(cx, cy);
+                        _session.SendMouseButton(NativeFreeRdp.PTR_FLAGS_BUTTON1, true, cx, cy);
+                    }
                 }
 
                 if (pointerCount == 1 && !_isTwoFingerGesture)
@@ -630,6 +769,7 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
                         ushort cx = (ushort)_cursorX;
                         ushort cy = (ushort)_cursorY;
                         _session.SendMouseMove(cx, cy);
+                        CheckAndHandleEdgeAutoScroll();
                     }
                     else
                     {
@@ -646,11 +786,8 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
                         _session.SendMouseMove(mx, my);
                         UpdateCursorPosition();
 
-                        // Edge auto-scroll in zoomed-in mode
-                        if (_scale > 1.05f)
-                        {
-                            CheckAndHandleEdgeAutoScroll();
-                        }
+                        // Continuous edge auto-scroll checks
+                        CheckAndHandleEdgeAutoScroll();
                     }
                 }
                 else if (pointerCount >= 2)
@@ -665,17 +802,19 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
                         _prevFocusX = focusX;
                         _prevFocusY = focusY;
 
-                        if (_scale > 1.05f)
+                        CalculateViewportBounds(out float maxPanX, out float maxPanY);
+
+                        if (_scale > 1.05f || maxPanX > 0 || maxPanY > 0)
                         {
-                            // Two-finger drag pans the zoomed remote desktop viewport
-                            _panX += fdx;
-                            _panY += fdy;
+                            // Two-finger drag pans viewport
+                            _panX = Math.Clamp(_panX + fdx, -maxPanX, maxPanX);
+                            _panY = Math.Clamp(_panY + fdy, -maxPanY, maxPanY);
                             RedrawCurrentFrame();
                             UpdateCursorPosition();
                         }
                         else
                         {
-                            // Two-finger vertical swipe acts as mouse scroll wheel
+                            // Two-finger vertical swipe transmits mouse scroll wheel
                             if (Math.Abs(fdy) > 16)
                             {
                                 bool up = fdy > 0;
@@ -715,11 +854,13 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
                         {
                             _session?.SendMouseButton(NativeFreeRdp.PTR_FLAGS_BUTTON2, false, rx, ry);
                         });
+                        CheckAndAutoReleaseLatchedModifiers();
                     }
                 }
                 break;
 
             case (int)MotionEventActions.Up:
+                StopEdgeScroll();
                 if (_directTouchMode)
                 {
                     ScreenToRemote(x, y, out _cursorX, out _cursorY);
@@ -728,6 +869,16 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
                     _session.SendMouseMove(cx, cy);
                     _session.SendMouseButton(NativeFreeRdp.PTR_FLAGS_BUTTON1, false, cx, cy);
                     _isDragging = false;
+
+                    if (!_hasMoved && (now - _touchStartTime < 300))
+                    {
+                        TriggerHaptic();
+                        if (_isTextCaretActive)
+                        {
+                            ShowSoftKeyboard();
+                        }
+                    }
+                    CheckAndAutoReleaseLatchedModifiers();
                 }
                 else
                 {
@@ -737,6 +888,22 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
                         ushort cx = (ushort)Math.Clamp(_cursorX, 0, _session.RemoteWidth);
                         ushort cy = (ushort)Math.Clamp(_cursorY, 0, _session.RemoteHeight);
                         _session.SendMouseButton(NativeFreeRdp.PTR_FLAGS_BUTTON1, false, cx, cy);
+                        CheckAndAutoReleaseLatchedModifiers();
+                    }
+                    else if (_isPotentialDoubleClick && !_hasMoved)
+                    {
+                        // Clean Double Click (two taps in place within 300ms)
+                        _isPotentialDoubleClick = false;
+                        TriggerHaptic();
+                        ushort cx = (ushort)Math.Clamp(_cursorX, 0, _session.RemoteWidth);
+                        ushort cy = (ushort)Math.Clamp(_cursorY, 0, _session.RemoteHeight);
+                        _session.SendMouseButton(NativeFreeRdp.PTR_FLAGS_BUTTON1, true, cx, cy);
+                        Task.Delay(35).ContinueWith(_ =>
+                        {
+                            _session?.SendMouseButton(NativeFreeRdp.PTR_FLAGS_BUTTON1, false, cx, cy);
+                        });
+                        _lastTapTime = 0;
+                        CheckAndAutoReleaseLatchedModifiers();
                     }
                     else if (!_isTwoFingerGesture && !_hasMoved)
                     {
@@ -761,14 +928,24 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
                                 _session?.SendMouseButton(buttonFlag, false, cx, cy);
                             });
                             _lastTapTime = now;
+
+                            // If clicking on text caret or editable area, activate soft keyboard
+                            if (_isTextCaretActive)
+                            {
+                                ShowSoftKeyboard();
+                            }
+
+                            CheckAndAutoReleaseLatchedModifiers();
                         }
                     }
                 }
                 _isTwoFingerGesture = false;
                 _hasMoved = false;
+                _isPotentialDoubleClick = false;
                 break;
 
             case (int)MotionEventActions.Cancel:
+                StopEdgeScroll();
                 if (_isDragging)
                 {
                     _isDragging = false;
@@ -778,6 +955,7 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
                 }
                 _isTwoFingerGesture = false;
                 _hasMoved = false;
+                _isPotentialDoubleClick = false;
                 break;
         }
 
@@ -807,6 +985,7 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
         {
             _session?.SendMouseButton(NativeFreeRdp.PTR_FLAGS_BUTTON1, false, cx, cy);
             _session?.SendMouseButton(NativeFreeRdp.PTR_FLAGS_BUTTON2, false, cx, cy);
+            CheckAndAutoReleaseLatchedModifiers();
         }
         return true;
     }
@@ -815,6 +994,7 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
     {
         if (e != null && _session != null && _session.IsConnected)
         {
+            ResetCollapseTimer();
             if (e.IsFromSource(InputSourceType.Mouse) || e.GetToolType(0) == MotionEventToolType.Mouse)
             {
                 if (e.Action == MotionEventActions.Scroll)
@@ -841,66 +1021,122 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
     }
 
     /// <summary>
-    /// Intuitively glides the zoomed-in desktop viewport when the virtual cursor touches within
-    /// 28dp of the screen bezel, strictly bounded by the actual remote PC screen boundaries.
+    /// Continuous 60 FPS edge scrolling engine that glides the viewport smoothly when the cursor
+    /// is within 32dp of any screen boundary (accounting for keyboard insets).
     /// </summary>
     private void CheckAndHandleEdgeAutoScroll()
     {
-        if (_scale <= 1.05f || _session == null || !_session.IsConnected) return;
+        if (_session == null || !_session.IsConnected)
+        {
+            StopEdgeScroll();
+            return;
+        }
+
+        CalculateViewportBounds(out float maxPanX, out float maxPanY);
+        if (maxPanX <= 0 && maxPanY <= 0)
+        {
+            StopEdgeScroll();
+            return;
+        }
 
         RemoteToScreen(_cursorX, _cursorY, out float sx, out float sy);
         float density = Resources?.DisplayMetrics?.Density ?? 2.0f;
-        float edgeMargin = 28f * density;
+        float edgeMargin = 32f * density;
 
-        int rw = _session.RemoteWidth > 0 ? _session.RemoteWidth : 1920;
-        int rh = _session.RemoteHeight > 0 ? _session.RemoteHeight : 1080;
+        int visibleW = _screenWidth;
+        int visibleH = _imeHeight > 0 ? Math.Max(100, _screenHeight - _imeHeight) : _screenHeight;
 
-        float scaleX = (float)_screenWidth / rw;
-        float scaleY = (float)_screenHeight / rh;
-        float baseScale = Math.Min(scaleX, scaleY);
-        float fitW = rw * baseScale;
-        float fitH = rh * baseScale;
+        float speedX = 0f;
+        float speedY = 0f;
 
-        float maxPanX = Math.Max(0, (fitW * _scale - _screenWidth) / 2f);
-        float maxPanY = Math.Max(0, (fitH * _scale - _screenHeight) / 2f);
-
-        float panDeltaX = 0f;
-        float panDeltaY = 0f;
-
-        // Check horizontal screen edges
-        if (sx < edgeMargin)
+        // Horizontal edges
+        if (sx < edgeMargin && maxPanX > 0)
         {
             float dist = edgeMargin - sx;
-            float speed = (float)Math.Min(24f, 4f + Math.Pow(dist / edgeMargin, 1.5) * 20f);
-            if (_panX < maxPanX) panDeltaX = speed;
+            speedX = (float)Math.Min(28f, 4f + Math.Pow(dist / edgeMargin, 1.5) * 24f);
         }
-        else if (sx > _screenWidth - edgeMargin)
+        else if (sx > visibleW - edgeMargin && maxPanX > 0)
         {
-            float dist = sx - (_screenWidth - edgeMargin);
-            float speed = (float)Math.Min(24f, 4f + Math.Pow(dist / edgeMargin, 1.5) * 20f);
-            if (_panX > -maxPanX) panDeltaX = -speed;
+            float dist = sx - (visibleW - edgeMargin);
+            speedX = -(float)Math.Min(28f, 4f + Math.Pow(dist / edgeMargin, 1.5) * 24f);
         }
 
-        // Check vertical screen edges
-        if (sy < edgeMargin)
+        // Vertical edges (bounded above keyboard if active)
+        if (sy < edgeMargin && maxPanY > 0)
         {
             float dist = edgeMargin - sy;
-            float speed = (float)Math.Min(24f, 4f + Math.Pow(dist / edgeMargin, 1.5) * 20f);
-            if (_panY < maxPanY) panDeltaY = speed;
+            speedY = (float)Math.Min(28f, 4f + Math.Pow(dist / edgeMargin, 1.5) * 24f);
         }
-        else if (sy > _screenHeight - edgeMargin)
+        else if (sy > visibleH - edgeMargin && maxPanY > 0)
         {
-            float dist = sy - (_screenHeight - edgeMargin);
-            float speed = (float)Math.Min(24f, 4f + Math.Pow(dist / edgeMargin, 1.5) * 20f);
-            if (_panY > -maxPanY) panDeltaY = -speed;
+            float dist = sy - (visibleH - edgeMargin);
+            speedY = -(float)Math.Min(28f, 4f + Math.Pow(dist / edgeMargin, 1.5) * 24f);
         }
 
-        if (panDeltaX != 0f || panDeltaY != 0f)
+        if (speedX != 0f || speedY != 0f)
         {
-            _panX = Math.Clamp(_panX + panDeltaX, -maxPanX, maxPanX);
-            _panY = Math.Clamp(_panY + panDeltaY, -maxPanY, maxPanY);
+            StartEdgeScroll(speedX, speedY);
+        }
+        else
+        {
+            StopEdgeScroll();
+        }
+    }
+
+    private void StartEdgeScroll(float speedX, float speedY)
+    {
+        _edgeScrollSpeedX = speedX;
+        _edgeScrollSpeedY = speedY;
+        if (!_isEdgeScrolling)
+        {
+            _isEdgeScrolling = true;
+            _edgeScrollHandler.Post(EdgeScrollStep);
+        }
+    }
+
+    private void StopEdgeScroll()
+    {
+        _isEdgeScrolling = false;
+        _edgeScrollSpeedX = 0f;
+        _edgeScrollSpeedY = 0f;
+    }
+
+    private void EdgeScrollStep()
+    {
+        if (!_isEdgeScrolling || _session == null || !_session.IsConnected)
+        {
+            _isEdgeScrolling = false;
+            return;
+        }
+
+        CalculateViewportBounds(out float maxPanX, out float maxPanY);
+        if (maxPanX <= 0 && maxPanY <= 0)
+        {
+            _isEdgeScrolling = false;
+            return;
+        }
+
+        float oldPanX = _panX;
+        float oldPanY = _panY;
+
+        if (_edgeScrollSpeedX != 0f && maxPanX > 0)
+        {
+            _panX = Math.Clamp(_panX + _edgeScrollSpeedX, -maxPanX, maxPanX);
+        }
+        if (_edgeScrollSpeedY != 0f && maxPanY > 0)
+        {
+            _panY = Math.Clamp(_panY + _edgeScrollSpeedY, -maxPanY, maxPanY);
+        }
+
+        if (Math.Abs(_panX - oldPanX) > 0.1f || Math.Abs(_panY - oldPanY) > 0.1f)
+        {
             RedrawCurrentFrame();
             UpdateCursorPosition();
+            _edgeScrollHandler.PostDelayed(EdgeScrollStep, 16); // ~60 FPS
+        }
+        else
+        {
+            _isEdgeScrolling = false;
         }
     }
 
@@ -971,7 +1207,7 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
     }
 
     // UI Controls Factory
-    private View CreateCursorView()
+    private ImageView CreateCursorView()
     {
         float density = Resources?.DisplayMetrics?.Density ?? 2.0f;
         int sizePx = Math.Max(28, (int)(22 * density));
@@ -982,28 +1218,50 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
             LayoutParameters = new FrameLayout.LayoutParams(sizePx, sizePx)
         };
 
-        var bmp = Bitmap.CreateBitmap(sizePx, sizePx, Bitmap.Config.Argb8888!);
-        using var canvas = new Canvas(bmp);
-        using var path = new global::Android.Graphics.Path();
-        float scale = sizePx / 24f;
-        path.MoveTo(0 * scale, 0 * scale);
-        path.LineTo(0 * scale, 20 * scale);
-        path.LineTo(6 * scale, 15 * scale);
-        path.LineTo(11 * scale, 23 * scale);
-        path.LineTo(14 * scale, 21 * scale);
-        path.LineTo(9 * scale, 13 * scale);
-        path.LineTo(16 * scale, 13 * scale);
-        path.Close();
+        // 1. Standard Arrow cursor bitmap
+        _arrowCursorBitmap = Bitmap.CreateBitmap(sizePx, sizePx, Bitmap.Config.Argb8888!);
+        using (var canvas = new Canvas(_arrowCursorBitmap))
+        using (var path = new global::Android.Graphics.Path())
+        {
+            float scale = sizePx / 24f;
+            path.MoveTo(0 * scale, 0 * scale);
+            path.LineTo(0 * scale, 20 * scale);
+            path.LineTo(6 * scale, 15 * scale);
+            path.LineTo(11 * scale, 23 * scale);
+            path.LineTo(14 * scale, 21 * scale);
+            path.LineTo(9 * scale, 13 * scale);
+            path.LineTo(16 * scale, 13 * scale);
+            path.Close();
 
-        using var fillPaint = new Paint { Color = Color.White, AntiAlias = true };
-        fillPaint.SetStyle(Paint.Style.Fill);
-        using var strokePaint = new Paint { Color = Color.Black, AntiAlias = true, StrokeWidth = Math.Max(2f, 2f * scale) };
-        strokePaint.SetStyle(Paint.Style.Stroke);
+            using var fillPaint = new Paint { Color = Color.White, AntiAlias = true };
+            fillPaint.SetStyle(Paint.Style.Fill);
+            using var strokePaint = new Paint { Color = Color.Black, AntiAlias = true, StrokeWidth = Math.Max(2f, 2f * scale) };
+            strokePaint.SetStyle(Paint.Style.Stroke);
 
-        canvas.DrawPath(path, fillPaint);
-        canvas.DrawPath(path, strokePaint);
+            canvas.DrawPath(path, fillPaint);
+            canvas.DrawPath(path, strokePaint);
+        }
 
-        cursor.SetImageBitmap(bmp);
+        // 2. I-Beam (Text Caret) cursor bitmap
+        _ibeamCursorBitmap = Bitmap.CreateBitmap(sizePx, sizePx, Bitmap.Config.Argb8888!);
+        using (var canvas = new Canvas(_ibeamCursorBitmap))
+        {
+            float scale = sizePx / 24f;
+            using var paint = new Paint { Color = Color.White, AntiAlias = true, StrokeWidth = 2.5f * scale };
+            using var stroke = new Paint { Color = Color.Black, AntiAlias = true, StrokeWidth = 4.5f * scale };
+
+            // Outline
+            canvas.DrawLine(5 * scale, 2 * scale, 17 * scale, 2 * scale, stroke);
+            canvas.DrawLine(5 * scale, 22 * scale, 17 * scale, 22 * scale, stroke);
+            canvas.DrawLine(11 * scale, 2 * scale, 11 * scale, 22 * scale, stroke);
+
+            // Fill
+            canvas.DrawLine(5 * scale, 2 * scale, 17 * scale, 2 * scale, paint);
+            canvas.DrawLine(5 * scale, 22 * scale, 17 * scale, 22 * scale, paint);
+            canvas.DrawLine(11 * scale, 2 * scale, 11 * scale, 22 * scale, paint);
+        }
+
+        cursor.SetImageBitmap(_arrowCursorBitmap);
         return cursor;
     }
 
@@ -1031,6 +1289,7 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
         float lastY = 0;
         bar.SetOnTouchListener(new CustomTouchListener((v, e) =>
         {
+            ResetCollapseTimer();
             if (e.Action == MotionEventActions.Down)
             {
                 lastY = e.GetY();
@@ -1054,6 +1313,41 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
         }));
 
         return bar;
+    }
+
+    private Button CreateFloatingKeyboardButton()
+    {
+        float density = Resources?.DisplayMetrics?.Density ?? 2.0f;
+        int btnSize = (int)(42 * density);
+
+        var btn = new Button(this)
+        {
+            Text = "⌨",
+            TextSize = 14,
+            LayoutParameters = new FrameLayout.LayoutParams(btnSize, btnSize)
+            {
+                Gravity = GravityFlags.Right | GravityFlags.Bottom,
+                RightMargin = (int)(12 * density),
+                BottomMargin = (int)(44 * density)
+            },
+            Elevation = 25f
+        };
+        btn.SetPadding(0, 0, 0, 0);
+
+        var bg = new GradientDrawable();
+        bg.SetShape(ShapeType.Oval);
+        bg.SetColor(Color.Argb(210, 28, 28, 36));
+        bg.SetStroke((int)(1.5f * density), Color.Argb(160, 0, 120, 215));
+        btn.Background = bg;
+        btn.SetTextColor(Color.White);
+
+        btn.Click += (_, _) =>
+        {
+            ToggleSoftKeyboard();
+            ResetCollapseTimer();
+        };
+
+        return btn;
     }
 
     private View CreateTopControls()
@@ -1082,25 +1376,26 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
             Elevation = 20f
         };
 
-        // Collapsed handle (mini-tab)
-        int handleW = (int)(46 * density);
-        int handleH = (int)(18 * density);
+        // Notch-protected collapsed mini-tab
+        int handleW = (int)(56 * density);
+        int handleH = (int)(24 * density);
         var handle = new Button(this)
         {
-            Text = "☰",
-            TextSize = 10,
+            Text = "⌨ ☰",
+            TextSize = 9,
             LayoutParameters = new FrameLayout.LayoutParams(handleW, handleH)
             {
-                Gravity = GravityFlags.Top | GravityFlags.CenterHorizontal
+                Gravity = GravityFlags.Top | GravityFlags.CenterHorizontal,
+                TopMargin = (int)(4 * density)
             },
             Visibility = ViewStates.Gone
         };
         handle.SetPadding(0, 0, 0, 0);
         var handleBg = new GradientDrawable();
         handleBg.SetShape(ShapeType.Rectangle);
-        handleBg.SetCornerRadius(9 * density);
-        handleBg.SetColor(Color.Argb(160, 20, 20, 25));
-        handleBg.SetStroke((int)(1 * density), Color.Argb(80, 255, 255, 255));
+        handleBg.SetCornerRadius(12 * density);
+        handleBg.SetColor(Color.Argb(200, 20, 20, 28));
+        handleBg.SetStroke((int)(1 * density), Color.Argb(160, 0, 120, 215));
         handle.Background = handleBg;
         handle.SetTextColor(Color.White);
         handle.Click += (_, _) =>
@@ -1131,8 +1426,8 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
         var bg = new GradientDrawable();
         bg.SetShape(ShapeType.Rectangle);
         bg.SetCornerRadius(18 * density);
-        bg.SetColor(Color.Argb(215, 20, 20, 25));
-        bg.SetStroke((int)(1 * density), Color.Argb(80, 255, 255, 255));
+        bg.SetColor(Color.Argb(225, 18, 18, 24));
+        bg.SetStroke((int)(1 * density), Color.Argb(90, 255, 255, 255));
         topBar.Background = bg;
 
         int btnHeight = (int)(32 * density);
@@ -1153,7 +1448,7 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
             ScheduleCollapseTimer();
         });
         var lpFlip = (LinearLayout.LayoutParams)_clickFlipperBtn.LayoutParameters!;
-        lpFlip.LeftMargin = (int)(6 * density);
+        lpFlip.LeftMargin = (int)(5 * density);
         topBar.AddView(_clickFlipperBtn);
 
         // 3. Regular Keyboard toggle
@@ -1163,40 +1458,35 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
             ScheduleCollapseTimer();
         });
         var lpKbd = (LinearLayout.LayoutParams)kbdBtn.LayoutParameters!;
-        lpKbd.LeftMargin = (int)(6 * density);
+        lpKbd.LeftMargin = (int)(5 * density);
         topBar.AddView(kbdBtn);
 
         // 4. Special Keys drawer toggle
         var keysBtn = CreatePillButton("☰ Keys", btnHeight, padH, () =>
         {
-            if (_modifierDrawer != null)
-            {
-                bool willOpen = _modifierDrawer.Visibility != ViewStates.Visible;
-                _modifierDrawer.Visibility = willOpen ? ViewStates.Visible : ViewStates.Gone;
-                if (willOpen)
-                {
-                    if (_collapseRunnable != null)
-                    {
-                        _collapseHandler.RemoveCallbacks(_collapseRunnable);
-                    }
-                }
-                else
-                {
-                    ScheduleCollapseTimer();
-                }
-            }
+            ToggleKeyboardAssistantBar();
+            ScheduleCollapseTimer();
         });
         var lpKeys = (LinearLayout.LayoutParams)keysBtn.LayoutParameters!;
-        lpKeys.LeftMargin = (int)(6 * density);
+        lpKeys.LeftMargin = (int)(5 * density);
         topBar.AddView(keysBtn);
 
-        // 5. Disconnect button (with confirmation guard)
-        var discBtn = CreatePillButton("✕ Disconnect", btnHeight, (int)(12 * density), () =>
+        // 5. Help / Onboarding button
+        var helpBtn = CreatePillButton("?", btnHeight, (int)(8 * density), () =>
+        {
+            ShowFirstSessionGuide();
+        });
+        var lpHelp = (LinearLayout.LayoutParams)helpBtn.LayoutParameters!;
+        lpHelp.LeftMargin = (int)(5 * density);
+        topBar.AddView(helpBtn);
+
+        // 6. Disconnect button (with confirmation guard)
+        var discBtn = CreatePillButton("✕ Disconnect", btnHeight, (int)(10 * density), () =>
         {
             ShowDisconnectConfirmation();
         }, isDanger: true);
         var lpDisc = (LinearLayout.LayoutParams)discBtn.LayoutParameters!;
-        lpDisc.LeftMargin = (int)(6 * density);
+        lpDisc.LeftMargin = (int)(5 * density);
         topBar.AddView(discBtn);
 
         _topBar = topBar;
@@ -1205,11 +1495,18 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
         return container;
     }
 
+    private void ResetCollapseTimer()
+    {
+        ScheduleCollapseTimer();
+    }
+
     private void ScheduleCollapseTimer()
     {
         if (_collapseRunnable == null) return;
         _collapseHandler.RemoveCallbacks(_collapseRunnable);
-        _collapseHandler.PostDelayed(_collapseRunnable, 3500);
+        // Do not auto-collapse while keyboard or assistant bar is active
+        if (_imeHeight > 0 || (_keyboardAssistantBar != null && _keyboardAssistantBar.Visibility == ViewStates.Visible)) return;
+        _collapseHandler.PostDelayed(_collapseRunnable, 4500);
     }
 
     private Button CreatePillButton(string text, int height, int padH, Action onClick, bool isDanger = false)
@@ -1226,7 +1523,7 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
         var bg = new GradientDrawable();
         bg.SetShape(ShapeType.Rectangle);
         bg.SetCornerRadius(16 * density);
-        bg.SetColor(isDanger ? Color.Argb(200, 160, 30, 30) : Color.Argb(180, 45, 45, 55));
+        bg.SetColor(isDanger ? Color.Argb(200, 160, 30, 30) : Color.Argb(180, 42, 42, 52));
         btn.Background = bg;
         btn.SetTextColor(Color.White);
         btn.Click += (_, _) => onClick();
@@ -1262,88 +1559,132 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
         var bg = new GradientDrawable();
         bg.SetShape(ShapeType.Rectangle);
         bg.SetCornerRadius(16 * density);
-        bg.SetColor(_isRightClickArmed ? Color.Argb(245, 255, 179, 0) : Color.Argb(180, 45, 45, 55));
+        bg.SetColor(_isRightClickArmed ? Color.Argb(245, 255, 179, 0) : Color.Argb(180, 42, 42, 52));
         _clickFlipperBtn.Background = bg;
         _clickFlipperBtn.SetTextColor(_isRightClickArmed ? Color.Black : Color.White);
     }
 
-    private LinearLayout CreateModifierDrawer()
+    private EditText CreateHiddenInput()
+    {
+        var edit = new EditText(this)
+        {
+            LayoutParameters = new FrameLayout.LayoutParams(1, 1),
+            Alpha = 0f,
+            Focusable = true,
+            FocusableInTouchMode = true
+        };
+        edit.InputType = global::Android.Text.InputTypes.ClassText |
+                         global::Android.Text.InputTypes.TextVariationNormal |
+                         global::Android.Text.InputTypes.TextFlagNoSuggestions;
+        edit.ImeOptions = ImeAction.None;
+
+        edit.TextChanged += (sender, args) =>
+        {
+            string? text = args.Text?.ToString();
+            if (string.IsNullOrEmpty(text)) return;
+            foreach (char c in text)
+            {
+                if (c == '\n' || c == '\r')
+                {
+                    SendScanCode(0x1C); // VK_RETURN
+                }
+                else
+                {
+                    _session?.SendUnicodeChar(c);
+                }
+            }
+            CheckAndAutoReleaseLatchedModifiers();
+            edit.Text = "";
+        };
+
+        edit.EditorAction += (sender, args) =>
+        {
+            SendScanCode(0x1C); // Enter on IME Done / Go / Send / Enter
+            CheckAndAutoReleaseLatchedModifiers();
+        };
+
+        return edit;
+    }
+
+    private LinearLayout CreateKeyboardAssistantBar()
     {
         float density = Resources?.DisplayMetrics?.Density ?? 2.0f;
-        int safeTop = (int)(28 * density);
-        if (Build.VERSION.SdkInt >= BuildVersionCodes.R)
-        {
-            var insets = WindowManager?.CurrentWindowMetrics?.WindowInsets?.GetInsetsIgnoringVisibility(
-                WindowInsetsCompat.Type.StatusBars() | WindowInsetsCompat.Type.DisplayCutout());
-            if (insets != null && insets.Top > safeTop)
-            {
-                safeTop = insets.Top + (int)(4 * density);
-            }
-        }
-        int drawerTopMargin = safeTop + (int)(46 * density);
 
-        var drawer = new LinearLayout(this)
+        var bar = new LinearLayout(this)
         {
-            Orientation = global::Android.Widget.Orientation.Vertical,
+            Orientation = global::Android.Widget.Orientation.Horizontal,
             Visibility = ViewStates.Gone,
-            Elevation = 25f,
+            Elevation = 30f,
             LayoutParameters = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WrapContent,
-                ViewGroup.LayoutParams.WrapContent)
+                ViewGroup.LayoutParams.MatchParent,
+                (int)(40 * density))
             {
-                Gravity = GravityFlags.Top | GravityFlags.CenterHorizontal,
-                TopMargin = drawerTopMargin
+                Gravity = GravityFlags.Bottom | GravityFlags.CenterHorizontal,
+                BottomMargin = 0
             }
         };
-        drawer.SetPadding((int)(10 * density), (int)(8 * density), (int)(10 * density), (int)(8 * density));
+        bar.SetPadding((int)(6 * density), (int)(4 * density), (int)(6 * density), (int)(4 * density));
 
         var bg = new GradientDrawable();
         bg.SetShape(ShapeType.Rectangle);
-        bg.SetCornerRadius(14 * density);
-        bg.SetColor(Color.Argb(240, 18, 18, 24));
+        bg.SetColor(Color.Argb(235, 16, 16, 22));
         bg.SetStroke((int)(1 * density), Color.Argb(100, 255, 255, 255));
-        drawer.Background = bg;
+        bar.Background = bg;
+
+        var scroll = new HorizontalScrollView(this)
+        {
+            HorizontalScrollBarEnabled = false,
+            LayoutParameters = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MatchParent,
+                ViewGroup.LayoutParams.MatchParent)
+        };
+
+        var row = new LinearLayout(this)
+        {
+            Orientation = global::Android.Widget.Orientation.Horizontal,
+            LayoutParameters = new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.WrapContent,
+                ViewGroup.LayoutParams.MatchParent)
+        };
 
         int keyH = (int)(32 * density);
 
-        // Row 1: Modifier and Special Keys
-        var row1 = new LinearLayout(this)
-        {
-            Orientation = global::Android.Widget.Orientation.Horizontal,
-            LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent)
-        };
-        AddDrawerKey(row1, "Esc", keyH, () => SendScanCode(0x01));
-        AddDrawerKey(row1, "Tab", keyH, () => SendScanCode(0x0F));
-        AddToggleKeyButton(row1, "Ctrl", keyH, ref _ctrlActive, 0x1D);
-        AddToggleKeyButton(row1, "Alt", keyH, ref _altActive, 0x38);
-        AddToggleKeyButton(row1, "Shift", keyH, ref _shiftActive, 0x2A);
-        AddToggleKeyButton(row1, "Win", keyH, ref _winActive, 0x5B, extended: true);
-        AddDrawerKey(row1, "Ctrl+Alt+Del", keyH, SendCtrlAltDel, isAccent: true);
-        drawer.AddView(row1);
+        // Core keys
+        AddAssistantKey(row, "Esc", keyH, () => SendScanCode(0x01));
+        AddAssistantKey(row, "Tab", keyH, () => SendScanCode(0x0F));
 
-        // Row 2: F1 - F12 inside a HorizontalScrollView
-        var fScroll = new HorizontalScrollView(this)
-        {
-            LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent)
-            {
-                TopMargin = (int)(6 * density)
-            },
-            HorizontalScrollBarEnabled = false
-        };
-        var rowF = new LinearLayout(this) { Orientation = global::Android.Widget.Orientation.Horizontal };
+        // Modifier keys with Latch/Lock logic
+        _btnCtrl = AddToggleModifierButton(row, "Ctrl", keyH, ref _ctrlMode, 0x1D);
+        _btnAlt = AddToggleModifierButton(row, "Alt", keyH, ref _altMode, 0x38);
+        _btnShift = AddToggleModifierButton(row, "Shift", keyH, ref _shiftMode, 0x2A);
+        _btnWin = AddToggleModifierButton(row, "Win", keyH, ref _winMode, 0x5B, extended: true);
+
+        // Navigation
+        AddAssistantKey(row, "←", keyH, () => SendScanCode(0x4B, extended: true));
+        AddAssistantKey(row, "↑", keyH, () => SendScanCode(0x48, extended: true));
+        AddAssistantKey(row, "↓", keyH, () => SendScanCode(0x50, extended: true));
+        AddAssistantKey(row, "→", keyH, () => SendScanCode(0x4D, extended: true));
+        AddAssistantKey(row, "Del", keyH, () => SendScanCode(0x53, extended: true));
+
+        // Function keys F1-F12
         ushort[] fCodes = [0x3B, 0x3C, 0x3D, 0x3E, 0x3F, 0x40, 0x41, 0x42, 0x43, 0x44, 0x57, 0x58];
         for (int i = 0; i < 12; i++)
         {
             ushort code = fCodes[i];
-            AddDrawerKey(rowF, $"F{i + 1}", keyH, () => SendScanCode(code));
+            AddAssistantKey(row, $"F{i + 1}", keyH, () => SendScanCode(code));
         }
-        fScroll.AddView(rowF);
-        drawer.AddView(fScroll);
 
-        return drawer;
+        AddAssistantKey(row, "Ctrl+Alt+Del", keyH, SendCtrlAltDel, isAccent: true);
+        AddAssistantKey(row, "✕ Clear", keyH, ReleaseAllModifiers);
+        AddAssistantKey(row, "⌨▼", keyH, HideSoftKeyboard);
+
+        scroll.AddView(row);
+        bar.AddView(scroll);
+
+        return bar;
     }
 
-    private void AddDrawerKey(LinearLayout row, string label, int height, Action action, bool isAccent = false)
+    private void AddAssistantKey(LinearLayout row, string label, int height, Action action, bool isAccent = false)
     {
         float density = Resources?.DisplayMetrics?.Density ?? 2.0f;
         var btn = new Button(this)
@@ -1359,15 +1700,20 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
 
         var bg = new GradientDrawable();
         bg.SetShape(ShapeType.Rectangle);
-        bg.SetCornerRadius(8 * density);
-        bg.SetColor(isAccent ? Color.Argb(200, 180, 50, 40) : Color.Argb(180, 40, 40, 48));
+        bg.SetCornerRadius(6 * density);
+        bg.SetColor(isAccent ? Color.Argb(210, 180, 50, 40) : Color.Argb(190, 36, 36, 44));
         btn.Background = bg;
         btn.SetTextColor(Color.White);
-        btn.Click += (_, _) => action();
+        btn.Click += (_, _) =>
+        {
+            ResetCollapseTimer();
+            action();
+            CheckAndAutoReleaseLatchedModifiers();
+        };
         row.AddView(btn);
     }
 
-    private Button AddToggleKeyButton(LinearLayout row, string label, int height, ref bool flagRef, ushort code, bool extended = false)
+    private Button AddToggleModifierButton(LinearLayout row, string label, int height, ref ModifierMode modeRef, ushort code, bool extended = false)
     {
         float density = Resources?.DisplayMetrics?.Density ?? 2.0f;
         var btn = new Button(this)
@@ -1380,36 +1726,141 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
             }
         };
         btn.SetPadding((int)(8 * density), 0, (int)(8 * density), 0);
-
-        var bg = new GradientDrawable();
-        bg.SetShape(ShapeType.Rectangle);
-        bg.SetCornerRadius(8 * density);
-        bg.SetColor(Color.Argb(180, 40, 40, 48));
-        btn.Background = bg;
-        btn.SetTextColor(Color.White);
+        UpdateModifierButtonStyle(btn, ModifierMode.Inactive);
 
         btn.Click += (_, _) =>
         {
-            if (label == "Ctrl") _ctrlActive = !_ctrlActive;
-            else if (label == "Alt") _altActive = !_altActive;
-            else if (label == "Shift") _shiftActive = !_shiftActive;
-            else if (label == "Win") _winActive = !_winActive;
+            ResetCollapseTimer();
+            ModifierMode current = GetModifierMode(label);
+            ModifierMode next = current switch
+            {
+                ModifierMode.Inactive => ModifierMode.Latched,
+                ModifierMode.Latched => ModifierMode.Locked,
+                _ => ModifierMode.Inactive
+            };
 
-            bool active = (label == "Ctrl" && _ctrlActive) ||
-                          (label == "Alt" && _altActive) ||
-                          (label == "Shift" && _shiftActive) ||
-                          (label == "Win" && _winActive);
+            SetModifierMode(label, next);
 
-            var activeBg = new GradientDrawable();
-            activeBg.SetShape(ShapeType.Rectangle);
-            activeBg.SetCornerRadius(8 * density);
-            activeBg.SetColor(active ? Color.Argb(230, 0, 120, 215) : Color.Argb(180, 40, 40, 48));
-            btn.Background = activeBg;
+            if (next == ModifierMode.Inactive)
+            {
+                _session?.SendKeyboardScanCode(code, false, extended);
+            }
+            else
+            {
+                _session?.SendKeyboardScanCode(code, true, extended);
+            }
 
-            _session?.SendKeyboardScanCode(code, active, extended);
+            UpdateModifierButtonStyle(btn, next);
         };
+
         row.AddView(btn);
         return btn;
+    }
+
+    private ModifierMode GetModifierMode(string label) => label switch
+    {
+        "Ctrl" => _ctrlMode,
+        "Alt" => _altMode,
+        "Shift" => _shiftMode,
+        "Win" => _winMode,
+        _ => ModifierMode.Inactive
+    };
+
+    private void SetModifierMode(string label, ModifierMode mode)
+    {
+        switch (label)
+        {
+            case "Ctrl": _ctrlMode = mode; break;
+            case "Alt": _altMode = mode; break;
+            case "Shift": _shiftMode = mode; break;
+            case "Win": _winMode = mode; break;
+        }
+    }
+
+    private void UpdateModifierButtonStyle(Button btn, ModifierMode mode)
+    {
+        float density = Resources?.DisplayMetrics?.Density ?? 2.0f;
+        var bg = new GradientDrawable();
+        bg.SetShape(ShapeType.Rectangle);
+        bg.SetCornerRadius(6 * density);
+
+        switch (mode)
+        {
+            case ModifierMode.Latched:
+                // Latched: Solid vivid accent blue
+                bg.SetColor(Color.Argb(240, 0, 120, 215));
+                btn.SetTextColor(Color.White);
+                break;
+            case ModifierMode.Locked:
+                // Locked: Vivid Amber with high contrast
+                bg.SetColor(Color.Argb(250, 255, 179, 0));
+                btn.SetTextColor(Color.Black);
+                break;
+            default:
+                // Inactive
+                bg.SetColor(Color.Argb(190, 36, 36, 44));
+                btn.SetTextColor(Color.White);
+                break;
+        }
+        btn.Background = bg;
+    }
+
+    private void UpdateModifierButtonsUi()
+    {
+        if (_btnCtrl != null) UpdateModifierButtonStyle(_btnCtrl, _ctrlMode);
+        if (_btnAlt != null) UpdateModifierButtonStyle(_btnAlt, _altMode);
+        if (_btnShift != null) UpdateModifierButtonStyle(_btnShift, _shiftMode);
+        if (_winMode != ModifierMode.Inactive && _btnWin != null) UpdateModifierButtonStyle(_btnWin, _winMode);
+    }
+
+    private void CheckAndAutoReleaseLatchedModifiers()
+    {
+        bool changed = false;
+        if (_ctrlMode == ModifierMode.Latched)
+        {
+            _ctrlMode = ModifierMode.Inactive;
+            _session?.SendKeyboardScanCode(0x1D, false, false);
+            changed = true;
+        }
+        if (_altMode == ModifierMode.Latched)
+        {
+            _altMode = ModifierMode.Inactive;
+            _session?.SendKeyboardScanCode(0x38, false, false);
+            changed = true;
+        }
+        if (_shiftMode == ModifierMode.Latched)
+        {
+            _shiftMode = ModifierMode.Inactive;
+            _session?.SendKeyboardScanCode(0x2A, false, false);
+            changed = true;
+        }
+        if (_winMode == ModifierMode.Latched)
+        {
+            _winMode = ModifierMode.Inactive;
+            _session?.SendKeyboardScanCode(0x5B, false, true);
+            changed = true;
+        }
+
+        if (changed)
+        {
+            RunOnUiThread(UpdateModifierButtonsUi);
+        }
+    }
+
+    private void ReleaseAllModifiers()
+    {
+        _ctrlMode = ModifierMode.Inactive;
+        _altMode = ModifierMode.Inactive;
+        _shiftMode = ModifierMode.Inactive;
+        _winMode = ModifierMode.Inactive;
+
+        _session?.SendKeyboardScanCode(0x1D, false, false); // Ctrl up
+        _session?.SendKeyboardScanCode(0x38, false, false); // Alt up
+        _session?.SendKeyboardScanCode(0x2A, false, false); // Shift up
+        _session?.SendKeyboardScanCode(0x5B, false, true);  // Win up
+
+        UpdateModifierButtonsUi();
+        Toast.MakeText(this, "Modifiers Released", ToastLength.Short)?.Show();
     }
 
     private void SendScanCode(ushort code, bool extended = false)
@@ -1428,40 +1879,287 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
         _session?.SendKeyboardScanCode(0x1D, false, false);// Ctrl up
     }
 
-    private void ToggleSoftKeyboard()
+    public void ShowSoftKeyboard()
+    {
+        _hiddenInput?.RequestFocus();
+        var imm = (InputMethodManager?)GetSystemService(InputMethodService);
+        imm?.ShowSoftInput(_hiddenInput, ShowFlags.Forced);
+        if (_keyboardAssistantBar != null)
+        {
+            _keyboardAssistantBar.Visibility = ViewStates.Visible;
+        }
+        ResetCollapseTimer();
+    }
+
+    public void HideSoftKeyboard()
     {
         var imm = (InputMethodManager?)GetSystemService(InputMethodService);
-        imm?.ToggleSoftInput(ShowFlags.Forced, HideSoftInputFlags.ImplicitOnly);
+        if (_hiddenInput != null)
+        {
+            imm?.HideSoftInputFromWindow(_hiddenInput.WindowToken, HideSoftInputFlags.None);
+        }
+        if (_keyboardAssistantBar != null)
+        {
+            _keyboardAssistantBar.Visibility = ViewStates.Gone;
+        }
+        ResetCollapseTimer();
+    }
+
+    private void ToggleSoftKeyboard()
+    {
+        if (_imeHeight > 0)
+        {
+            HideSoftKeyboard();
+        }
+        else
+        {
+            ShowSoftKeyboard();
+        }
+    }
+
+    private void ToggleKeyboardAssistantBar()
+    {
+        if (_keyboardAssistantBar == null) return;
+        bool willOpen = _keyboardAssistantBar.Visibility != ViewStates.Visible;
+        _keyboardAssistantBar.Visibility = willOpen ? ViewStates.Visible : ViewStates.Gone;
+        ResetCollapseTimer();
+    }
+
+    public void OnImeInsetsChanged(int imeHeight, bool isImeVisible)
+    {
+        _imeHeight = imeHeight;
+        if (_keyboardAssistantBar != null)
+        {
+            var lp = (FrameLayout.LayoutParams)_keyboardAssistantBar.LayoutParameters!;
+            lp.BottomMargin = imeHeight;
+            _keyboardAssistantBar.LayoutParameters = lp;
+
+            if (isImeVisible)
+            {
+                _keyboardAssistantBar.Visibility = ViewStates.Visible;
+            }
+        }
+
+        // When IME is up and remote cursor is covered, auto-pan upward
+        if (imeHeight > 0)
+        {
+            RemoteToScreen(_cursorX, _cursorY, out float sx, out float sy);
+            int visibleH = Math.Max(100, _screenHeight - imeHeight - 40);
+            if (sy > visibleH)
+            {
+                float overflow = sy - visibleH;
+                CalculateViewportBounds(out _, out float maxPanY);
+                _panY = Math.Clamp(_panY - overflow, -maxPanY, maxPanY);
+                RedrawCurrentFrame();
+                UpdateCursorPosition();
+            }
+        }
     }
 
     public override bool DispatchKeyEvent(KeyEvent? e)
     {
-        if (e != null && e.Action == KeyEventActions.Multiple && !string.IsNullOrEmpty(e.Characters))
-        {
-            foreach (char c in e.Characters)
-            {
-                _session?.SendUnicodeChar(c);
-            }
-            return true;
-        }
+        if (e == null) return base.DispatchKeyEvent(e);
 
-        if (e != null && e.Action == KeyEventActions.Down)
+        if (e.Action == KeyEventActions.Down)
         {
+            ResetCollapseTimer();
+            Keycode kc = e.KeyCode;
+
+            // 1. Enter key
+            if (kc == Keycode.Enter || kc == Keycode.NumpadEnter)
+            {
+                SendScanCode(0x1C); // VK_RETURN
+                CheckAndAutoReleaseLatchedModifiers();
+                return true;
+            }
+
+            // 2. Backspace key
+            if (kc == Keycode.Del)
+            {
+                SendScanCode(0x0E); // VK_BACK
+                CheckAndAutoReleaseLatchedModifiers();
+                return true;
+            }
+
+            // 3. Forward Delete key
+            if (kc == Keycode.ForwardDel)
+            {
+                SendScanCode(0x53, extended: true); // VK_DELETE
+                CheckAndAutoReleaseLatchedModifiers();
+                return true;
+            }
+
+            // 4. Tab key
+            if (kc == Keycode.Tab)
+            {
+                SendScanCode(0x0F); // VK_TAB
+                CheckAndAutoReleaseLatchedModifiers();
+                return true;
+            }
+
+            // 5. Escape key
+            if (kc == Keycode.Escape)
+            {
+                SendScanCode(0x01); // VK_ESCAPE
+                CheckAndAutoReleaseLatchedModifiers();
+                return true;
+            }
+
+            // 6. Navigation keys
+            if (kc == Keycode.DpadUp)
+            {
+                SendScanCode(0x48, extended: true);
+                CheckAndAutoReleaseLatchedModifiers();
+                return true;
+            }
+            if (kc == Keycode.DpadDown)
+            {
+                SendScanCode(0x50, extended: true);
+                CheckAndAutoReleaseLatchedModifiers();
+                return true;
+            }
+            if (kc == Keycode.DpadLeft)
+            {
+                SendScanCode(0x4B, extended: true);
+                CheckAndAutoReleaseLatchedModifiers();
+                return true;
+            }
+            if (kc == Keycode.DpadRight)
+            {
+                SendScanCode(0x4D, extended: true);
+                CheckAndAutoReleaseLatchedModifiers();
+                return true;
+            }
+            if (kc == Keycode.Home)
+            {
+                SendScanCode(0x47, extended: true);
+                CheckAndAutoReleaseLatchedModifiers();
+                return true;
+            }
+            if (kc == Keycode.MoveEnd)
+            {
+                SendScanCode(0x4F, extended: true);
+                CheckAndAutoReleaseLatchedModifiers();
+                return true;
+            }
+            if (kc == Keycode.PageUp)
+            {
+                SendScanCode(0x49, extended: true);
+                CheckAndAutoReleaseLatchedModifiers();
+                return true;
+            }
+            if (kc == Keycode.PageDown)
+            {
+                SendScanCode(0x51, extended: true);
+                CheckAndAutoReleaseLatchedModifiers();
+                return true;
+            }
+
+            // 7. Shortcut mapping when Ctrl/Alt/Win is active
+            if (_ctrlMode != ModifierMode.Inactive || _altMode != ModifierMode.Inactive || _winMode != ModifierMode.Inactive)
+            {
+                if (TryMapKeycodeToScancode(kc, out ushort scancode, out bool ext))
+                {
+                    SendScanCode(scancode, ext);
+                    CheckAndAutoReleaseLatchedModifiers();
+                    return true;
+                }
+            }
+
+            // 8. Printable Unicode characters
             int unicode = e.GetUnicodeChar(e.MetaState);
             if (unicode > 0)
             {
-                _session?.SendUnicodeChar((char)unicode);
+                if (unicode == 10 || unicode == 13)
+                {
+                    SendScanCode(0x1C);
+                }
+                else
+                {
+                    _session?.SendUnicodeChar((char)unicode);
+                }
+                CheckAndAutoReleaseLatchedModifiers();
                 return true;
             }
         }
+        else if (e.Action == KeyEventActions.Multiple && !string.IsNullOrEmpty(e.Characters))
+        {
+            foreach (char c in e.Characters)
+            {
+                if (c == '\n' || c == '\r') SendScanCode(0x1C);
+                else _session?.SendUnicodeChar(c);
+            }
+            CheckAndAutoReleaseLatchedModifiers();
+            return true;
+        }
+
         return base.DispatchKeyEvent(e);
+    }
+
+    private static bool TryMapKeycodeToScancode(Keycode kc, out ushort scancode, out bool extended)
+    {
+        extended = false;
+        scancode = kc switch
+        {
+            Keycode.A => 0x1E,
+            Keycode.B => 0x30,
+            Keycode.C => 0x2E,
+            Keycode.D => 0x20,
+            Keycode.E => 0x12,
+            Keycode.F => 0x21,
+            Keycode.G => 0x22,
+            Keycode.H => 0x23,
+            Keycode.I => 0x17,
+            Keycode.J => 0x24,
+            Keycode.K => 0x25,
+            Keycode.L => 0x26,
+            Keycode.M => 0x32,
+            Keycode.N => 0x31,
+            Keycode.O => 0x18,
+            Keycode.P => 0x19,
+            Keycode.Q => 0x10,
+            Keycode.R => 0x13,
+            Keycode.S => 0x1F,
+            Keycode.T => 0x14,
+            Keycode.U => 0x16,
+            Keycode.V => 0x2F,
+            Keycode.W => 0x11,
+            Keycode.X => 0x2D,
+            Keycode.Y => 0x15,
+            Keycode.Z => 0x2C,
+            Keycode.Num0 => 0x0B,
+            Keycode.Num1 => 0x02,
+            Keycode.Num2 => 0x03,
+            Keycode.Num3 => 0x04,
+            Keycode.Num4 => 0x05,
+            Keycode.Num5 => 0x06,
+            Keycode.Num6 => 0x07,
+            Keycode.Num7 => 0x08,
+            Keycode.Num8 => 0x09,
+            Keycode.Num9 => 0x0A,
+            Keycode.Space => 0x39,
+            _ => 0
+        };
+        return scancode != 0;
     }
 
     public override void OnBackPressed()
     {
-        if (_modifierDrawer != null && _modifierDrawer.Visibility == ViewStates.Visible)
+        if (_helpOverlay != null && _helpOverlay.Visibility == ViewStates.Visible)
         {
-            _modifierDrawer.Visibility = ViewStates.Gone;
+            _helpOverlay.Visibility = ViewStates.Gone;
+            return;
+        }
+
+        if (_imeHeight > 0)
+        {
+            HideSoftKeyboard();
+            return;
+        }
+
+        if (_keyboardAssistantBar != null && _keyboardAssistantBar.Visibility == ViewStates.Visible)
+        {
+            _keyboardAssistantBar.Visibility = ViewStates.Gone;
             ScheduleCollapseTimer();
             return;
         }
@@ -1482,6 +2180,133 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
         });
         builder.SetNegativeButton("Keep Connected", (_, _) => { });
         builder.Show();
+    }
+
+    private void CheckAndShowFirstSessionGuide()
+    {
+        if (!AppPrefs.GetBool(AppPrefs.KeyHasSeenGestureHelp, false))
+        {
+            ShowFirstSessionGuide();
+        }
+    }
+
+    private void ShowFirstSessionGuide()
+    {
+        if (_helpOverlay != null)
+        {
+            _helpOverlay.Visibility = ViewStates.Visible;
+            return;
+        }
+
+        float density = Resources?.DisplayMetrics?.Density ?? 2.0f;
+
+        var overlay = new FrameLayout(this)
+        {
+            LayoutParameters = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MatchParent,
+                ViewGroup.LayoutParams.MatchParent),
+            Elevation = 40f
+        };
+        overlay.SetBackgroundColor(Color.Argb(210, 8, 8, 12));
+
+        var card = new LinearLayout(this)
+        {
+            Orientation = global::Android.Widget.Orientation.Vertical,
+            LayoutParameters = new FrameLayout.LayoutParams(
+                (int)Math.Min(_screenWidth * 0.9f, 440 * density),
+                ViewGroup.LayoutParams.WrapContent)
+            {
+                Gravity = GravityFlags.Center
+            }
+        };
+        card.SetPadding((int)(20 * density), (int)(18 * density), (int)(20 * density), (int)(18 * density));
+
+        var cardBg = new GradientDrawable();
+        cardBg.SetShape(ShapeType.Rectangle);
+        cardBg.SetCornerRadius(16 * density);
+        cardBg.SetColor(Color.Argb(245, 24, 24, 32));
+        cardBg.SetStroke((int)(1.5f * density), Color.Argb(160, 0, 120, 215));
+        card.Background = cardBg;
+
+        var title = new TextView(this)
+        {
+            Text = "REMOTE DESKTOP GESTURES",
+            TextSize = 14,
+            Typeface = Typeface.DefaultBold
+        };
+        title.SetTextColor(Color.White);
+        card.AddView(title);
+
+        AddGuideItem(card, "👆 Single Tap", "Left Click on remote desktop");
+        AddGuideItem(card, "👆...👆 Double Tap", "Double Click / Open application or folder");
+        AddGuideItem(card, "✌ Two-Finger Tap", "Right Click context menu");
+        AddGuideItem(card, "🤏 Pinch to Zoom", "Zoom in & out (1.0x to 5.0x)");
+        AddGuideItem(card, "↔ Slide near Edge", "Smooth continuous auto-scroll");
+        AddGuideItem(card, "⌨ Floating / Bottom Bar", "Soft keyboard and modifier keys (Ctrl, Alt, Shift, F1-F12)");
+
+        var btnGotIt = new Button(this)
+        {
+            Text = "Got it",
+            TextSize = 12,
+            LayoutParameters = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MatchParent,
+                (int)(38 * density))
+            {
+                TopMargin = (int)(14 * density)
+            }
+        };
+        var btnBg = new GradientDrawable();
+        btnBg.SetShape(ShapeType.Rectangle);
+        btnBg.SetCornerRadius(8 * density);
+        btnBg.SetColor(Color.Argb(255, 0, 120, 215));
+        btnGotIt.Background = btnBg;
+        btnGotIt.SetTextColor(Color.White);
+        btnGotIt.Click += (_, _) =>
+        {
+            AppPrefs.SetBool(AppPrefs.KeyHasSeenGestureHelp, true);
+            overlay.Visibility = ViewStates.Gone;
+        };
+        card.AddView(btnGotIt);
+
+        overlay.AddView(card);
+        _helpOverlay = overlay;
+        _rootLayout?.AddView(_helpOverlay);
+    }
+
+    private void AddGuideItem(LinearLayout card, string gesture, string desc)
+    {
+        float density = Resources?.DisplayMetrics?.Density ?? 2.0f;
+        var row = new LinearLayout(this)
+        {
+            Orientation = global::Android.Widget.Orientation.Horizontal,
+            LayoutParameters = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MatchParent,
+                ViewGroup.LayoutParams.WrapContent)
+            {
+                TopMargin = (int)(8 * density)
+            }
+        };
+
+        var tvGesture = new TextView(this)
+        {
+            Text = gesture,
+            TextSize = 11,
+            Typeface = Typeface.DefaultBold,
+            LayoutParameters = new LinearLayout.LayoutParams((int)(140 * density), ViewGroup.LayoutParams.WrapContent)
+        };
+        tvGesture.SetTextColor(Color.ParseColor("#8AB4F8"));
+
+        var tvDesc = new TextView(this)
+        {
+            Text = desc,
+            TextSize = 11,
+            LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent)
+        };
+        tvDesc.SetTextColor(Color.ParseColor("#D0D0D8"));
+
+        row.AddView(tvGesture);
+        row.AddView(tvDesc);
+        card.AddView(row);
     }
 
     private View CreateLoadingOverlay(out ProgressBar? pb, out TextView? tv)
@@ -1510,6 +2335,8 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
 
     protected override void OnDestroy()
     {
+        StopEdgeScroll();
+
         if (_collapseRunnable != null)
         {
             _collapseHandler.RemoveCallbacks(_collapseRunnable);
@@ -1517,10 +2344,7 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
 
         if (_session != null)
         {
-            _session.Connected -= OnSessionConnected;
-            _session.ConnectionFailed -= OnSessionConnectionFailed;
-            _session.Disconnected -= OnSessionDisconnected;
-            _session.FramebufferUpdated -= OnFramebufferUpdated;
+            UnbindSessionEvents(_session);
 
             if (_isExplicitDisconnect || !_session.IsConnected)
             {
@@ -1537,8 +2361,29 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
 
         _frameBitmap?.Recycle();
         _frameBitmap = null;
+        _arrowCursorBitmap?.Recycle();
+        _arrowCursorBitmap = null;
+        _ibeamCursorBitmap?.Recycle();
+        _ibeamCursorBitmap = null;
         _pixelBuffer = null;
         base.OnDestroy();
+    }
+
+    private class InsetListener : Java.Lang.Object, IOnApplyWindowInsetsListener
+    {
+        private readonly RdpSessionActivity _act;
+        public InsetListener(RdpSessionActivity act) => _act = act;
+
+        public WindowInsetsCompat? OnApplyWindowInsets(View? v, WindowInsetsCompat? insets)
+        {
+            if (insets != null)
+            {
+                var imeInsets = insets.GetInsets(WindowInsetsCompat.Type.Ime());
+                bool isImeVisible = insets.IsVisible(WindowInsetsCompat.Type.Ime());
+                _act.OnImeInsetsChanged(imeInsets?.Bottom ?? 0, isImeVisible);
+            }
+            return insets;
+        }
     }
 
     private class ScaleListener : ScaleGestureDetector.SimpleOnScaleGestureListener

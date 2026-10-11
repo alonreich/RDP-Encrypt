@@ -21,6 +21,7 @@ public static class AppPrefs
     public const string KeyLastExportUtcTicks = "last_export_utc_ticks";
     public const string KeyLastVaultChangeUtcTicks = "last_vault_change_utc_ticks";
     public const string KeyBackupReminderDismissedTicks = "backup_reminder_dismissed_ticks";
+    public const string KeyHasSeenGestureHelp = "has_seen_gesture_help";
 
     private static ISharedPreferences? Store
     {

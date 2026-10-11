@@ -131,6 +131,15 @@ public static class NativeFreeRdp
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     public delegate bool EndPaintDelegate(IntPtr context);
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINTER_SYSTEM_UPDATE
+    {
+        public uint type;
+    }
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    public delegate bool PointerSystemDelegate(IntPtr context, ref POINTER_SYSTEM_UPDATE pointer_system);
+
     // Native P/Invoke functions
     [DllImport(LibFreeRdp, CallingConvention = CallingConvention.Cdecl)]
     public static extern IntPtr freerdp_new();
@@ -250,6 +259,7 @@ public sealed class FreeRdpSession : IDisposable
     private readonly NativeFreeRdp.VerifyCertificateExDelegate _verifyCertEx;
     private readonly NativeFreeRdp.BeginPaintDelegate _beginPaint;
     private readonly NativeFreeRdp.EndPaintDelegate _endPaint;
+    private readonly NativeFreeRdp.PointerSystemDelegate _pointerSystem;
 
     private volatile bool _isDisposed;
     private volatile bool _stopRequested;
@@ -260,6 +270,7 @@ public sealed class FreeRdpSession : IDisposable
     public event Action? Disconnected;
     public event Action<int, int, int, int, IntPtr, int>? FramebufferUpdated;
     public event Action<string>? RemoteClipboardReceived;
+    public event Action<uint>? PointerTypeChanged;
 
     public RdpSessionConfig Config { get; }
     public bool IsConnected { get; private set; }
@@ -280,6 +291,7 @@ public sealed class FreeRdpSession : IDisposable
         _verifyCertEx = OnVerifyCertificateEx;
         _beginPaint = OnBeginPaint;
         _endPaint = OnEndPaint;
+        _pointerSystem = OnPointerSystem;
     }
 
     public void Start()
@@ -945,8 +957,34 @@ public sealed class FreeRdpSession : IDisposable
             // Hook BeginPaint and EndPaint in rdp_update (BeginPaint=72, EndPaint=80)
             Marshal.WriteIntPtr(update, 72, Marshal.GetFunctionPointerForDelegate(_beginPaint));
             Marshal.WriteIntPtr(update, 80, Marshal.GetFunctionPointerForDelegate(_endPaint));
+
+            try
+            {
+                for (int i = 15; i <= 28; i++)
+                {
+                    IntPtr cand = Marshal.ReadIntPtr(update, i * IntPtr.Size);
+                    if (cand != IntPtr.Zero && cand != update && cand != _context && IsValidContextBacklink(cand, _context))
+                    {
+                        Marshal.WriteIntPtr(cand, 16, Marshal.GetFunctionPointerForDelegate(_pointerSystem));
+                        AppLog.Info($"FreeRDP hooked PointerSystem at index {i}");
+                        break;
+                    }
+                }
+            }
+            catch { }
         }
 
+        return true;
+    }
+
+    private bool OnPointerSystem(IntPtr context, ref NativeFreeRdp.POINTER_SYSTEM_UPDATE pointer_system)
+    {
+        try
+        {
+            uint type = pointer_system.type;
+            PointerTypeChanged?.Invoke(type);
+        }
+        catch { }
         return true;
     }
 

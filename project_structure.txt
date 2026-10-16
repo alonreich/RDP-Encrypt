@@ -5,9 +5,10 @@ SOURCE OF TRUTH & GUIDANCE FOR ANY AI AGENT (OR HUMAN) WORKING ON THIS PROJECT
 Last updated : 2026-10-16
 Version      : 2026.10.16  (Windows 1.1.0, Android companion 2.0.0 Embedded FreeRDP Engine)
 Status       : Windows: production release, compiled and tested with .NET 9 SDK on Windows 10/11 x64.
-               SHA-256 (compiled\RDPVault.exe): 851ec55bb276b72ed94c1e2ba887ecf9e620f3d0b05fea2b469fb9ff1e05ace7
+               SHA-256 (compiled\RDPVault.exe): 3fdf141d5213453eefab757fe02011955552b901bb3bd6192a54f1e2e2864b4b
                Android: 2.0.0 embedded FreeRDP engine with landscape matrix scaling, TextureView & direct touch / trackpad support.
                compiled\RDPVault.apk ~50.7 MiB (53,121,641 bytes), versionCode 3 / versionName 2.0.0.
+               SHA-256 (compiled\RDPVault.apk): 3ea1348156a3e5586281edc2430ab148a1bc7131069fe6f5040d2fae204fc2a4
                Minimum Android is 9 (API 28); built against API 34/35 with native ABIs arm64-v8a & x86_64.
                SECTIONS 30, 31, 32 & 33 supersede all prior statements regarding external intent handoff,
                RdpAutoTypeService, and Android Accessibility Service requirements.
@@ -2365,9 +2366,8 @@ SECTION 33 — OCTOBER 2026 AUDIT RESOLUTIONS & CRITICAL UX / STABILIZATION ENHA
      - Pinch-to-zoom transforms fluidly around touch focal coordinates, maintaining stable visual context without drifting off-screen.
 
 33.D - ANDROID FREERDP REMOTE UX, INPUT & STABILITY OVERHAUL (RdpSessionActivity.cs & FreeRdpClient.cs):
-  1. Soft Keyboard Auto-Pop Suppression:
-     - Suppressed automatic Android soft keyboard display on remote caret focus events. Keyboard invocation is strictly
-       user-controlled via the dedicated top toolbar keyboard button.
+  1. Soft Keyboard Intelligent Activation Contract:
+     - Replaced clumsy manual-only keyboard workflows with an intelligent, zero-drawback auto-activation pipeline (see 33.E).
   2. Native RdpInputConnection for Reliable Text & Unicode:
      - Implemented `RdpInputConnection` on `RdpSessionActivity` to correctly handle soft keyboard Backspace, deletion,
        batch edits, and full Unicode character streaming into the FreeRDP native input subsystem.
@@ -2382,6 +2382,47 @@ SECTION 33 — OCTOBER 2026 AUDIT RESOLUTIONS & CRITICAL UX / STABILIZATION ENHA
   6. Automatic Backgrounding Vault Lock:
      - When navigating away from the active session or backgrounding the companion app, the vault immediately locks
        in memory to secure master keys.
+
+33.E - ANDROID FREERDP NATIVE POINTER SYSTEM HOOK & TEXT CARET SOFT KEYBOARD AUTO-TRIGGER (NativeFreeRdp.cs & RdpSessionActivity.cs):
+  1. Root Cause Resolution in FreeRDP Update Subsystem Hook:
+     - In FreeRDP 2.0 (64-bit), `rdp_update` holds `rdpPointerUpdate* pointer` at offset 176 (index 22).
+     - Inside `rdpPointerUpdate`, the `pPointerSystem` callback resides at offset 80 (following `context` and `paddingA[15]`).
+     - Previous logic erroneously attempted to write to offset 16 of the first matched context backlink (which corrupted
+       `primary` orders at index 17 and left `pointer->PointerSystem` completely unhooked), preventing `OnPointerTypeChanged`
+       from ever receiving system pointer updates.
+     - `NativeFreeRdp.cs` now precisely targets index 22 (`cand + 80`), ensuring native RDP system pointer packets
+       (`PTR_MSG_TYPE_SYSTEM`) are captured in real-time.
+  2. Zero-Drawback Text Caret Auto-Detection & Soft Keyboard Pop-up:
+     - Remote Windows text input areas transmit `SYSPTR_IBEAM` (`0x7F01`).
+     - To prevent jarring disruptions from simple hovering, the Android soft keyboard is strictly triggered when the user
+       intentionally interacts with a text field:
+       a) Single tap or click on an active I-beam text area immediately requests focus and invokes `ShowSoftKeyboard()`.
+       b) Direct touch taps on a remote text box transition the remote cursor to `0x7F01` within the roundtrip window (<700ms),
+          seamlessly auto-opening the soft keyboard.
+       c) Gliding the trackpad cursor across text without clicking changes the visual cursor bitmap to I-beam but does NOT
+          spurious pop-up the keyboard.
+       d) Tapping away on an arrow cursor area (`SYSPTR_DEFAULT` / `0x7F00`) smoothly auto-dismisses the keyboard.
+       e) Explicit keyboard dismissal by the user sets a cooldown timestamp, preventing the keyboard from immediately re-opening
+          unless the user taps/clicks again.
+
+33.F - ANDROID FREERDP EDGE AUTO-SCROLL PROXIMITY SENSITIVITY & ZOOM ACCELERATION (RdpSessionActivity.cs):
+  1. Non-Linear Proximity Depth Acceleration:
+     - The screen edge trigger margin (`36dp * density`) calculates normalized penetration depth:
+       `penetration = Clamp((edgeMargin - dist) / edgeMargin, 0, 1.5)`.
+     - An exponential acceleration curve (`Math.Pow(penetration, 1.6)`) provides slow, fine-grained precision scrolling
+       when barely entering the edge boundary, smoothly ramping up to rapid overdrive when pressing against the physical bezel.
+  2. Dynamic Zoom Factor Magnification Scaling:
+     - Fixed screen-pixel panning previously resulted in agonizingly slow scrolling when zoomed in.
+     - Auto-scroll velocity scales dynamically with viewport magnification:
+       `zoomMultiplier = 1.0f + Max(0, _scale - 1.0f) * 1.5f`.
+     - When zoomed out (`_scale == 1.0`), edge scrolling maintains a controlled base pace (`zoomMultiplier = 1.0`).
+     - When zoomed in (e.g. 3x to 5x), velocity scales up to 7x, allowing users to effortlessly traverse wide desktop resolutions.
+  3. Continuous Pinned Cursor Tracking:
+     - In Trackpad mode (`!_directTouchMode`), `EdgeScrollStep` translates `_cursorX` and `_cursorY` synchronously with viewport
+       delta panning (`actualDeltaPan / effectiveScale`).
+     - The mouse cursor stays pinned to the screen bezel rather than drifting inward, continuously streaming `SendMouseMove`
+       to the remote host and allowing sustained panning without frantic, repeated sideways swipe gestures.
+     - Pulling the finger inward away from the edge or lifting the touch immediately stops scrolling without inertia lag.
 
 --------------------------------------------------------------------------------
 END OF FILE — keep synchronized with the code.

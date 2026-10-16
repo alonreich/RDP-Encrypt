@@ -68,6 +68,9 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
     private ScaleGestureDetector? _scaleDetector;
 
     private bool _isTextCaretActive = false;
+    private long _lastClickOrTapTime = 0;
+    private bool _keyboardAutoTriggered = false;
+    private long _lastManualKeyboardCloseTime = 0;
     private Bitmap? _arrowCursorBitmap;
     private Bitmap? _ibeamCursorBitmap;
 
@@ -516,6 +519,9 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
     private void OnPointerTypeChanged(uint pointerType)
     {
         bool isText = (pointerType == 0x7F01);
+        long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        bool justClicked = (now - _lastClickOrTapTime) < 700;
+
         if (_isTextCaretActive != isText)
         {
             _isTextCaretActive = isText;
@@ -526,6 +532,23 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
                     _cursorView.SetImageBitmap(_isTextCaretActive ? _ibeamCursorBitmap : _arrowCursorBitmap);
                 }
             });
+        }
+
+        if (isText)
+        {
+            if (justClicked && (now - _lastManualKeyboardCloseTime > 1000))
+            {
+                _keyboardAutoTriggered = true;
+                RunOnUiThread(ShowSoftKeyboard);
+            }
+        }
+        else
+        {
+            if (_keyboardAutoTriggered && justClicked)
+            {
+                _keyboardAutoTriggered = false;
+                RunOnUiThread(HideSoftKeyboard);
+            }
         }
     }
 
@@ -912,6 +935,12 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
                     if (!_hasMoved && (now - _touchStartTime < 350))
                     {
                         TriggerHaptic();
+                        _lastClickOrTapTime = now;
+                        if (_isTextCaretActive && (now - _lastManualKeyboardCloseTime > 1000))
+                        {
+                            _keyboardAutoTriggered = true;
+                            RunOnUiThread(ShowSoftKeyboard);
+                        }
                     }
                     CheckAndAutoReleaseLatchedModifiers();
                 }
@@ -929,6 +958,12 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
                     {
                         _isPotentialDoubleClick = false;
                         TriggerHaptic();
+                        _lastClickOrTapTime = now;
+                        if (_isTextCaretActive && (now - _lastManualKeyboardCloseTime > 1000))
+                        {
+                            _keyboardAutoTriggered = true;
+                            RunOnUiThread(ShowSoftKeyboard);
+                        }
                         ushort cx = (ushort)Math.Clamp(_cursorX, 0, _session.RemoteWidth);
                         ushort cy = (ushort)Math.Clamp(_cursorY, 0, _session.RemoteHeight);
                         _session.SendMouseButton(NativeFreeRdp.PTR_FLAGS_BUTTON1, true, cx, cy);
@@ -945,11 +980,18 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
                         if (duration < 350)
                         {
                             TriggerHaptic();
+                            _lastClickOrTapTime = now;
                             ushort buttonFlag = _isRightClickArmed ? NativeFreeRdp.PTR_FLAGS_BUTTON2 : NativeFreeRdp.PTR_FLAGS_BUTTON1;
                             if (_isRightClickArmed)
                             {
                                 _isRightClickArmed = false;
                                 RunOnUiThread(UpdateClickFlipperUi);
+                            }
+
+                            if (buttonFlag == NativeFreeRdp.PTR_FLAGS_BUTTON1 && _isTextCaretActive && (now - _lastManualKeyboardCloseTime > 1000))
+                            {
+                                _keyboardAutoTriggered = true;
+                                RunOnUiThread(ShowSoftKeyboard);
                             }
 
                             ushort cx = (ushort)Math.Clamp(_cursorX, 0, _session.RemoteWidth);
@@ -1013,6 +1055,14 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
             _session?.SendMouseButton(NativeFreeRdp.PTR_FLAGS_BUTTON1, false, cx, cy);
             _session?.SendMouseButton(NativeFreeRdp.PTR_FLAGS_BUTTON2, false, cx, cy);
             CheckAndAutoReleaseLatchedModifiers();
+
+            long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            _lastClickOrTapTime = now;
+            if (_isTextCaretActive && (now - _lastManualKeyboardCloseTime > 1000))
+            {
+                _keyboardAutoTriggered = true;
+                RunOnUiThread(ShowSoftKeyboard);
+            }
         }
         return true;
     }
@@ -1064,7 +1114,7 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
 
         RemoteToScreen(_cursorX, _cursorY, out float sx, out float sy);
         float density = Resources?.DisplayMetrics?.Density ?? 2.0f;
-        float edgeMargin = 32f * density;
+        float edgeMargin = 36f * density;
 
         int visibleW = _screenWidth;
         int visibleH = _imeHeight > 0 ? Math.Max(100, _screenHeight - _imeHeight) : _screenHeight;
@@ -1072,26 +1122,41 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
         float speedX = 0f;
         float speedY = 0f;
 
+        // Dynamic Zoom Scaling:
+        // When zoomed out (_scale == 1.0f): zoomMultiplier = 1.0f (retains comfortable, gentle base pace)
+        // When zoomed in (_scale > 1.0f): scales up progressively so magnified desktop pans effortlessly
+        float zoomMultiplier = 1.0f + Math.Max(0f, _scale - 1.0f) * 1.5f;
+        float minSpeed = 2.5f * density;
+        float maxSpeed = 24.0f * density;
+
         if (sx < edgeMargin && maxPanX > 0)
         {
             float dist = edgeMargin - sx;
-            speedX = (float)Math.Min(28f, 4f + Math.Pow(dist / edgeMargin, 1.5) * 24f);
+            float penetration = Math.Clamp(dist / edgeMargin, 0f, 1.5f);
+            float curve = (float)Math.Pow(penetration, 1.6);
+            speedX = (minSpeed + curve * (maxSpeed - minSpeed)) * zoomMultiplier;
         }
         else if (sx > visibleW - edgeMargin && maxPanX > 0)
         {
             float dist = sx - (visibleW - edgeMargin);
-            speedX = -(float)Math.Min(28f, 4f + Math.Pow(dist / edgeMargin, 1.5) * 24f);
+            float penetration = Math.Clamp(dist / edgeMargin, 0f, 1.5f);
+            float curve = (float)Math.Pow(penetration, 1.6);
+            speedX = -(minSpeed + curve * (maxSpeed - minSpeed)) * zoomMultiplier;
         }
 
         if (sy < edgeMargin && maxPanY > 0)
         {
             float dist = edgeMargin - sy;
-            speedY = (float)Math.Min(28f, 4f + Math.Pow(dist / edgeMargin, 1.5) * 24f);
+            float penetration = Math.Clamp(dist / edgeMargin, 0f, 1.5f);
+            float curve = (float)Math.Pow(penetration, 1.6);
+            speedY = (minSpeed + curve * (maxSpeed - minSpeed)) * zoomMultiplier;
         }
         else if (sy > visibleH - edgeMargin && maxPanY > 0)
         {
             float dist = sy - (visibleH - edgeMargin);
-            speedY = -(float)Math.Min(28f, 4f + Math.Pow(dist / edgeMargin, 1.5) * 24f);
+            float penetration = Math.Clamp(dist / edgeMargin, 0f, 1.5f);
+            float curve = (float)Math.Pow(penetration, 1.6);
+            speedY = -(minSpeed + curve * (maxSpeed - minSpeed)) * zoomMultiplier;
         }
 
         if (speedX != 0f || speedY != 0f)
@@ -1149,15 +1214,45 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
             _panY = Math.Clamp(_panY + _edgeScrollSpeedY, -maxPanY, maxPanY);
         }
 
-        if (Math.Abs(_panX - oldPanX) > 0.1f || Math.Abs(_panY - oldPanY) > 0.1f)
+        float actualDeltaPanX = _panX - oldPanX;
+        float actualDeltaPanY = _panY - oldPanY;
+
+        if (Math.Abs(actualDeltaPanX) > 0.05f || Math.Abs(actualDeltaPanY) > 0.05f)
         {
+            int rw = _session.RemoteWidth > 0 ? _session.RemoteWidth : 1920;
+            int rh = _session.RemoteHeight > 0 ? _session.RemoteHeight : 1080;
+            int visibleH = _imeHeight > 0 ? Math.Max(100, _screenHeight - _imeHeight) : _screenHeight;
+            float scaleX = (float)_screenWidth / rw;
+            float scaleY = (float)visibleH / rh;
+            float effectiveScale = Math.Min(scaleX, scaleY) * _scale;
+
+            if (effectiveScale > 0.001f)
+            {
+                if (!_directTouchMode)
+                {
+                    _cursorX = Math.Clamp(_cursorX - actualDeltaPanX / effectiveScale, 0, _session.RemoteWidth);
+                    _cursorY = Math.Clamp(_cursorY - actualDeltaPanY / effectiveScale, 0, _session.RemoteHeight);
+                }
+                else
+                {
+                    ScreenToRemote(_lastTouchX, _lastTouchY, out _cursorX, out _cursorY);
+                }
+                _session.SendMouseMove((ushort)_cursorX, (ushort)_cursorY);
+            }
+
             RedrawCurrentFrame();
             UpdateCursorPosition();
-            _edgeScrollHandler.PostDelayed(EdgeScrollStep, 16);
+
+            CheckAndHandleEdgeAutoScroll();
+
+            if (_isEdgeScrolling)
+            {
+                _edgeScrollHandler.PostDelayed(EdgeScrollStep, 16);
+            }
         }
         else
         {
-            _isEdgeScrolling = false;
+            StopEdgeScroll();
         }
     }
 
@@ -1948,6 +2043,8 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
 
     public void HideSoftKeyboard()
     {
+        _lastManualKeyboardCloseTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        _keyboardAutoTriggered = false;
         var imm = (InputMethodManager?)GetSystemService(InputMethodService);
         if (_hiddenInput != null)
         {
@@ -1983,6 +2080,11 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
     public void OnImeInsetsChanged(int imeHeight, bool isImeVisible)
     {
         _imeHeight = imeHeight;
+        if (!isImeVisible && imeHeight == 0)
+        {
+            _keyboardAutoTriggered = false;
+            _lastManualKeyboardCloseTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        }
         if (_keyboardAssistantBar != null)
         {
             var lp = (FrameLayout.LayoutParams)_keyboardAssistantBar.LayoutParameters!;

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -912,18 +912,43 @@ public sealed class FreeRdpSession : IDisposable
 
             try
             {
-                for (int i = 15; i <= 28; i++)
+                IntPtr fpPointerSystem = Marshal.GetFunctionPointerForDelegate(_pointerSystem);
+                bool hooked = false;
+
+                // In FreeRDP 2.0 (64-bit), update->pointer is at offset 176 (index 22).
+                // struct rdp_pointer_update has context at offset 0, PointerPosition at 72, PointerSystem at 80.
+                for (int i = 20; i <= 26; i++)
                 {
                     IntPtr cand = Marshal.ReadIntPtr(update, i * IntPtr.Size);
                     if (cand != IntPtr.Zero && cand != update && cand != _context && IsValidContextBacklink(cand, _context))
                     {
-                        Marshal.WriteIntPtr(cand, 16, Marshal.GetFunctionPointerForDelegate(_pointerSystem));
-                        AppLog.Info($"FreeRDP hooked PointerSystem at index {i}");
+                        Marshal.WriteIntPtr(cand, 80, fpPointerSystem);
+                        Marshal.WriteIntPtr(cand, 16, fpPointerSystem);
+                        AppLog.Info($"FreeRDP hooked PointerSystem in rdpPointerUpdate at update[{i}]+80: 0x{cand.ToInt64():X}");
+                        hooked = true;
                         break;
                     }
                 }
+
+                if (!hooked)
+                {
+                    for (int i = 15; i <= 32; i++)
+                    {
+                        IntPtr cand = Marshal.ReadIntPtr(update, i * IntPtr.Size);
+                        if (cand != IntPtr.Zero && cand != update && cand != _context && IsValidContextBacklink(cand, _context))
+                        {
+                            Marshal.WriteIntPtr(cand, 80, fpPointerSystem);
+                            Marshal.WriteIntPtr(cand, 16, fpPointerSystem);
+                            AppLog.Info($"FreeRDP fallback hooked PointerSystem at update[{i}]: 0x{cand.ToInt64():X}");
+                            break;
+                        }
+                    }
+                }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                AppLog.Warn($"FreeRDP failed hooking PointerSystem: {ex.Message}");
+            }
         }
 
         return true;

@@ -13,6 +13,7 @@ build-apk.log
 rdpvault.log
 TestResults/
 testresults/
+*.binlog
 
 # Local developer scratchpads & AI outputs -----------------------------------
 Claude outputs/

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading.Tasks;
@@ -76,13 +76,11 @@ public class RdpSessionActivity : AppCompatActivity, TextureView.ISurfaceTexture
     private LinearLayout? _topBar;
     private Button? _collapsedHandle;
     private ImageView? _cursorView;
-    private View? _scrollWheelBar;
     private View? _loadingOverlay;
     private ProgressBar? _progressBar;
     private TextView? _statusText;
     private Button? _topModeBtn;
     private Button? _clickFlipperBtn;
-    private Button? _floatingKeyboardBtn;
     private View? _helpOverlay;
 
     private LinearLayout? _keyboardAssistantBar;

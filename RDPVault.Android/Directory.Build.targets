@@ -1,0 +1,4 @@
+<Project>
+  <Target Name="_CheckForMissingWorkload" />
+  <Target Name="_ParseRuntimeConfigFiles" />
+</Project>

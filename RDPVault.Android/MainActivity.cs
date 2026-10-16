@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading.Tasks;
 using Android.App;
 using Android.Content;
@@ -12,6 +12,7 @@ using Avalonia;
 using Avalonia.Android;
 using RDPVault;
 using RDPVault.Android.Platform;
+using RDPVault.Android.Rdp;
 using RDPVault.Android.Services;
 
 namespace RDPVault.Android;

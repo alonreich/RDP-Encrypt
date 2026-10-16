@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -711,10 +711,8 @@ public partial class MainView : UserControl
         ShowPanel(PanelFirstRun);
         TxtFirstRunPass.Text = "";
         TxtFirstRunPass.PasswordChar = '●';
-        BtnToggleFirstRunPass.Content = "👁";
         TxtFirstRunConfirm.Text = "";
         TxtFirstRunConfirm.PasswordChar = '●';
-        BtnToggleFirstRunConfirm.Content = "👁";
         TxtFirstRunError.IsVisible = false;
         PnlFirstRunProgress.IsVisible = false;
         BtnFirstRunCreate.IsEnabled = true;
@@ -915,7 +913,6 @@ public partial class MainView : UserControl
         ShowPanel(PanelLocked);
         TxtPassword.Text = "";
         TxtPassword.PasswordChar = '●';
-        BtnToggleUnlockPass.Content = "👁";
         TxtLockNotice.IsVisible = false;
         TxtLockError.IsVisible = false;
         PnlUnlockProgress.IsVisible = false;

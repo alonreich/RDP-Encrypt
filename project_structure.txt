@@ -5,10 +5,10 @@ SOURCE OF TRUTH & GUIDANCE FOR ANY AI AGENT (OR HUMAN) WORKING ON THIS PROJECT
 Last updated : 2026-10-16
 Version      : 2026.10.16  (Windows 1.1.0, Android companion 2.0.0 Embedded FreeRDP Engine)
 Status       : Windows: production release, compiled and tested with .NET 9 SDK on Windows 10/11 x64.
-               SHA-256 (compiled\RDPVault.exe): 3fdf141d5213453eefab757fe02011955552b901bb3bd6192a54f1e2e2864b4b
+               SHA-256 (compiled\RDPVault.exe): 00136a82de90aa179d144034b31c922c946879732b9898d76ca3cf3f0997e9be
                Android: 2.0.0 embedded FreeRDP engine with landscape matrix scaling, TextureView & direct touch / trackpad support.
                compiled\RDPVault.apk ~50.7 MiB (53,121,641 bytes), versionCode 3 / versionName 2.0.0.
-               SHA-256 (compiled\RDPVault.apk): 3ea1348156a3e5586281edc2430ab148a1bc7131069fe6f5040d2fae204fc2a4
+               SHA-256 (compiled\RDPVault.apk): a0d5e4b121863fac7e0297b81138a9909ab624ed33b3183715f8a0d288f11571
                Minimum Android is 9 (API 28); built against API 34/35 with native ABIs arm64-v8a & x86_64.
                SECTIONS 30, 31, 32 & 33 supersede all prior statements regarding external intent handoff,
                RdpAutoTypeService, and Android Accessibility Service requirements.

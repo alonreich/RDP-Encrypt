@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -60,12 +60,6 @@ public sealed class LaunchProgressUpdate
     public string? SkipStageLabel { get; init; }
 }
 
-/// <summary>
-/// Launches mstsc.exe from a generated temp .rdp file and scrubs everything when it closes.
-/// If a password is saved, it is placed in Windows Credential Manager as a SESSION
-/// credential (vanishes at sign-out / reboot) and deleted the moment the RDP window
-/// closes - it is never written into the .rdp file itself.
-/// </summary>
 public static class RdpLauncher
 {
     public static volatile bool SkipWaitRequested;
@@ -159,15 +153,6 @@ public static class RdpLauncher
         catch { return null; }
     }
 
-    /// <summary>
-    /// Robust multi-interface, multi-target, multi-port Wake-on-LAN transmission.
-    /// Dispatches the 102-byte magic packet to:
-    /// 1. Target Host unicast IP/hostname (resolving DNS and penetrating WAN/VPN port forwards)
-    /// 2. Subnet-directed broadcasts across all active local network adapters
-    /// 3. Global broadcast (255.255.255.255)
-    /// 4. Configured broadcast IP (if customized)
-    /// Across configured WOL port (default: 9), alternative echo port (7), and custom RDP port (e.g. 11).
-    /// </summary>
     public static async Task<(bool success, WolDispatchReport report)> SendWakeOnLanAsync(
         string macAddress,
         string? host = null,
@@ -340,17 +325,14 @@ public static class RdpLauncher
     }
 
 
-    /// <summary>Start one RDP session for the profile synchronously.</summary>
     public static bool Launch(RdpProfile p)
     {
         _ = LaunchAsync(p);
         return true;
     }
 
-    /// <summary>Start one RDP session for the profile with WOL and async monitoring.</summary>
     public static Task<bool> LaunchAsync(RdpProfile p) => LaunchAsync(p, null, System.Threading.CancellationToken.None);
 
-    /// <summary>Start one RDP session for the profile with tactical progress updates and cancellation support.</summary>
     public static async Task<bool> LaunchAsync(
         RdpProfile p,
         Action<LaunchProgressUpdate>? progress,
@@ -616,7 +598,7 @@ public static class RdpLauncher
                     await proc.WaitForExitAsync();
                 }
             }
-            catch { /* process info no longer available */ }
+            catch {}
 
             CaptureCertPin(p);
             TryDelete(tempRdp);
@@ -641,10 +623,6 @@ public static class RdpLauncher
         return true;
     }
 
-    /// <summary>
-    /// Probes whether the RDP destination endpoint on its specified destination port (custom or standard)
-    /// is accepting connections and verifies that the mstsc process remains active.
-    /// </summary>
     public static async Task<bool> ProbeRdpConnectionAsync(string host, int port, Process proc, System.Threading.CancellationToken ct)
     {
         var deadline = DateTime.UtcNow.AddSeconds(12);
@@ -675,7 +653,6 @@ public static class RdpLauncher
         return !proc.HasExited;
     }
 
-    /// <summary>Kill every mstsc.exe this app launched (USB pulled / user request).</summary>
     public static void KillAll()
     {
         lock (Gate)
@@ -810,7 +787,7 @@ public static class RdpLauncher
             using var key = Registry.CurrentUser.CreateSubKey($@"{TscServersKey}\{FullAddress(p)}");
             key?.SetValue("CertHash", hash, RegistryValueKind.Binary);
         }
-        catch { /* the user simply gets the normal warning */ }
+        catch {}
     }
 
     public record PendingCertPinUpdate(string ProfileId, string ExpectedEndpoint, string CertThumbprint, DateTime TimestampUtc);
@@ -1019,11 +996,6 @@ public static class RdpLauncher
         });
     }
 
-    /// <summary>
-    /// Removes the Servers\&lt;address&gt; key this app created to replay a certificate
-    /// approval. Always called once the session is over, so the pin lives only in the
-    /// encrypted vault and never on this PC.
-    /// </summary>
     private static void RemoveCertPin(RdpProfile p)
     {
         try

@@ -12,44 +12,17 @@ using Java.Security;
 
 namespace RDPVault.Android.Security;
 
-/// <summary>
-/// Result of a biometric operation that is cryptographically bound to a hardware key.
-/// </summary>
 public sealed class BiometricCryptoResult
 {
     public bool Success { get; init; }
     public Cipher? Cipher { get; init; }
     public string? ErrorMessage { get; init; }
 
-    /// <summary>User pressed Cancel / the negative button. Not an error worth surfacing.</summary>
     public bool UserCancelled { get; init; }
 
-    /// <summary>
-    /// The hardware key is permanently gone: a new fingerprint/face was enrolled, the
-    /// screen lock was removed, or the OS rotated the Keymaster. The seal must be
-    /// re-created from the master password; it can never be recovered.
-    /// </summary>
     public bool KeyPermanentlyInvalidated { get; init; }
 }
 
-/// <summary>
-/// Mobile hardware security provider: Android Keystore / StrongBox Keymaster.
-/// Equivalent to PC TPM 2.0 / Windows Hello.
-///
-/// SECURITY CONTRACT (audited 2026-09-21, Finding 1):
-///   1. The AES-256-GCM wrap key is generated INSIDE the Secure Element (StrongBox) or
-///      the ARM TrustZone TEE and is never exportable.
-///   2. The key is created with SetUserAuthenticationRequired(true) and a validity
-///      duration of -1, which means "authorise EVERY single use with a Class 3 strong
-///      biometric". Without that flag the key would be usable by anything running as
-///      this UID, and the fingerprint prompt would be pure decoration.
-///   3. Every encrypt/decrypt goes through BiometricPrompt.CryptoObject, so the Cipher
-///      used to seal/unseal the master key is the exact Cipher the Keymaster authorised
-///      for that one biometric event. Calling BiometricPrompt and then separately using
-///      a Cipher is NOT a binding and is explicitly forbidden here.
-///   4. SetInvalidatedByBiometricEnrollment(true): adding a new fingerprint destroys the
-///      seal rather than silently extending access to the new finger.
-/// </summary>
 public static class AndroidHardwareKeyStore
 {
     private const string KeyStoreProvider = "AndroidKeyStore";
@@ -64,14 +37,6 @@ public static class AndroidHardwareKeyStore
         return false;
     }
 
-    /// <summary>
-    /// Generates a hardware-isolated 256-bit AES-GCM key inside the device Secure Element / StrongBox.
-    /// The key material NEVER enters application memory.
-    /// </summary>
-    /// <param name="requireBiometrics">
-    /// When true (the only value RDP Vault ever passes) the key is unusable without a
-    /// fresh Class 3 biometric authorisation supplied via BiometricPrompt.CryptoObject.
-    /// </param>
     public static void GenerateHardwareKey(Context context, string keyId, bool requireBiometrics = true)
     {
         string alias = KeyAliasPrefix + keyId;
@@ -98,11 +63,6 @@ public static class AndroidHardwareKeyStore
         keyGenerator.GenerateKey();
     }
 
-    /// <summary>
-    /// Encrypts the 32-byte master key using the biometric-authorised AES-GCM Cipher.
-    /// Returns the seal payload (base64 nonce : base64 ciphertext).
-    /// The Cipher MUST come from a successful BiometricPrompt.CryptoObject.
-    /// </summary>
     public static string SealMasterKey(string keyId, byte[] masterKey, Cipher cipher)
     {
         byte[] iv = cipher.GetIV() ?? throw new InvalidOperationException("Cipher IV was null.");
@@ -111,9 +71,6 @@ public static class AndroidHardwareKeyStore
         return $"{Convert.ToBase64String(iv)}:{Convert.ToBase64String(encrypted)}";
     }
 
-    /// <summary>
-    /// Decrypts the master key using the biometric-authorised Cipher.
-    /// </summary>
     public static byte[] UnsealMasterKey(string tpmBlob, Cipher cipher)
     {
         string[] parts = tpmBlob.Split(':');
@@ -123,9 +80,6 @@ public static class AndroidHardwareKeyStore
         return cipher.DoFinal(ciphertext) ?? throw new CryptographicException("Failed to unseal master key.");
     }
 
-    /// <summary>
-    /// Extracts the GCM nonce from a stored seal blob.
-    /// </summary>
     public static byte[] ExtractSealIv(string tpmBlob)
     {
         string[] parts = tpmBlob.Split(':');
@@ -147,11 +101,6 @@ public static class AndroidHardwareKeyStore
         }
     }
 
-    /// <summary>
-    /// Prepares an initialised Cipher to be wrapped in a BiometricPrompt.CryptoObject.
-    /// Throws when the underlying hardware key has been invalidated by a new biometric
-    /// enrolment or a screen-lock change.
-    /// </summary>
     public static Cipher GetInitializedCipher(string keyId, int opMode, byte[]? iv = null)
     {
         string alias = KeyAliasPrefix + keyId;
@@ -204,12 +153,6 @@ public static class AndroidHardwareKeyStore
         return ex.Message;
     }
 
-    /// <summary>
-    /// True when the exception means "this hardware key is gone forever" (new fingerprint
-    /// enrolled, screen lock removed, Keymaster rotated by an OS update).
-    /// Detected by type name so the code does not depend on one particular AndroidX /
-    /// Mono.Android binding surface for KeyPermanentlyInvalidatedException.
-    /// </summary>
     public static bool IsKeyInvalidated(Exception? ex)
     {
         if (ex == null) return false;
@@ -250,11 +193,6 @@ public static class AndroidHardwareKeyStore
         }
     }
 
-    /// <summary>
-    /// Human-readable reason biometrics cannot be used right now (no hardware, no
-    /// fingerprints enrolled, sensor temporarily locked out, security update required).
-    /// Returns null when biometrics ARE available.
-    /// </summary>
     public static string? DescribeBiometricUnavailability(Context? context)
     {
         if (context == null) return "Device context unavailable.";
@@ -295,11 +233,6 @@ public static class AndroidHardwareKeyStore
         catch { }
     }
 
-    /// <summary>
-    /// Creates a brand new hardware key and seals the master key under it.
-    /// The user is prompted for a biometric and the resulting AUTHORISED Cipher is what
-    /// performs the encryption - there is no code path that seals without that prompt.
-    /// </summary>
     public static async Task<(bool Success, string? Seal, string? KeyId, string? Error, bool Cancelled)> EnrollAndSealAsync(
         MainActivity activity,
         byte[] masterKey,
@@ -336,10 +269,6 @@ public static class AndroidHardwareKeyStore
         }
     }
 
-    /// <summary>
-    /// Unseals the master key from an existing seal. The Cipher handed to DoFinal is the
-    /// one the Keymaster released for this single biometric authorisation.
-    /// </summary>
     public static async Task<(bool Success, byte[]? MasterKey, string? Error, bool Cancelled, bool Invalidated)> AuthenticateAndUnsealAsync(
         MainActivity activity,
         string keyId,
@@ -385,10 +314,6 @@ public static class AndroidHardwareKeyStore
         }
     }
 
-    /// <summary>
-    /// Shows BiometricPrompt bound to <paramref name="cipher"/> and returns the Cipher the
-    /// Keymaster authorised. This is the ONLY entry point allowed to unlock a hardware key.
-    /// </summary>
     public static Task<BiometricCryptoResult> AuthenticateWithCryptoAsync(
         MainActivity activity,
         string title,

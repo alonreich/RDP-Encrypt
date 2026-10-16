@@ -10,12 +10,6 @@ using Avalonia.Threading;
 
 namespace RDPVault;
 
-/// <summary>
-/// Small shared dialogs, built in code so there is one consistent look and no extra
-/// XAML/InitializeComponent pairs to keep in sync.
-///
-/// Responsive dialog layout with bounded dimensions, scrollable body and pinned action buttons (Issue #8).
-/// </summary>
 public static class Dialogs
 {
     private static readonly IBrush Bg = new SolidColorBrush(Color.Parse("#0E0E10"));
@@ -108,7 +102,6 @@ public static class Dialogs
         };
 
 
-    /// <summary>Issue #12: nothing destructive happens without this.</summary>
     public static Task<bool> ConfirmAsync(Window owner, string title, string message,
                                           string confirmText = "Continue", bool danger = false,
                                           string? typeToConfirm = null)
@@ -254,7 +247,6 @@ public static class Dialogs
     }
 
 
-    /// <summary>Shows a freshly generated Recovery Code and refuses to close until it is acknowledged.</summary>
     public static Task ShowRecoveryCodeAsync(Window owner, string code, bool mustAcknowledge = true)
     {
         var w = Shell("Your Recovery Code", 560, 430);
@@ -359,7 +351,6 @@ public static class Dialogs
         return w.ShowDialog<bool>(owner);
     }
 
-    /// <summary>Lock-screen entry point for "I forgot my master password".</summary>
     public static Task<string?> AskRecoveryCodeAsync(Window owner)
     {
         var w = Shell("Unlock with a Recovery Code", 520, 300);

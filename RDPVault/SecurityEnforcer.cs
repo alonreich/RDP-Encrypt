@@ -16,27 +16,8 @@ public readonly struct FailureOutcome
     public TimeSpan Cooldown { get; init; }
 }
 
-/// <summary>
-/// Brute-force handling. See issue #4.
-///
-/// OLD BEHAVIOUR (broken in both directions):
-///   * the counter lived in a plaintext file "rdpvault_fails.json" sitting next to
-///     the vault, so an attacker just deleted it between attempts -> zero protection;
-///   * the threshold read Payload?.Settings, which is ALWAYS null while locked, so
-///     the user's configured value was silently ignored and 20 was always used;
-///   * Settings accepted 0 or 1, so one typo could permanently delete the vault;
-///   * it was on by default, and the vault had no recovery path.
-///
-/// NEW BEHAVIOUR:
-///   * the counter lives inside vault.rdpv itself, so it cannot be reset without
-///     touching the file the attacker is trying to open;
-///   * the always-on defence is a non-destructive escalating delay;
-///   * self-destruct is OFF by default, must be opted into, is clamped to >= 5
-///     attempts, and cannot be armed until a Recovery Code exists.
-/// </summary>
 public static class SecurityEnforcer
 {
-    /// <summary>Legacy plaintext counter from v1. Removed on sight.</summary>
     private static string LegacyFailsFile => Path.Combine(AppPaths.ExeDir, "rdpvault_fails.json");
 
     public static void RemoveLegacyState()
@@ -47,11 +28,6 @@ public static class SecurityEnforcer
     private static long _lastFailureTick = 0;
     private static double _inProcessCooldownSeconds = 0;
 
-    /// <summary>
-    /// How long the user must wait before the next attempt is accepted.
-    /// 0-4 failures: no delay. Then 2s, 4s, 8s ... capped at 60s.
-    /// Uses monotonic stopwatch ticks to prevent advancing the OS clock from clearing the cooldown.
-    /// </summary>
     public static TimeSpan CooldownRemaining(VaultFile file)
     {
         if (!file.Policy.ThrottleEnabled) return TimeSpan.Zero;
@@ -75,7 +51,6 @@ public static class SecurityEnforcer
         return monotonicLeft > wallClockLeft ? monotonicLeft : wallClockLeft;
     }
 
-    /// <summary>Records one wrong password/recovery code and persists it inside the vault envelope.</summary>
     public static FailureOutcome RecordFailure(VaultFile file, string vaultPath)
     {
         var now = DateTime.UtcNow;
@@ -134,10 +109,6 @@ public static class SecurityEnforcer
         try { VaultCrypto.SaveEnvelopeOnly(file, vaultPath); } catch { }
     }
 
-    /// <summary>
-    /// Overwrite-then-delete the vault and every copy of it. Only ever reached when
-    /// the user explicitly armed self-destruct.
-    /// </summary>
     private static void ShredVault(string vaultPath)
     {
         foreach (string path in new[] { vaultPath,
@@ -162,21 +133,11 @@ public static class SecurityEnforcer
                 }
                 File.Delete(path);
             }
-            catch { /* a failed shred must not stop the remaining deletions */ }
+            catch {}
         }
     }
 
 
-    /// <summary>
-    /// Issue #7: previously this method existed but was NEVER CALLED, while the
-    /// Settings screen showed an "Enforce BitLocker" checkbox. It is now called on
-    /// unlock and drives a visible warning. It is a warning, not a block - the app
-    /// cannot encrypt the user's drive for them, and refusing to open their own
-    /// vault would be worse than telling them the truth.
-    ///
-    /// manage-bde output is localised, so anything we cannot confidently parse is
-    /// reported as Unknown rather than guessed at.
-    /// </summary>
     public static BitLockerStatus CheckDrive(string driveLetter)
     {
         try

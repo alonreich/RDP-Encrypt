@@ -1,11 +1,7 @@
-using System;
+﻿using System;
 
 namespace RDPVault.Android.Rdp;
 
-/// <summary>
-/// In-memory bridge for passing connection parameters to RdpSessionActivity and managing
-/// the active session lifecycle without touching Android Intent extras, Logcat, or disk storage.
-/// </summary>
 public static class RdpSessionBridge
 {
     private static readonly object _lock = new();

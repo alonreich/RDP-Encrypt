@@ -27,7 +27,10 @@ public partial class MainWindow : Window
         mgr.Notice += SetStatus;
         mgr.LaunchRequested += async (p, fromShortcut) =>
         {
-            BringToForeground();
+            if (!fromShortcut)
+            {
+                BringToForeground();
+            }
             await ValidateAndLaunchProfileAsync(p, fromShortcut);
         };
 
@@ -62,9 +65,6 @@ public partial class MainWindow : Window
         };
     }
 
-    /// <summary>
-    /// Forces the vault window to restore, stay focused, and remain visible in the foreground.
-    /// </summary>
     public void BringToForeground()
     {
         Dispatcher.UIThread.Post(() =>
@@ -146,7 +146,6 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>Issue #17: the status line used to be the hard-coded lie "Connected to Hardware TPM."</summary>
     private void SetStatus(string text)
     {
         TxtStatus.Text = text;
@@ -258,7 +257,6 @@ public partial class MainWindow : Window
         UpdateUIState();
     }
 
-    /// <summary>Issue #2: a real "I forgot my password" path.</summary>
     private async void BtnRecovery_Click(object? sender, RoutedEventArgs e)
     {
         if (_busy) return;
@@ -287,7 +285,6 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>Issue #1 (2026 review): completes the "I forgot my master password" journey.</summary>
     private async Task OfferPasswordResetAfterRecoveryAsync()
     {
         await Dialogs.MessageAsync(this, "Unlocked with your Recovery Code",
@@ -431,7 +428,6 @@ public partial class MainWindow : Window
         SetStatus($"Profile \"{p.Name}\" updated.");
     }
 
-    /// <summary>Issue #12: deleting a profile is irreversible, so it now asks first.</summary>
     private async void BtnDelete_Click(object? sender, RoutedEventArgs e)
     {
         if (sender is not Button b || b.Tag is not RdpProfile p) return;
@@ -556,19 +552,42 @@ public partial class MainWindow : Window
             launched = await RdpLauncher.LaunchAsync(p, OnProgress, _connectCts.Token);
             if (launched)
             {
+                if (fromShortcut)
+                {
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        OverlayLaunch.IsVisible = false;
+                        _busy = false;
+                        WindowState = WindowState.Minimized;
+                        var handle = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+                        if (handle != IntPtr.Zero)
+                        {
+                            SystemPromptFocus.SendToBackground(handle);
+                        }
+                    });
+                }
+
                 var currentSession = RdpLauncher.FindActiveSession(p);
                 if (currentSession != null && currentSession.Process != null)
                 {
-                    var endpoint = ConnectionEndpoint.FromProfile(p);
-                    OnProgress(new LaunchProgressUpdate
+                    if (!string.IsNullOrWhiteSpace(p.GatewayHost) || fromShortcut)
                     {
-                        Step = "Probing RDP Connection",
-                        Details = $"Verifying connection to {endpoint.Host}:{endpoint.Port}...",
-                        IsIndeterminate = true
-                    });
+                        // Internal host behind RD Gateway or shortcut launch: verify process directly
+                        connectionVerified = !currentSession.Process.HasExited;
+                    }
+                    else
+                    {
+                        var endpoint = ConnectionEndpoint.FromProfile(p);
+                        OnProgress(new LaunchProgressUpdate
+                        {
+                            Step = "Probing RDP Connection",
+                            Details = $"Verifying connection to {endpoint.Host}:{endpoint.Port}...",
+                            IsIndeterminate = true
+                        });
 
-                    connectionVerified = await RdpLauncher.ProbeRdpConnectionAsync(
-                        endpoint.Host, endpoint.Port, currentSession.Process, _connectCts.Token);
+                        connectionVerified = await RdpLauncher.ProbeRdpConnectionAsync(
+                            endpoint.Host, endpoint.Port, currentSession.Process, _connectCts.Token);
+                    }
                 }
                 else
                 {
@@ -579,17 +598,26 @@ public partial class MainWindow : Window
         catch (OperationCanceledException)
         {
             SetStatus($"Connection to {p.Name} cancelled.");
+            if (fromShortcut) BringToForeground();
         }
         catch (Exception ex)
         {
             SetStatus($"Connection failed: {ex.Message}");
+            if (fromShortcut) BringToForeground();
         }
         finally
         {
             _busy = false;
             BtnSkipStage.IsVisible = false;
-            await Task.Delay(350);
-            OverlayLaunch.IsVisible = false;
+            if (!fromShortcut)
+            {
+                await Task.Delay(350);
+                OverlayLaunch.IsVisible = false;
+            }
+            else
+            {
+                OverlayLaunch.IsVisible = false;
+            }
         }
 
         if (launched && connectionVerified)
@@ -599,6 +627,11 @@ public partial class MainWindow : Window
                 Dispatcher.UIThread.Post(() =>
                 {
                     WindowState = WindowState.Minimized;
+                    var handle = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+                    if (handle != IntPtr.Zero)
+                    {
+                        SystemPromptFocus.SendToBackground(handle);
+                    }
                 });
             }
             else
@@ -609,7 +642,10 @@ public partial class MainWindow : Window
         else if (launched)
         {
             SetStatus($"Remote Desktop launched for {p.Name}.");
-            BringToForeground();
+            if (!fromShortcut)
+            {
+                BringToForeground();
+            }
         }
     }
 

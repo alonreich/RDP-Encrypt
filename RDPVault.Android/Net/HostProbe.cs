@@ -20,17 +20,8 @@ public enum NetworkKind
     Other
 }
 
-/// <summary>
-/// Pre-flight network checks performed BEFORE handing the session to an external RDP
-/// client, so the user is told "your PC is asleep" by RDP Vault instead of staring at
-/// an opaque 0x204 spinner inside Microsoft Remote Desktop 30 seconds later.
-/// </summary>
 public static class HostProbe
 {
-    /// <summary>
-    /// Attempts a TCP connect to host:port. Returns true if the port accepted the
-    /// connection within the timeout. Never throws.
-    /// </summary>
     public static async Task<bool> IsReachableAsync(string host, int port, int timeoutMs, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(host)) return false;
@@ -135,24 +126,12 @@ public static class HostProbe
         }
     }
 
-    /// <summary>
-    /// True when Wake-on-LAN has any chance of working: WOL magic packets are
-    /// link-local, so they only reach the target over Wi-Fi / Ethernet, never over
-    /// mobile data.
-    /// </summary>
     public static bool IsWolCapableNetwork(Context? context)
     {
         var kind = GetActiveNetworkKind(context);
         return kind == NetworkKind.Wifi || kind == NetworkKind.Ethernet;
     }
 
-    /// <summary>
-    /// Computes the subnet-directed broadcast address(es) for the device's current
-    /// IPv4 interfaces (e.g. 192.168.1.255 for 192.168.1.37/24).
-    ///
-    /// Android silently drops or fails to route 255.255.255.255 on many OEM builds,
-    /// which is why a plain limited broadcast is not enough on its own.
-    /// </summary>
     public static List<IPAddress> GetDirectedBroadcastAddresses()
     {
         var results = new List<IPAddress>();

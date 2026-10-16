@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -11,9 +11,6 @@ using System.Threading.Tasks;
 
 namespace RDPVault;
 
-/// <summary>
-/// Port Knocking helper supporting ICMP magic packets and TCP port knocks with configurable delay.
-/// </summary>
 public static class IcmpKnock
 {
     public const int DefaultDelayMilliseconds = 2000;
@@ -125,7 +122,6 @@ public static class IcmpKnock
 
     public static async Task SendTcpKnockAsync(string host, int port, CancellationToken ct)
     {
-        // Emulates: curl -m 1 http://<host>:<port> >nul 2>&1
         var httpTask = SendHttpKnockAsync(host, port, ct);
         var synTask = SendSocketSynKnockAsync(host, port, ct);
 

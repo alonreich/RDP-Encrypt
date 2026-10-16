@@ -3,7 +3,6 @@ using System.Net.Sockets;
 
 namespace RDPVault;
 
-/// <summary>The separate Port field is authoritative, including for legacy host:port inputs.</summary>
 public readonly record struct ConnectionEndpoint(string Host, int Port)
 {
     public string Address => Host.Contains(':') ? $"[{Host}]:{Port}" : $"{Host}:{Port}";
@@ -77,10 +76,6 @@ public readonly record struct ConnectionEndpoint(string Host, int Port)
         return true;
     }
 
-    /// <summary>
-    /// Parses an RD Gateway authority string (e.g. "gw.example.com", "gw.example.com:8443", "[2001:db8::1]:8443").
-    /// Preserves the embedded port when present, falling back to defaultPort (443) only when no port was specified.
-    /// </summary>
     public static bool TryParseGatewayAuthority(string? input, out ConnectionEndpoint endpoint, out string error, int defaultPort = 443)
     {
         endpoint = default;
@@ -137,12 +132,6 @@ public readonly record struct ConnectionEndpoint(string Host, int Port)
         return true;
     }
 
-    /// <summary>
-    /// Parses an endpoint as displayed in client UI without applying default port overrides.
-    /// Preserves exact host and port tokens.
-    /// Returns port = null when no port was specified in the text.
-    /// Returns port = exact integer when a valid port (1..65535) was specified.
-    /// </summary>
     public static bool TryParseDisplayedEndpoint(string? input, out string host, out int? port, out string error)
     {
         host = "";

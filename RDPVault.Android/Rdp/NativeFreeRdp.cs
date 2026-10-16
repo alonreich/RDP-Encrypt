@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -8,10 +8,6 @@ using RDPVault.Android.Platform;
 
 namespace RDPVault.Android.Rdp;
 
-/// <summary>
-/// Native P/Invoke bindings and high-level manager for the embedded FreeRDP engine.
-/// Connects, authenticates, and renders the remote desktop directly in-memory.
-/// </summary>
 public static class NativeFreeRdp
 {
     private const string LibFreeRdp = "freerdp2";
@@ -25,10 +21,6 @@ public static class NativeFreeRdp
 
     private static bool _librariesLoaded;
 
-    /// <summary>
-    /// Explicitly preloads native libraries in topological dependency order to ensure
-    /// Android dynamic linker resolves transitive symbols without runtime failure.
-    /// </summary>
     public static void EnsureNativeLibrariesLoaded()
     {
         if (_librariesLoaded) return;
@@ -48,7 +40,6 @@ public static class NativeFreeRdp
         }
     }
 
-    // FreeRDP setting keys (stable FreeRDP 2.x)
     public const int FreeRDP_ServerPort = 19;
     public const int FreeRDP_ServerHostname = 20;
     public const int FreeRDP_Username = 21;
@@ -70,29 +61,25 @@ public static class NativeFreeRdp
     public const int FreeRDP_RedirectClipboard = 4800;
     public const int FreeRDP_SupportDisplayControl = 5185;
 
-    // Pointer event flags (RDP protocol)
     public const ushort PTR_FLAGS_HWHEEL = 0x0400;
     public const ushort PTR_FLAGS_WHEEL = 0x0200;
     public const ushort PTR_FLAGS_WHEEL_NEGATIVE = 0x0100;
     public const ushort PTR_FLAGS_MOVE = 0x0800;
     public const ushort PTR_FLAGS_DOWN = 0x8000;
-    public const ushort PTR_FLAGS_BUTTON1 = 0x1000; // Left button
-    public const ushort PTR_FLAGS_BUTTON2 = 0x2000; // Right button
-    public const ushort PTR_FLAGS_BUTTON3 = 0x4000; // Middle button
+    public const ushort PTR_FLAGS_BUTTON1 = 0x1000;
+    public const ushort PTR_FLAGS_BUTTON2 = 0x2000;
+    public const ushort PTR_FLAGS_BUTTON3 = 0x4000;
 
-    // Keyboard flags
     public const ushort KBD_FLAGS_EXTENDED = 0x0100;
     public const ushort KBD_FLAGS_DOWN = 0x4000;
     public const ushort KBD_FLAGS_RELEASE = 0x8000;
 
-    // GDI 32bpp formats
     public const uint CLRCONV_ALPHA = 0x00000004;
     public const uint PIXEL_FORMAT_BGRX32 = 0x20040888;
     public const uint PIXEL_FORMAT_BGRA32 = 0x20048888;
     public const uint PIXEL_FORMAT_RGBA32 = 0x20038888;
     public const uint PIXEL_FORMAT_RGBX32 = 0x20030888;
 
-    // Delegates for native callbacks
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     public delegate bool PreConnectDelegate(IntPtr instance);
 
@@ -140,7 +127,6 @@ public static class NativeFreeRdp
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     public delegate bool PointerSystemDelegate(IntPtr context, ref POINTER_SYSTEM_UPDATE pointer_system);
 
-    // Native P/Invoke functions
     [DllImport(LibFreeRdp, CallingConvention = CallingConvention.Cdecl)]
     public static extern IntPtr freerdp_new();
 
@@ -238,11 +224,6 @@ public static class NativeFreeRdp
         [MarshalAs(UnmanagedType.Bool)] bool allowUnknown);
 }
 
-/// <summary>
-/// High-level managed session running the native FreeRDP connection loop.
-/// Streams credentials into RAM, clears them with CryptographicOperations.ZeroMemory immediately,
-/// and fires render updates on incoming frame buffers.
-/// </summary>
 public sealed class FreeRdpSession : IDisposable
 {
     private IntPtr _instance = IntPtr.Zero;
@@ -312,9 +293,6 @@ public sealed class FreeRdpSession : IDisposable
                 throw new InvalidOperationException("Failed to allocate FreeRDP native instance.");
             }
 
-            // Write callbacks into freerdp struct
-            // Offsets (64-bit pointers):
-            // PreConnect=48, PostConnect=49, Authenticate=50, VerifyCert=51, PostDisconnect=55, VerifyCertEx=66
             Marshal.WriteIntPtr(_instance, 48 * IntPtr.Size, Marshal.GetFunctionPointerForDelegate(_preConnect));
             Marshal.WriteIntPtr(_instance, 49 * IntPtr.Size, Marshal.GetFunctionPointerForDelegate(_postConnect));
             Marshal.WriteIntPtr(_instance, 50 * IntPtr.Size, Marshal.GetFunctionPointerForDelegate(_authenticate));
@@ -322,20 +300,18 @@ public sealed class FreeRdpSession : IDisposable
             Marshal.WriteIntPtr(_instance, 55 * IntPtr.Size, Marshal.GetFunctionPointerForDelegate(_postDisconnect));
             Marshal.WriteIntPtr(_instance, 66 * IntPtr.Size, Marshal.GetFunctionPointerForDelegate(_verifyCertEx));
 
-            // Context initialization
             bool contextOk = NativeFreeRdp.freerdp_context_new(_instance);
             if (!contextOk)
             {
                 throw new InvalidOperationException("Failed to initialize FreeRDP context via freerdp_context_new.");
             }
 
-            _context = Marshal.ReadIntPtr(_instance, 0); // instance->context
+            _context = Marshal.ReadIntPtr(_instance, 0);
             if (_context == IntPtr.Zero)
             {
                 throw new InvalidOperationException("FreeRDP context pointer is NULL after freerdp_context_new.");
             }
 
-            // Resolve settings pointer
             _settings = ResolveSettings(_instance, _context);
             if (_settings == IntPtr.Zero)
             {
@@ -345,10 +321,8 @@ public sealed class FreeRdpSession : IDisposable
             _input = ResolveInput(_instance, _context, _settings);
             _update = ResolveUpdate(_instance, _context, _settings);
 
-            // Configure connection settings
             ApplySettings();
 
-            // Connect
             bool ok = NativeFreeRdp.freerdp_connect(_instance);
             if (!ok || _stopRequested)
             {
@@ -366,7 +340,6 @@ public sealed class FreeRdpSession : IDisposable
             IsConnected = true;
             Connected?.Invoke();
 
-            // Event pump loop
             IntPtr[] handles = new IntPtr[64];
             while (!_stopRequested && !NativeFreeRdp.freerdp_shall_disconnect(_instance))
             {
@@ -400,7 +373,6 @@ public sealed class FreeRdpSession : IDisposable
 
     private static IntPtr ResolveSettings(IntPtr instance, IntPtr context)
     {
-        // In FreeRDP 2.x, rdpContext.settings is at offset 40, and rdp_freerdp.settings is at offset 18
         if (context != IntPtr.Zero)
         {
             IntPtr ptr = Marshal.ReadIntPtr(context, 40 * IntPtr.Size);
@@ -413,7 +385,6 @@ public sealed class FreeRdpSession : IDisposable
             if (ptr != IntPtr.Zero) return ptr;
         }
 
-        // Defensive scan in context
         if (context != IntPtr.Zero)
         {
             for (int i = 35; i <= 45; i++)
@@ -426,7 +397,6 @@ public sealed class FreeRdpSession : IDisposable
             }
         }
 
-        // Defensive scan in instance
         if (instance != IntPtr.Zero)
         {
             for (int i = 14; i <= 22; i++)
@@ -474,7 +444,6 @@ public sealed class FreeRdpSession : IDisposable
 
     private static IntPtr ResolveInput(IntPtr instance, IntPtr context, IntPtr settings)
     {
-        // 1. Direct offset check from standard FreeRDP 2.x (context: 38, instance: 16)
         if (context != IntPtr.Zero)
         {
             IntPtr ptr = Marshal.ReadIntPtr(context, 38 * IntPtr.Size);
@@ -495,7 +464,6 @@ public sealed class FreeRdpSession : IDisposable
             }
         }
 
-        // 2. Scan relative to settings pointer (input is 2 pointers before settings in both context and instance)
         if (context != IntPtr.Zero && settings != IntPtr.Zero)
         {
             for (int i = 30; i <= 50; i++)
@@ -530,7 +498,6 @@ public sealed class FreeRdpSession : IDisposable
             }
         }
 
-        // 3. Scan context for any candidate pointer whose first field is context
         if (context != IntPtr.Zero)
         {
             for (int i = 32; i <= 48; i++)
@@ -544,7 +511,6 @@ public sealed class FreeRdpSession : IDisposable
             }
         }
 
-        // 4. Scan instance
         if (instance != IntPtr.Zero)
         {
             for (int i = 12; i <= 24; i++)
@@ -558,7 +524,6 @@ public sealed class FreeRdpSession : IDisposable
             }
         }
 
-        // 5. Fallback unverified read
         if (context != IntPtr.Zero)
         {
             IntPtr ptr = Marshal.ReadIntPtr(context, 38 * IntPtr.Size);
@@ -587,7 +552,6 @@ public sealed class FreeRdpSession : IDisposable
             if (IsValidContextBacklink(ptr, context)) return ptr;
         }
 
-        // Update is 1 pointer before settings
         if (context != IntPtr.Zero && settings != IntPtr.Zero)
         {
             for (int i = 30; i <= 50; i++)
@@ -780,7 +744,6 @@ public sealed class FreeRdpSession : IDisposable
     {
         if (settings == IntPtr.Zero) return;
 
-        // Clean target host (strip port or brackets if present)
         string targetHost = Config.Host.Trim();
         int targetPort = Config.Port > 0 ? Config.Port : 3389;
         if (targetHost.StartsWith('[') && targetHost.Contains(']'))
@@ -797,10 +760,8 @@ public sealed class FreeRdpSession : IDisposable
 
         var (cleanUser, cleanDomain) = SplitUserAndDomain(Config.Username, Config.Domain);
 
-        // 1. Invoke FreeRDP client CLI parser (sets /v:host:port, /u:user, /d:domain, /p:password)
         ParseCommandLineArgs(settings, targetHost, targetPort, RemoteWidth, RemoteHeight, cleanUser, cleanDomain, Config.PasswordChars, Config.AllowClipboard, Config.SuppressCertWarnings, Config.GatewayHost);
 
-        // 2. Explicitly apply settings properties
         SetSettingString(settings, "ServerHostname", NativeFreeRdp.FreeRDP_ServerHostname, targetHost);
         SetSettingUint(settings, "ServerPort", NativeFreeRdp.FreeRDP_ServerPort, (uint)targetPort);
 
@@ -818,7 +779,6 @@ public sealed class FreeRdpSession : IDisposable
             SetSettingString(settings, "Domain", NativeFreeRdp.FreeRDP_Domain, "");
         }
 
-        // Stream password directly in RAM and wipe immediately upon consumption
         if (Config.PasswordChars != null && Config.PasswordChars.Length > 0)
         {
             byte[] passBytes = Encoding.UTF8.GetBytes(Config.PasswordChars);
@@ -833,26 +793,20 @@ public sealed class FreeRdpSession : IDisposable
             }
         }
 
-        // Dimensions and color
         SetSettingUint(settings, "DesktopWidth", NativeFreeRdp.FreeRDP_DesktopWidth, (uint)RemoteWidth);
         SetSettingUint(settings, "DesktopHeight", NativeFreeRdp.FreeRDP_DesktopHeight, (uint)RemoteHeight);
         SetSettingUint(settings, "ColorDepth", NativeFreeRdp.FreeRDP_ColorDepth, 32);
 
-        // Strict default deny for clipboard sharing
         SetSettingBool(settings, "RedirectClipboard", NativeFreeRdp.FreeRDP_RedirectClipboard, Config.AllowClipboard);
 
-        // Prohibit dynamic display resizing (avoid MS-RDPEDISP extension channel mismatch)
         SetSettingBool(settings, "SupportDisplayControl", NativeFreeRdp.FreeRDP_SupportDisplayControl, false);
         SetSettingBool(settings, "DynamicResolutionUpdate", NativeFreeRdp.FreeRDP_DynamicResolutionUpdate, false);
         SetSettingBool(settings, "SmartSizing", NativeFreeRdp.FreeRDP_SmartSizing, false);
 
-        // Remote audio playback redirection enabled
         SetSettingBool(settings, "AudioPlayback", NativeFreeRdp.FreeRDP_AudioPlayback, true);
 
-        // Certificate warning suppression
         SetSettingBool(settings, "IgnoreCertificate", NativeFreeRdp.FreeRDP_IgnoreCertificate, Config.SuppressCertWarnings);
 
-        // RD Gateway if specified
         if (!string.IsNullOrWhiteSpace(Config.GatewayHost))
         {
             string gwHost = Config.GatewayHost.Trim();
@@ -928,7 +882,6 @@ public sealed class FreeRdpSession : IDisposable
 
     private bool OnPostConnect(IntPtr instance)
     {
-        // Initialize GDI 32bpp framebuffer with RGBA32 format matching Android bitmap buffer
         bool gdiOk = NativeFreeRdp.gdi_init(instance, NativeFreeRdp.PIXEL_FORMAT_RGBA32);
         if (!gdiOk)
         {
@@ -954,7 +907,6 @@ public sealed class FreeRdpSession : IDisposable
 
         if (update != IntPtr.Zero)
         {
-            // Hook BeginPaint and EndPaint in rdp_update (BeginPaint=72, EndPaint=80)
             Marshal.WriteIntPtr(update, 72, Marshal.GetFunctionPointerForDelegate(_beginPaint));
             Marshal.WriteIntPtr(update, 80, Marshal.GetFunctionPointerForDelegate(_endPaint));
 
@@ -998,13 +950,13 @@ public sealed class FreeRdpSession : IDisposable
         string fingerprint,
         bool hostMismatch)
     {
-        if (Config.SuppressCertWarnings) return 2; // Accept for session
+        if (Config.SuppressCertWarnings) return 2;
         if (!string.IsNullOrEmpty(Config.PinnedFingerprint) &&
-            string.Equals(Config.PinnedFingerprint, fingerprint, StringComparison.OrdinalIgnoreCase))
+            string.Equals(Config.PinnedFingerprint.Replace(":", "").Trim(), fingerprint?.Replace(":", "").Trim(), StringComparison.OrdinalIgnoreCase))
         {
-            return 1; // Accept and match pinned
+            return 1;
         }
-        return 0; // Reject
+        return 0;
     }
 
     private uint OnVerifyCertificateEx(
@@ -1017,13 +969,13 @@ public sealed class FreeRdpSession : IDisposable
         string fingerprint,
         uint flags)
     {
-        if (Config.SuppressCertWarnings) return 2; // Accept for session
+        if (Config.SuppressCertWarnings) return 2;
         if (!string.IsNullOrEmpty(Config.PinnedFingerprint) &&
-            string.Equals(Config.PinnedFingerprint, fingerprint, StringComparison.OrdinalIgnoreCase))
+            string.Equals(Config.PinnedFingerprint.Replace(":", "").Trim(), fingerprint?.Replace(":", "").Trim(), StringComparison.OrdinalIgnoreCase))
         {
-            return 1; // Accept and match pinned
+            return 1;
         }
-        return 0; // Reject
+        return 0;
     }
 
     private bool OnBeginPaint(IntPtr context) => true;
@@ -1034,7 +986,6 @@ public sealed class FreeRdpSession : IDisposable
 
         try
         {
-            // context->gdi is at offset 33 (33 * 8 = 264)
             IntPtr gdi = Marshal.ReadIntPtr(context, 33 * IntPtr.Size);
             if (gdi != IntPtr.Zero)
             {

@@ -1,8 +1,7 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 
 namespace RDPVault;
 
-/// <summary>Non-destructive Android password throttling. The counter stays in the encrypted-file envelope.</summary>
 public sealed class UnlockThrottle
 {
     private long _lastFailureTick;

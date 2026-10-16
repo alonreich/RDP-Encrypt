@@ -52,18 +52,10 @@
                 <Border Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16">
                     <StackPanel Spacing="10">
                         <TextBlock Text="CREATE MASTER PASSWORD" FontSize="12" FontWeight="Bold" Foreground="#9A9AA3" LetterSpacing="1"/>
-                        <Grid ColumnDefinitions="*,Auto">
-                            <TextBox Grid.Column="0" Name="TxtFirstRunPass" PasswordChar="●" Watermark="Master password (min 8 characters)..."
-                                     Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35"/>
-                            <Button Grid.Column="1" Name="BtnToggleFirstRunPass" Content="👁" Background="#1C1C21" Foreground="#9A9AA3"
-                                    BorderBrush="#2E2E35" MinWidth="48" Margin="6,0,0,0"/>
-                        </Grid>
-                        <Grid ColumnDefinitions="*,Auto">
-                            <TextBox Grid.Column="0" Name="TxtFirstRunConfirm" PasswordChar="●" Watermark="Confirm master password..."
-                                     Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35"/>
-                            <Button Grid.Column="1" Name="BtnToggleFirstRunConfirm" Content="👁" Background="#1C1C21" Foreground="#9A9AA3"
-                                    BorderBrush="#2E2E35" MinWidth="48" Margin="6,0,0,0"/>
-                        </Grid>
+                        <TextBox Name="TxtFirstRunPass" PasswordChar="●" Watermark="Master password (min 10 characters)..."
+                                 Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35"/>
+                        <TextBox Name="TxtFirstRunConfirm" PasswordChar="●" Watermark="Confirm master password..."
+                                 Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35"/>
                         <TextBlock Text="There is no way to reset this password except the recovery code you are about to receive. Nothing is sent anywhere - the vault lives on this phone only."
                                    FontSize="12" Foreground="#8A8A93" TextWrapping="Wrap"/>
                     </StackPanel>
@@ -179,12 +171,8 @@
                 <Border Name="CardPasswordUnlock" Background="#141417" CornerRadius="8" BorderBrush="#2E2E35" BorderThickness="1" Padding="16">
                     <StackPanel Spacing="12">
                         <TextBlock Text="MASTER PASSWORD" FontSize="12" FontWeight="Bold" Foreground="#9A9AA3" LetterSpacing="1"/>
-                        <Grid ColumnDefinitions="*,Auto">
-                            <TextBox Grid.Column="0" Name="TxtPassword" PasswordChar="●" Watermark="Enter master password..."
-                                     Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35"/>
-                            <Button Grid.Column="1" Name="BtnToggleUnlockPass" Content="👁" Background="#1C1C21" Foreground="#9A9AA3"
-                                    BorderBrush="#2E2E35" MinWidth="48" Margin="6,0,0,0"/>
-                        </Grid>
+                        <TextBox Name="TxtPassword" PasswordChar="●" Watermark="Enter master password..."
+                                 Background="#1C1C21" Foreground="#EDEDED" BorderBrush="#2E2E35"/>
                         <Button Name="BtnUnlock" Content="Unlock Vault" HorizontalAlignment="Stretch"
                                 Background="#005FB8" Foreground="White" MinHeight="48" CornerRadius="6" FontSize="15" FontWeight="SemiBold"/>
 

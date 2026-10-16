@@ -2,14 +2,12 @@
 PROJECT_STRUCTURE.TXT  —  RDP VAULT
 SOURCE OF TRUTH & GUIDANCE FOR ANY AI AGENT (OR HUMAN) WORKING ON THIS PROJECT
 ================================================================================
-Last updated : 2026-10-09
-Version      : 2026.10.09  (Windows 1.1.0, Android companion 2.0.0 Embedded FreeRDP Engine)
+Last updated : 2026-10-16
+Version      : 2026.10.16  (Windows 1.1.0, Android companion 2.0.0 Embedded FreeRDP Engine)
 Status       : Windows: production release, compiled and tested with .NET 9 SDK on Windows 10/11 x64.
-               SHA-256 (compiled\RDPVault.exe): 619B0F19739F225D23560F92297329BECEAF33537E1646FFAFEA3E7D089F8154
                Android: 2.0.0 embedded FreeRDP engine with landscape matrix scaling, TextureView & direct touch / trackpad support.
-               compiled\RDPVault.apk ~67.0 MiB (70,252,184 bytes), versionCode 3 / versionName 2.0.0.
                Minimum Android is 9 (API 28); built against API 34/35 with native ABIs arm64-v8a & x86_64.
-               SECTIONS 30, 31 & 32 supersede all prior statements regarding external intent handoff,
+               SECTIONS 30, 31, 32 & 33 supersede all prior statements regarding external intent handoff,
                RdpAutoTypeService, and Android Accessibility Service requirements.
 
 --------------------------------------------------------------------------------
@@ -593,7 +591,7 @@ ProfileEditorWindow edits a CLONE and exposes ApplyTo(target), so Cancel really
 cancels and editing never changes the profile's Id.
 Controls & validation:
   - Display name, host (space-free, required), port (1-65535).
-  - Masked password with "Show password" toggle.
+  - Permanently masked password input (strictly omits reveal/unmask toggle).
   - Optional RD Gateway host.
   - Display resolution presets (Full screen, Multi-mon, 1080p, etc.).
   - Overrides (Full screen, Multi-monitor, Certificate & identity warnings).
@@ -1046,7 +1044,7 @@ A parallel mobile software distribution branch sharing the identical cryptograph
 
  6. ANDROID FIRST-TIME SETUP WIZARD & BIOMETRIC AUTH LIFECYCLE:
     - First-Time Setup Wizard (PanelFirstRun): Automatically detects when no vault exists on the device
-      (!File.Exists(VaultPath)). Displays welcome screen with dual password fields (min 8 chars), match
+      (!File.Exists(VaultPath)). Displays welcome screen with dual password fields (min 10 chars), match
       validation, and hardware StrongBox biometric enrollment toggle.
     - Recovery Code Display (PanelRecoveryDisplay): Generates 52-character Crockford-Base32 emergency code,
       formatted into 4-character blocks (13 groups of 4 separated by hyphens). Provides one-tap clipboard copy
@@ -2319,6 +2317,69 @@ SECTION 32 — PRE-CONNECT SEQUENCING, VIEWPORT REPAIR & INTERACTIVE GESTURES (2
      - Removed `FLAG_ACTIVITY_CLEAR_TOP` from notification resume intent, preventing destructive task clearing.
      - `OnDestroy()` in `RdpSessionActivity` strictly guards `_session.Dispose()` with `_isExplicitDisconnect`: background activity recycling never drops the underlying FreeRDP TCP connection.
      - Added native `RequestRedraw()` in `FreeRdpSession` reading unmanaged GDI primary buffer directly, and dynamic session reattachment in `OnCreate`, `OnNewIntent`, and `OnResume` for instant zero-delay restoration.
+
+--------------------------------------------------------------------------------
+SECTION 33 — OCTOBER 2026 AUDIT RESOLUTIONS & CRITICAL UX / STABILIZATION ENHANCEMENTS (2026-10-16)
+--------------------------------------------------------------------------------
+33.A - WINDOWS SHORTCUT LAUNCH DIRECT BACKGROUNDING & FOCUS DECOUPLING (MainWindow.axaml.cs & SystemPromptFocus.cs):
+  1. Direct Desktop Shortcut Backgrounding:
+     - When launching an RDP connection via a desktop shortcut (`--launch <id>`), upon successful Windows Hello / TPM
+       biometric authentication and `mstsc.exe` process launch (`launched == true`), the vault window immediately
+       hides the connection overlay, sets `WindowState = WindowState.Minimized`, and invokes `SystemPromptFocus.SendToBackground(handle)`.
+     - Win32 `SW_MINIMIZE`, `HWND_BOTTOM`, and `SWP_ASYNCWINDOWPOS` ensure the vault window drops immediately to the bottom
+       of the desktop Z-order and never lingers in front of or wide open behind the active remote desktop session.
+  2. Elimination of Blocking 12s Socket Probe on Shortcut Launch:
+     - Direct desktop shortcuts bypass the 12-second local TCP socket probe (`ProbeRdpConnectionAsync`), verifying process
+       liveness directly (`!currentSession.Process.HasExited`). This prevents the launch overlay from lingering on screen
+       or popping up over `mstsc.exe` if secondary socket probes fail or time out.
+  3. Gated Named-Pipe Launch Request:
+     - `SessionManager.cs` gates named-pipe `LAUNCH:<id>` commands: `ShowRequested?.Invoke()` is called only if the vault is
+       currently locked, preventing unwanted window foregrounding when an already-unlocked vault receives a launch command.
+  4. Post-Launch Foreground Protection:
+     - `BringToForeground()` is guarded across `mgr.LaunchRequested` and post-launch completion handlers: it is strictly
+       suppressed when `fromShortcut` is true, ensuring user focus remains undisturbed on the remote session.
+
+33.B - CREDENTIAL HARDENING & PROBE OPTIMIZATIONS (WINDOWS & ANDROID):
+  1. 10-Character Master Password Enforcement:
+     - All vault creation, password change, and initial setup wizards enforce a strict 10-character minimum master password
+       requirement across Windows (SetupWindow, Dialogs) and Android (MainView) to guarantee Argon2id entropy defense.
+  2. Elimination of Password Unmask / Reveal Toggles:
+     - Plain-text reveal / unmask eye toggle buttons (`BtnToggleProfilePass`, `BtnTogglePass`) were removed across all
+       dialogs and input forms. Password fields remain permanently masked with bullet glyphs to prevent shoulder-surfing and memory leaks.
+  3. RD Gateway Direct Process Verification:
+     - In `MainWindow.axaml.cs` and `RdpLauncher.cs`, connection targets configured with an RD Gateway bypass the direct
+       TCP socket probe to host:port (which is non-routable externally without the gateway tunnel) and verify connection
+       state directly against `mstsc.exe` process health, eliminating artificial 12-second connection delays.
+
+33.C - ANDROID FREERDP VIEWPORT TRANSFORMATION & SYMMETRICAL PANNING (RdpSessionActivity.cs):
+  1. Viewport Matrix Symmetrical Panning & Boundary Calculation:
+     - Resolved a critical bug where zooming in portrait mode (or landscape) rendered the top, bottom, left, or right
+       portions of the remote screen completely unreachable and prevented scrolling down.
+     - Recalculated viewport panning bounds (`maxPanY`, `maxPanX`) symmetrically based on scaled desktop dimensions,
+       physical display aspect ratios, and orientation metrics.
+     - Matrix translation (`tx`, `ty`) and pan clamping allow 100% full-screen reachability across any magnification level
+       in both portrait and landscape orientations.
+  2. Smooth Zoom Focal-Point Centering:
+     - Pinch-to-zoom transforms fluidly around touch focal coordinates, maintaining stable visual context without drifting off-screen.
+
+33.D - ANDROID FREERDP REMOTE UX, INPUT & STABILITY OVERHAUL (RdpSessionActivity.cs & FreeRdpClient.cs):
+  1. Soft Keyboard Auto-Pop Suppression:
+     - Suppressed automatic Android soft keyboard display on remote caret focus events. Keyboard invocation is strictly
+       user-controlled via the dedicated top toolbar keyboard button.
+  2. Native RdpInputConnection for Reliable Text & Unicode:
+     - Implemented `RdpInputConnection` on `RdpSessionActivity` to correctly handle soft keyboard Backspace, deletion,
+       batch edits, and full Unicode character streaming into the FreeRDP native input subsystem.
+  3. Touch-and-Hold Right-Click with Haptics:
+     - Added native touch-and-hold (long-press) gesture triggering remote Right-Click with tactile haptic vibration feedback.
+  4. Clutter Removal & Streamlined Toolbar:
+     - Eliminated redundant floating click overlays and awkward viewport buttons.
+     - Added an interactive in-session disconnect confirmation dialog (`ConfirmSessionDisconnectAsync`).
+  5. Strict FreeRDP Certificate Pinning:
+     - FreeRDP certificate verification utilizes SHA-256 fingerprint matching (`FreeRdpClient.cs`), rejecting unrecognized
+       or tampered host certificates automatically unless explicitly accepted.
+  6. Automatic Backgrounding Vault Lock:
+     - When navigating away from the active session or backgrounding the companion app, the vault immediately locks
+       in memory to secure master keys.
 
 --------------------------------------------------------------------------------
 END OF FILE — keep synchronized with the code.

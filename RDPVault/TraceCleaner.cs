@@ -8,23 +8,6 @@ using Microsoft.Win32;
 
 namespace RDPVault;
 
-/// <summary>
-/// Removes the local traces mstsc.exe leaves behind.
-///
-/// ISSUE #20 - SCOPING.
-/// The old cleaner ran unconditionally on every unlock, lock and exit and deleted
-/// the machine's ENTIRE Terminal Server Client history, every *.rdp* shortcut in
-/// Recent, and the mstsc UserAssist/prefetch records - including connections the
-/// user made outside this app, from their own saved .rdp files. That is silent,
-/// irreversible collateral damage.
-///
-/// The cleaner now defaults to SweepScope.OwnHostsOnly: it only removes entries it
-/// can positively tie to a host stored in this vault, plus its own temp launchers.
-/// SweepScope.Everything restores the original scorched-earth behaviour for users
-/// who want it, and the Settings screen spells out what that means.
-///
-/// Every step is wrapped so cleanup can never crash or block the app.
-/// </summary>
 public readonly struct SweepReport
 {
     public int ItemsCleaned { get; init; }
@@ -52,7 +35,6 @@ public static class TraceCleaner
         }
     }
 
-    /// <summary>Called on lock/exit so host names are not retained in memory (issue #20).</summary>
     public static void ForgetHosts()
     {
         lock (Gate) _hosts = Array.Empty<string>();
@@ -77,7 +59,6 @@ public static class TraceCleaner
     }
 
 
-    /// <summary>Standard sweep: everything except other saved TERMSRV credentials.</summary>
     public static SweepReport Sweep()
     {
         _itemsCleaned = 0;
@@ -91,9 +72,6 @@ public static class TraceCleaner
         return new SweepReport { ItemsCleaned = _itemsCleaned, ItemsLocked = _itemsLocked };
     }
 
-    /// <summary>
-    /// Issue #1: Cleans specific target hosts deterministically, even if ForgetHosts() was called when the vault locked.
-    /// </summary>
     public static SweepReport SweepHosts(IEnumerable<string> hosts)
     {
         _itemsCleaned = 0;
@@ -113,7 +91,6 @@ public static class TraceCleaner
         return new SweepReport { ItemsCleaned = _itemsCleaned, ItemsLocked = _itemsLocked };
     }
 
-    /// <summary>Sweep + delete every saved RDP credential on this PC.</summary>
     public static SweepReport DeepSweep()
     {
         var report = Sweep();
@@ -269,7 +246,6 @@ public static class TraceCleaner
         });
     }
 
-    /// <summary>Our own temporary launcher files (%TEMP%\rdpv_*.rdp). Active sessions are preserved until exit.</summary>
     public static void TempLaunchers()
     {
         TryRun(() =>
@@ -283,9 +259,6 @@ public static class TraceCleaner
         });
     }
 
-    /// <summary>
-    /// Issue #7: Removes any .net single-file extraction directories left in %TEMP%.
-    /// </summary>
     public static void CleanBundleResidue()
     {
         TryRun(() =>
@@ -362,7 +335,7 @@ public static class TraceCleaner
 
     private static void TryRun(Action a)
     {
-        try { a(); } catch { /* never let cleanup crash the app */ }
+        try { a(); } catch {}
     }
 
     private static void TryDeleteFile(string path)

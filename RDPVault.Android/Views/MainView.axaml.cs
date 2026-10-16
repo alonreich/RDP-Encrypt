@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -53,12 +53,6 @@ public partial class MainView : UserControl
     private DateTime _lastSensitiveCopyUtc = DateTime.MinValue;
     private string? _lastSensitiveCopiedText;
 
-    /// <summary>
-    /// Guards the Settings screen while it is being populated. Without it, assigning
-    /// SelectedIndex to a ComboBox during load fires SelectionChanged, which used to write
-    /// a half-initialised VaultSettings straight back to disk - the bug where merely
-    /// OPENING Settings flipped the user's scaling choice (audit item 6).
-    /// </summary>
     private bool _suppressSettingsSave;
 
     private DispatcherTimer? _idleTimer;
@@ -185,9 +179,6 @@ public partial class MainView : UserControl
 
     private void WireEvents()
     {
-        SetupPasswordToggle(TxtFirstRunPass, BtnToggleFirstRunPass);
-        SetupPasswordToggle(TxtFirstRunConfirm, BtnToggleFirstRunConfirm);
-        SetupPasswordToggle(TxtPassword, BtnToggleUnlockPass);
         SetupPasswordToggle(TxtRecoveryNewPass, BtnToggleRecoveryNewPass);
         SetupPasswordToggle(TxtSettingsCurrentPass, BtnToggleSettingsCurrentPass);
         SetupPasswordToggle(TxtSettingsNewPass, BtnToggleSettingsNewPass);
@@ -665,7 +656,6 @@ public partial class MainView : UserControl
     public bool IsVaultUnlocked => _masterKey != null;
     private bool _pendingResumeAfterUnlock;
 
-    /// <summary>Locks the vault if it is currently open. Safe to call from any state.</summary>
     public void AutoLockIfUnlocked()
     {
         if (_masterKey != null)
@@ -746,9 +736,9 @@ public partial class MainView : UserControl
         string pass = TxtFirstRunPass.Text ?? "";
         string confirm = TxtFirstRunConfirm.Text ?? "";
 
-        if (pass.Length < 8)
+        if (pass.Length < 10)
         {
-            TxtFirstRunError.Text = "Master password must be at least 8 characters.";
+            TxtFirstRunError.Text = "Master password must be at least 10 characters.";
             TxtFirstRunError.IsVisible = true;
             return;
         }
@@ -857,10 +847,6 @@ public partial class MainView : UserControl
         TxtCopyNotice.IsVisible = true;
     }
 
-    /// <summary>
-    /// Writes the recovery code to a plain text file the user chooses. This is the escape
-    /// route that does not involve the clipboard at all (audit item 7).
-    /// </summary>
     private async Task SaveRecoveryCodeToFileAsync()
     {
         if (string.IsNullOrEmpty(_activeRecoveryCode)) return;
@@ -899,10 +885,6 @@ public partial class MainView : UserControl
         }
     }
 
-    /// <summary>
-    /// Shares the code as plain TEXT through the Android share sheet. Deliberately not a
-    /// file: this leaves no plaintext copy of the recovery code anywhere on disk.
-    /// </summary>
     private void ShareRecoveryCodeText()
     {
         if (string.IsNullOrEmpty(_activeRecoveryCode)) return;
@@ -1900,9 +1882,6 @@ public partial class MainView : UserControl
             _editingProfile.Height = customHeight;
             _editingProfile.AllowClipboard = allowClip;
             _editingProfile.AllowClipboardOverride = allowClipOverride;
-            _editingProfile.MultiMonOverride = TriStateOverride.Disabled;
-            _editingProfile.UseMultiMon = false;
-            _editingProfile.SmartSizingOverride = TriStateOverride.Disabled;
             _editingProfile.EnableWol = ChkProfileEnableWol.IsChecked == true;
             _editingProfile.WolMacAddress = wolMac;
             _editingProfile.WolPort = wolPort > 0 ? wolPort : 9;
@@ -1924,10 +1903,6 @@ public partial class MainView : UserControl
         RefreshBackupReminder();
     }
 
-    /// <summary>
-    /// Shows a validation error and, when the offending field lives under "Advanced",
-    /// opens that section so the user is not told off about a field they cannot see.
-    /// </summary>
     private void ShowProfileError(string message, bool inAdvancedSection)
     {
         if (inAdvancedSection) SetAdvancedVisible(true);
@@ -2190,9 +2165,9 @@ public partial class MainView : UserControl
             return;
         }
 
-        if (newPass.Length < 8)
+        if (newPass.Length < 10)
         {
-            TxtChangePasswordError.Text = "New password must be at least 8 characters.";
+            TxtChangePasswordError.Text = "New password must be at least 10 characters.";
             TxtChangePasswordError.IsVisible = true;
             return;
         }
@@ -2454,7 +2429,6 @@ public partial class MainView : UserControl
 
             if (result == RdpLaunchStatus.Success)
             {
-                MainActivity.Instance?.BeginExternalActivity(30);
                 OverlayLaunch.IsVisible = false;
             }
             else
@@ -2527,11 +2501,6 @@ public partial class MainView : UserControl
         ProgLaunch.IsIndeterminate = true;
     }
 
-    /// <summary>
-    /// One-second TCP check before handing off, so an asleep or offline PC is reported by
-    /// RDP Vault in plain words instead of by Remote Desktop's opaque 0x204 half a minute
-    /// later (suggestion 10). Returns false when the user cancels.
-    /// </summary>
     private async Task<bool> RunPreflightAsync(RdpProfile profile, string host, int port, CancellationToken ct)
     {
         while (true)
@@ -2598,86 +2567,13 @@ public partial class MainView : UserControl
 
                 if (ct.IsCancellationRequested) return false;
 
-                var kind = HostProbe.GetActiveNetworkKind(AndroidContext);
-                bool isLocal = HostProbe.IsPrivateOrLocalHost(host);
-                string reason = kind switch
-                {
-                    NetworkKind.None => "This phone has no network connection right now.",
-                    NetworkKind.Cellular when isLocal => "You are on mobile data. If this is a home or office PC, it is probably only reachable from its own Wi-Fi network or through a VPN.",
-                    NetworkKind.Cellular => $"The remote computer did not answer on port {port}. It may be offline, asleep, or blocked by a firewall.",
-                    _ => "The computer did not answer. It is most likely asleep, switched off, or not on this network."
-                };
-
-                if (profile.EnableIcmpKnock)
-                {
-                    reason += " (Port knocking was sent, but the port is not yet accepting connections).";
-                }
-
-                bool canWol = !string.IsNullOrWhiteSpace(profile.WolMacAddress);
-
-                TxtLaunchUnreachableTitle.Text = $"{host} DID NOT ANSWER";
-                TxtLaunchUnreachableBody.Text = reason + " Opening Remote Desktop now would just spin for about 30 seconds and then show error 0x204.";
-                BtnLaunchSendWol.IsVisible = canWol;
-                CardLaunchUnreachable.IsVisible = true;
-                ProgLaunch.IsIndeterminate = false;
-                ProgLaunch.Value = 0;
-                TxtLaunchSubStatus.Text = "";
-                TxtLaunchStep.Text = "Waiting for you to choose what to do.";
-            }
-
-            _unreachableChoiceTcs = new TaskCompletionSource<UnreachableChoice>(TaskCreationOptions.RunContinuationsAsynchronously);
-            UnreachableChoice choice;
-            try
-            {
-                choice = await _unreachableChoiceTcs.Task.WaitAsync(ct);
-            }
-            catch (OperationCanceledException)
-            {
-                return false;
-            }
-            finally
-            {
-                _unreachableChoiceTcs = null;
-            }
-
-            switch (choice)
-            {
-                case UnreachableChoice.ConnectAnyway:
-                    CardLaunchUnreachable.IsVisible = false;
-                    return true;
-
-                case UnreachableChoice.SendWol:
-                    CardLaunchUnreachable.IsVisible = false;
-                    ProgLaunch.IsIndeterminate = true;
-                    TxtLaunchSubStatus.Text = "Sending wake signal";
-                    TxtLaunchStep.Text = $"Sending wake-up signal to {profile.WolMacAddress}...";
-                    await DispatchWolAsync(profile, host);
-                    for (int s = 15; s > 0; s--)
-                    {
-                        if (ct.IsCancellationRequested) return false;
-                        TxtLaunchStep.Text = $"Wake-up signal sent. Waiting for the computer to start ({s}s)...";
-                        await Task.Delay(1000, ct);
-                    }
-                    continue;
-
-                case UnreachableChoice.Retry:
-                    continue;
-
-                default:
-                    CancelLaunch();
-                    return false;
+                // Direct embedded FreeRDP connection handshake without blocking launch
+                TxtLaunchStep.Text = $"Opening Remote Desktop connection to {host}:{port}...";
+                return true;
             }
         }
     }
 
-    /// <summary>
-    /// Wake-on-LAN dispatch.
-    ///
-    /// Finding 6 fixes: the magic packet now goes to the SUBNET-DIRECTED broadcast address
-    /// (many Android builds drop 255.255.255.255), and it is no longer also fired at the
-    /// host's RDP port, which was meaningless traffic aimed at a machine that is by
-    /// definition switched off.
-    /// </summary>
     private static async Task DispatchWolAsync(RdpProfile profile, string host)
     {
         try
@@ -2826,10 +2722,6 @@ public partial class MainView : UserControl
     }
 
 
-    /// <summary>
-    /// Mirrors exactly what RecoveryCode.Normalize accepts, so the caret arithmetic below
-    /// cannot drift out of sync with the normaliser.
-    /// </summary>
     private static bool IsSignificantRecoveryChar(char raw)
     {
         char c = char.ToUpperInvariant(raw);
@@ -2909,11 +2801,6 @@ public partial class MainView : UserControl
     }
 
 
-    /// <summary>
-    /// Validates that the bytes really are an RDP Vault file before they are allowed to
-    /// overwrite a live vault (Finding 8). The old check was "longer than 16 bytes", which
-    /// happily accepted a photo.
-    /// </summary>
     private static bool TryValidateVaultBytes(byte[] data, out string error, out int profileCountHint)
     {
         error = "";
@@ -3018,12 +2905,6 @@ public partial class MainView : UserControl
         }
     }
 
-    /// <summary>
-    /// Suggestion 9: hands the encrypted vault straight to the Android share sheet, so it
-    /// can go to Quick Share, Drive or email in one tap instead of a trip through a file
-    /// manager. The staged copy lives in the app's own cache folder and is exposed through
-    /// a scoped FileProvider, never through world-readable storage.
-    /// </summary>
     private async Task ShareVaultBackupAsync()
     {
         try

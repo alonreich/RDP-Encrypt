@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -44,20 +44,6 @@ internal interface IPersistFileLink
     void GetCurFile([MarshalAs(UnmanagedType.LPWStr)] out string ppszFileName);
 }
 
-/// <summary>
-/// ISSUE #16 - replaces the old `dynamic shell = Activator.CreateInstance(WScript.Shell)`
-/// shortcut creator.
-///
-/// `dynamic` needs the C# runtime binder, which does not survive trimming or
-/// NativeAOT, and the whole call site sat inside `catch { }` - so on a trimmed build
-/// the installer created no shortcuts at all and still reported
-/// "Installation completed successfully".
-///
-/// This is a direct IShellLink/IPersistFile implementation: no runtime binder, no
-/// Windows Script Host dependency, and failures are thrown rather than swallowed.
-/// The COM work runs on a dedicated STA thread because the installer itself runs on
-/// a background (MTA) thread.
-/// </summary>
 internal static class ShellLink
 {
     public static void Create(string shortcutPath, string targetPath, string arguments,

@@ -31,14 +31,6 @@ public partial class SetupWindow : Window
         Close();
     }
 
-    /// <summary>
-    /// ISSUE #5 (and #12).
-    /// This button promised to delete "your existing vault", but it deleted
-    /// InstallDir\vault.dat - a file this app has never created. The real vault is
-    /// vault.rdpv, so nothing was erased: users pressed "Clean install", expected a
-    /// fresh start, and were then asked for the old master password by the old vault.
-    /// It also fired instantly with no confirmation.
-    /// </summary>
     private async void BtnCleanInstall_Click(object? sender, RoutedEventArgs e)
     {
         bool go = await Dialogs.ConfirmAsync(this, "Erase the installed vault?",

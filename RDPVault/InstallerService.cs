@@ -25,9 +25,6 @@ public static class InstallerService
                currentExe.Equals(InstalledExe, StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>
-    /// Checks whether the current process is running with elevated administrator privileges.
-    /// </summary>
     public static bool IsAdministrator()
     {
         try
@@ -42,11 +39,6 @@ public static class InstallerService
         }
     }
 
-    /// <summary>
-    /// Automatically requests elevation via the Windows UAC prompt without requiring the user
-    /// to manually right-click 'Run as administrator'. If elevation is approved, spawns the elevated
-    /// process and terminates the current process cleanly.
-    /// </summary>
     public static bool TryElevate(string[]? args = null)
     {
         if (IsAdministrator()) return false;
@@ -95,11 +87,6 @@ public static class InstallerService
         return false;
     }
 
-    /// <summary>
-    /// Fast, non-blocking termination of running RDPVault instances to release file locks and mutexes.
-    /// Exits in milliseconds if no other instances are active. If an elevated process cannot be killed
-    /// due to lack of privileges, triggers UAC privilege escalation.
-    /// </summary>
     public static void KillRunningInstances(bool excludeCurrent = true, Action<string>? log = null)
     {
         int currentPid = Environment.ProcessId;
@@ -298,23 +285,8 @@ public static class InstallerService
     }
 
 
-    /// <summary>Is there a vault inside the install directory that would be destroyed?</summary>
     public static bool InstalledVaultExists() => File.Exists(AppPaths.InstalledVaultPath);
 
-    /// <summary>
-    /// ISSUE #1 - THE WORST BUG IN THE PROJECT.
-    ///
-    /// The old uninstaller ended with:
-    ///     rmdir /S /Q "%LOCALAPPDATA%\RDPVault"
-    /// and the vault lives in exactly that directory. Choosing "Uninstall" in
-    /// Programs and Features - or the QuietUninstallString, which runs with no UI
-    /// whatsoever - permanently deleted every stored credential with no warning, no
-    /// confirmation, no backup and (see issue #2) no way to recover.
-    ///
-    /// Now: the vault is copied out to Documents\RDP Vault Backups BEFORE anything
-    /// is removed, unless the user explicitly asks for it to be destroyed. The
-    /// rescued path is returned so the UI can show it.
-    /// </summary>
     public static string? UninstallWithProgress(Action<string> log, bool keepVault)
     {
         string? rescuedTo = null;

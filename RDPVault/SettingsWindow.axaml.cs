@@ -209,7 +209,6 @@ public partial class SettingsWindow : Window
         }
     }
 
-    /// <summary>Issue #4/#12: arming self-destruct is a deliberate, typed confirmation.</summary>
     private async void ChkSelfDestruct_Click(object? sender, RoutedEventArgs e)
     {
         if (ChkSelfDestruct.IsChecked != true) { UpdateSelfDestructNote(); return; }

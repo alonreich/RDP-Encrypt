@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading.Tasks;
 using Android.App;
 using Android.Content;
@@ -66,21 +66,10 @@ public class MainActivity : AvaloniaMainActivity<App>
 
     public static MainActivity? Instance { get; private set; }
 
-    /// <summary>Inactivity timeout in minutes. 0 = never.</summary>
     public int ConfiguredLockMinutes { get; set; } = 5;
 
-    /// <summary>
-    /// When true the vault is locked the moment the app leaves the screen, and the
-    /// physical Back button on the connections list locks instead of just minimising.
-    /// </summary>
     public bool LockImmediatelyOnBackground { get; set; } = true;
 
-    /// <summary>
-    /// Set immediately before RDP Vault deliberately launches another app (Remote Desktop,
-    /// Play Store, the file picker, the share sheet, Android Settings). Without this the
-    /// "lock the instant we leave the screen" rule would slam the vault shut every time the
-    /// user opens a file picker and lose their place.
-    /// </summary>
     private DateTime _externalActivitySuppressUntilUtc = DateTime.MinValue;
 
     private DateTime _lastBackgroundedUtc = DateTime.MinValue;
@@ -95,10 +84,6 @@ public class MainActivity : AvaloniaMainActivity<App>
     private PowerManager.WakeLock? _connectingWakeLock;
     public bool IsConnecting { get; private set; }
 
-    /// <summary>
-    /// Keeps Android display awake strictly during the RDP connection phase
-    /// (WOL, knock, preflight, handshake) until connected or failed.
-    /// </summary>
     public void SetConnectingKeepAwake(bool keepAwake)
     {
         IsConnecting = keepAwake;
@@ -120,7 +105,7 @@ public class MainActivity : AvaloniaMainActivity<App>
                     }
                     if (_connectingWakeLock != null && !_connectingWakeLock.IsHeld)
                     {
-                        _connectingWakeLock.Acquire(120_000); // 2 minute maximum safety timeout
+                        _connectingWakeLock.Acquire(120_000);
                     }
                 }
                 else
@@ -157,11 +142,6 @@ public class MainActivity : AvaloniaMainActivity<App>
         }
     }
 
-    /// <summary>
-    /// FLAG_SECURE. Blanks the app-switcher thumbnail and blocks screenshots and screen
-    /// recording of the vault (connection list, master password field, recovery code).
-    /// Opt-out lives in Settings for users who genuinely need to screen-record.
-    /// </summary>
     public void ApplyScreenSecurity()
     {
         try
@@ -217,12 +197,6 @@ public class MainActivity : AvaloniaMainActivity<App>
         return null;
     }
 
-    /// <summary>
-    /// Every touch, key press and trackball event in the app funnels through here.
-    /// This is what makes the FOREGROUND inactivity auto-lock real: previously the timer
-    /// only ever ran while the app was in the background, so a phone left unlocked on a
-    /// desk with RDP Vault open never locked at all.
-    /// </summary>
     public override void OnUserInteraction()
     {
         base.OnUserInteraction();
@@ -238,7 +212,8 @@ public class MainActivity : AvaloniaMainActivity<App>
         {
             ResolveMainView()?.SuspendIdleTimer();
 
-            if (LockImmediatelyOnBackground && !IsExternalActivitySuppressed && !IsConnecting)
+            bool isSessionActive = RdpSessionBridge.ActiveSession != null;
+            if ((LockImmediatelyOnBackground || isSessionActive) && !IsExternalActivitySuppressed && !IsConnecting)
             {
                 Avalonia.Threading.Dispatcher.UIThread.Post(() =>
                 {
@@ -361,10 +336,6 @@ public class MainActivity : AvaloniaMainActivity<App>
         });
     }
 
-    /// <summary>
-    /// Re-syncs the in-app session banner (e.g. after the reachability watchdog flips the
-    /// remote host to "not responding"). Does NOT clear the banner.
-    /// </summary>
     public void NotifySessionStateChanged()
     {
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
@@ -401,11 +372,6 @@ public class MainActivity : AvaloniaMainActivity<App>
         MoveTaskToBack(true);
     }
 
-    /// <summary>
-    /// Orientation changes are handled IN-PLACE. The Activity is never destroyed, so an
-    /// external remote session and the unlocked vault both survive a screen flip with no
-    /// re-authentication prompt.
-    /// </summary>
     public override void OnConfigurationChanged(Configuration newConfig)
     {
         base.OnConfigurationChanged(newConfig);

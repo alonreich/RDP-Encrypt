@@ -14,7 +14,6 @@ public enum HelloEnrollResult
     Success,
     Cancelled,
     NotSupported,
-    /// <summary>Issue #18c: this platform's key does not sign deterministically.</summary>
     SignatureNotReproducible
 }
 
@@ -27,20 +26,6 @@ public static class WindowsHello
 
     public static Task<bool> IsSupportedAsync() => KeyCredentialManager.IsSupportedAsync().AsTask();
 
-    /// <summary>
-    /// ISSUE #18c.
-    /// Quick unlock derives the vault key from the raw TPM signature bytes. That only
-    /// works if signing the same challenge twice yields identical bytes - true for
-    /// RSA PKCS#1 v1.5, false for randomised schemes such as RSA-PSS or ECDSA.
-    ///
-    /// Previously the app enrolled blindly. On a platform that randomises signatures
-    /// enrollment appeared to succeed and then quick unlock failed forever, with the
-    /// user told only "Hardware signature rejected".
-    ///
-    /// Enrollment now signs twice and compares. If the bytes differ we refuse to
-    /// enroll and say so plainly, and we always test-unseal the freshly written seal
-    /// before it is trusted (see SessionManager.EnableHelloSealAsync).
-    /// </summary>
     public static async Task<(HelloEnrollResult Result, string KeyId, byte[] Signature)> EnrollAndSignAsync()
     {
         using var focus = SystemPromptFocus.Begin();

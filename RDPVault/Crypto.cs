@@ -17,10 +17,6 @@ public static class VaultCrypto
     private const int SaltBytes = 32;
 
 
-    /// <summary>
-    /// Issue #19: the Argon2 instance is now disposed and the UTF-8 copy of the
-    /// secret is zeroed in a finally block. Previously both were left in memory.
-    /// </summary>
     private static byte[] DeriveKey(string secret, byte[] salt, int memKiB, int iterations, int lanes)
     {
         byte[] secretBytes = Encoding.UTF8.GetBytes(secret);
@@ -55,14 +51,9 @@ public static class VaultCrypto
     public static byte[] DerivePasswordKey(string password, VaultFile.KdfParams kdf)
         => DeriveKey(password, Convert.FromBase64String(kdf.Salt), kdf.Mem, kdf.Iter, kdf.Lanes);
 
-    /// <summary>Recovery codes are high-entropy already, so a lighter (but still memory-hard) KDF is fine.</summary>
     private static byte[] DeriveRecoveryKey(string normalizedCode, string saltB64)
         => DeriveKey(normalizedCode, Convert.FromBase64String(saltB64), 65536, 3, 4);
 
-    /// <summary>
-    /// Issue #18c: derived from the raw TPM signature. Enrollment verifies the
-    /// signature is reproducible before trusting this (see WindowsHello).
-    /// </summary>
     public static byte[] DeriveTpmKey(byte[] signature, string saltBase64)
     {
         Argon2? argon2 = null;
@@ -121,11 +112,6 @@ public static class VaultCrypto
         => AeadOpen(key, Convert.FromBase64String(blob.Nonce), Convert.FromBase64String(blob.Ct));
 
 
-    /// <summary>
-    /// Creates a brand new vault. Issue #2: a Recovery Code is generated and bound
-    /// to the master key at creation time - it is a real second way in, not decoration.
-    /// The caller MUST show <paramref name="recoveryCodeDisplay"/> to the user.
-    /// </summary>
     public static VaultFile CreateVault(string password, VaultPayload payload, string vaultPath,
                                         out string recoveryCodeDisplay, bool retainRecoveryUntilAcknowledged = false)
     {
@@ -162,7 +148,6 @@ public static class VaultCrypto
         }
     }
 
-    /// <summary>Unlock with the master password.</summary>
     public static (byte[] Master, VaultPayload Payload) Open(VaultFile file, string password)
     {
         byte[] passwordKey = DerivePasswordKey(password, file.Kdf);
@@ -184,7 +169,6 @@ public static class VaultCrypto
         }
     }
 
-    /// <summary>Issue #2: unlock with the printed Recovery Code. Returns null if the code is wrong.</summary>
     public static (byte[] Master, VaultPayload Payload)? OpenWithRecoveryCode(VaultFile file, string typedCode)
     {
         if (file.Recovery == null || string.IsNullOrEmpty(file.RecoverySalt)) return null;
@@ -213,10 +197,6 @@ public static class VaultCrypto
 
     public static VaultPayload OpenPayload(VaultFile file, byte[] master) => OpenPayloadOrThrow(file, master);
 
-    /// <summary>
-    /// Issue #19: JsonException used to escape uncaught with a developer-facing
-    /// message. Both failure modes now produce one clear sentence.
-    /// </summary>
     private static VaultPayload OpenPayloadOrThrow(VaultFile file, byte[] master)
     {
         byte[] plain;
@@ -275,17 +255,8 @@ public static class VaultCrypto
         WriteAtomic(file, vaultPath);
     }
 
-    /// <summary>
-    /// Rewrites only the unencrypted envelope (policy / failure counter). Used while
-    /// the vault is LOCKED, so no master key is available. Wrap/Recovery/Data are
-    /// carried over untouched.
-    /// </summary>
     public static void SaveEnvelopeOnly(VaultFile file, string vaultPath) => WriteAtomic(file, vaultPath);
 
-    /// <summary>
-    /// Atomic write + rolling backup. Issue #1/#4: there is now always a previous
-    /// good copy at vault.rdpv.bak, so a bad write or an accidental wipe is survivable.
-    /// </summary>
     private static void WriteAtomic(VaultFile file, string vaultPath)
     {
         lock (SaveLock)

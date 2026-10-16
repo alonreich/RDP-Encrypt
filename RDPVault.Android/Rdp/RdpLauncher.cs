@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Android.Content;
 using RDPVault;
 using RDPVault.Android.Activities;
@@ -13,11 +13,6 @@ public enum RdpLaunchStatus
 
 public static class RdpLauncher
 {
-    /// <summary>
-    /// Launches an embedded in-app FreeRDP connection session via RdpSessionActivity.
-    /// Credentials stream directly in RAM through RdpSessionBridge without touching Android
-    /// Intent extras, Logcat, clipboard, or persistent storage.
-    /// </summary>
     public static RdpLaunchStatus LaunchRdp(Context context, RdpProfile profile, VaultSettings? settings, out string message)
     {
         if (profile == null)
@@ -53,6 +48,7 @@ public static class RdpLauncher
             Height = targetHeight,
             AllowClipboard = allowClipboard,
             SuppressCertWarnings = suppressCert,
+            PinnedFingerprint = profile.CertThumbprint,
             ProfileName = profile.Name,
             Profile = profile,
             GatewayHost = profile.GatewayHost,
@@ -77,9 +73,6 @@ public static class RdpLauncher
         }
     }
 
-    /// <summary>
-    /// Resumes or brings the embedded session Activity to the foreground.
-    /// </summary>
     public static bool ResumeRemoteDesktop(Context context)
     {
         try

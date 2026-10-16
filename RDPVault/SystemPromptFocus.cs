@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -8,43 +8,12 @@ using System.Threading.Tasks;
 
 namespace RDPVault;
 
-/// <summary>
-/// ISSUE #21 - the Windows Hello / TPM prompt opened behind the app and without
-/// focus, so touching the fingerprint sensor did nothing until the user first
-/// clicked the dialog. That defeats the entire point of a one-touch unlock.
-///
-/// WHY IT HAPPENS
-/// KeyCredentialManager.RequestSignAsync / RequestCreateAsync render their prompt
-/// in a separate broker process (CredentialUIBroker.exe / LogonUI.exe). Unlike
-/// UserConsentVerifier, KeyCredentialManager exposes NO interop interface for
-/// passing an owner HWND, so the broker window is never parented to our window and
-/// Windows' foreground-lock rules routinely leave it behind whatever had focus.
-///
-/// WHAT THIS DOES - three layers, cheapest first:
-///   1. Activate our own window, so our process is the foreground process at the
-///      moment of the call.
-///   2. AllowSetForegroundWindow(ASFW_ANY) - explicitly hands the foreground right
-///      to whichever process shows the prompt. This alone fixes it on most systems.
-///   3. A watchdog that polls for the broker's top-level window and, while the
-///      operation is pending, keeps forcing it topmost and focused using the
-///      AttachThreadInput technique. It stops the instant the prompt closes or the
-///      scope is disposed, and the window is released from topmost on the way out.
-///
-/// The watchdog only ever touches windows belonging to the known credential broker
-/// processes, or windows with the credential dialog's class name. It never
-/// manipulates arbitrary windows.
-/// </summary>
 public static class SystemPromptFocus
 {
     private static IntPtr _owner;
 
-    /// <summary>Called by any window that may trigger a system credential prompt.</summary>
     public static void SetOwner(IntPtr hwnd) => _owner = hwnd;
 
-    /// <summary>
-    /// Wrap every KeyCredentialManager call in this. Dispose as soon as the
-    /// operation finishes - success or failure.
-    /// </summary>
     public static IDisposable Begin() => new Scope(_owner);
 
 
@@ -88,7 +57,7 @@ public static class SystemPromptFocus
                 }
             }
             catch (OperationCanceledException) { }
-            catch { /* focus assistance must never break the unlock */ }
+            catch {}
         }
 
         public void Dispose()
@@ -112,7 +81,6 @@ public static class SystemPromptFocus
     }
 
 
-    /// <summary>Processes Windows uses to host the Hello / credential prompt.</summary>
     private static readonly string[] BrokerProcesses =
     {
         "credentialuibroker",
@@ -121,7 +89,6 @@ public static class SystemPromptFocus
         "shellexperiencehost"
     };
 
-    /// <summary>Window class of the "Windows Security" credential dialog.</summary>
     private const string CredentialDialogClass = "Credential Dialog Xaml Host";
 
     private static IntPtr FindCredentialPrompt()
@@ -190,9 +157,6 @@ public static class SystemPromptFocus
     }
 
 
-    /// <summary>
-    /// Brings a target window to the foreground and focuses it without permanently pinning it topmost.
-    /// </summary>
     public static void ActivateWindow(IntPtr hwnd)
     {
         if (hwnd == IntPtr.Zero) return;
@@ -255,12 +219,27 @@ public static class SystemPromptFocus
 
     private const int ASFW_ANY = -1;
     private const int SW_SHOW = 5;
+    private const int SW_MINIMIZE = 6;
     private static readonly IntPtr HWND_TOPMOST = new(-1);
     private static readonly IntPtr HWND_NOTOPMOST = new(-2);
+    private static readonly IntPtr HWND_BOTTOM = new(1);
     private const uint SWP_NOSIZE = 0x0001;
     private const uint SWP_NOMOVE = 0x0002;
     private const uint SWP_NOACTIVATE = 0x0010;
     private const uint SWP_SHOWWINDOW = 0x0040;
+    private const uint SWP_ASYNCWINDOWPOS = 0x4000;
+
+    public static void SendToBackground(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero) return;
+        try
+        {
+            ShowWindow(hwnd, SW_MINIMIZE);
+            SetWindowPos(hwnd, HWND_BOTTOM, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+        }
+        catch { }
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT { public int Left, Top, Right, Bottom; }

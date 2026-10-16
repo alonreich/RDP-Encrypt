@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Pipes;
@@ -24,20 +24,6 @@ public sealed class SessionManager : IDisposable
     public bool IsUnlocked => Master != null;
     public bool VaultExists => System.IO.File.Exists(VaultPath);
 
-    /// <summary>
-    /// ISSUE #1 (2026 review). True when this session was opened with the printed
-    /// Recovery Code rather than the master password.
-    ///
-    /// What was broken: after a recovery unlock the app told the user to "set a new
-    /// master password in Settings", but ChangePassword demanded the CURRENT password
-    /// to prove knowledge - the exact thing the user had just proved they did not
-    /// have. The instruction was impossible to follow and the vault stayed locked to a
-    /// password nobody knew, with the Recovery Code as the only key forever.
-    ///
-    /// When this is true the proof-of-knowledge step is skipped: the master key is
-    /// already unwrapped in memory, unwrapped by a 256-bit secret, so there is nothing
-    /// further to prove.
-    /// </summary>
     public bool UnlockedViaRecovery { get; private set; }
 
     private DispatcherTimer? _lockTimer;
@@ -45,8 +31,6 @@ public sealed class SessionManager : IDisposable
     private DateTime _lastActivity = DateTime.UtcNow;
     private bool _exiting;
 
-    /// <summary>Issue #3 (2026 review): consecutive 2 s polls that must all fail before
-    /// the app tears itself down. One transient miss is not a removed drive.</summary>
     private const int UsbMissesBeforeShutdown = 3;
     private int _usbMisses;
 
@@ -54,11 +38,8 @@ public sealed class SessionManager : IDisposable
     public event Action? Unlocked;
     public event Action? UsbRemoved;
     public event Action? ShowRequested;
-    /// <summary>Fired when the vault was destroyed by an armed self-destruct.</summary>
     public event Action? VaultDestroyed;
-    /// <summary>Human-readable one-liner for the status bar (issue #17).</summary>
     public event Action<string>? Notice;
-    /// <summary>Fired when an RDP profile launch is requested via shortcut, pipe, or pending launch. bool indicates fromShortcut.</summary>
     public event Action<RdpProfile, bool>? LaunchRequested;
 
     private SessionManager()
@@ -70,10 +51,6 @@ public sealed class SessionManager : IDisposable
         _ = Task.Run(PipeLoop);
     }
 
-    /// <summary>
-    /// Issue #6: shortcuts now pass "--launch &lt;profileId&gt;" directly. The legacy
-    /// "--launch &lt;file.rdpvlink&gt;" form is still accepted so old shortcuts keep working.
-    /// </summary>
     private string ParseCommandLine()
     {
         var args = Environment.GetCommandLineArgs();
@@ -111,9 +88,6 @@ public sealed class SessionManager : IDisposable
         return "SHOW";
     }
 
-    /// <summary>
-    /// Locates an RDP profile by GUID ID, normalized ID without dashes, Name, or Host.
-    /// </summary>
     public RdpProfile? FindProfile(string? target)
     {
         if (Payload?.Profiles == null || string.IsNullOrWhiteSpace(target)) return null;
@@ -147,10 +121,6 @@ public sealed class SessionManager : IDisposable
         else Dispatcher.UIThread.Post(action);
     }
 
-    /// <summary>
-    /// Issue #18a: unlock runs inside Task.Run, and DispatcherTimer has UI-thread
-    /// affinity in Avalonia. Creating/starting the timers off the UI thread threw.
-    /// </summary>
     private void StartTimers() => OnUi(() =>
     {
         if (_lockTimer == null)
@@ -179,7 +149,6 @@ public sealed class SessionManager : IDisposable
         if (File.Seals is null) File.Seals = new List<SealEntry>();
     }
 
-    /// <summary>Creates a brand new vault and hands back the Recovery Code to show the user (issue #2/#3).</summary>
     public string CreateNew(string password, VaultPayload payload)
     {
         File = VaultCrypto.CreateVault(password, payload, VaultPath, out string recoveryCode);
@@ -188,7 +157,6 @@ public sealed class SessionManager : IDisposable
     }
 
 
-    /// <summary>Seconds the user must wait before another attempt is accepted (issue #4 / #10).</summary>
     public TimeSpan CooldownRemaining()
     {
         try
@@ -227,7 +195,6 @@ public sealed class SessionManager : IDisposable
         AfterUnlock();
     }
 
-    /// <summary>Issue #2: the printed Recovery Code is a real second way in.</summary>
     public bool UnlockWithRecoveryCode(string typedCode)
     {
         LoadFile();
@@ -266,9 +233,6 @@ public sealed class SessionManager : IDisposable
         OnUi(() => VaultDestroyed?.Invoke());
     }
 
-    /// <summary>
-    /// Issue #3: Offload Argon2id computation to Task.Run to prevent freezing the UI Dispatcher.
-    /// </summary>
     public async Task<bool> UnlockWithHelloAsync()
     {
         if (File == null) LoadFile();
@@ -308,9 +272,6 @@ public sealed class SessionManager : IDisposable
         return true;
     }
 
-    /// <summary>
-    /// Issue #10: Inspect in-memory File representation when unlocked to avoid redundant disk reads and state tearing.
-    /// </summary>
     public bool HelloSealAvailable()
     {
         try
@@ -369,7 +330,6 @@ public sealed class SessionManager : IDisposable
         }
     }
 
-    /// <summary>Issue #20: tell the cleaner which hosts belong to us so it can stay in its lane.</summary>
     private void ApplySweepConfig()
     {
         var settings = Payload?.Settings;
@@ -379,10 +339,6 @@ public sealed class SessionManager : IDisposable
     }
 
 
-    /// <summary>
-    /// Issue #9: this used to return silently when the vault had auto-locked, so
-    /// changes were lost without a word. It now reports the problem.
-    /// </summary>
     public void Save(string? newPassword = null)
     {
         if (File == null || Master == null || Payload == null)
@@ -398,7 +354,6 @@ public sealed class SessionManager : IDisposable
         catch (Exception ex) { error = ex.Message; return false; }
     }
 
-    /// <summary>Issue #2: creates or replaces the Recovery Code and returns it for display.</summary>
     public string RegenerateRecoveryCode()
     {
         if (File == null || Master == null || Payload == null)
@@ -412,10 +367,6 @@ public sealed class SessionManager : IDisposable
 
     public bool HasRecoveryCode => File?.Recovery != null;
 
-    /// <summary>
-    /// Issue #2/#19: this existed but was wired to nothing, discarded the key it
-    /// derived without zeroing it, and dereferenced possibly-null state.
-    /// </summary>
     public void ChangePassword(string? oldPassword, string newPassword)
     {
         if (File == null || Master == null || Payload == null)
@@ -465,7 +416,6 @@ public sealed class SessionManager : IDisposable
         });
     }
 
-    /// <summary>Issue #11: ANY meaningful user action postpones the auto-lock.</summary>
     public void Touch() => _lastActivity = DateTime.UtcNow;
 
     public TimeSpan IdleRemaining()
@@ -481,21 +431,6 @@ public sealed class SessionManager : IDisposable
         if (IdleRemaining() == TimeSpan.Zero) Lock(killSessions: false);
     }
 
-    /// <summary>
-    /// ISSUE #3 (2026 review).
-    ///
-    /// What was broken: a SINGLE failed Directory.Exists / File.Exists poll tore the
-    /// whole app down - Lock, KillAll, DeepSweep, Environment.Exit - with no debounce,
-    /// no retry and no confirmation. An antivirus lock, a sleep/resume cycle, a slow
-    /// USB controller or a network-drive hiccup was enough to kill every open remote
-    /// desktop. Worse, UsbRemoved was posted to the UI thread and the process exited
-    /// before it could render, so the user got no explanation at all.
-    ///
-    /// Now: the drive must be missing for UsbMissesBeforeShutdown consecutive polls
-    /// (3 x 2 s = 6 s), a single recovery resets the counter, and the shutdown work
-    /// runs off the UI thread with a short grace period so the on-screen message is
-    /// actually painted before the process ends.
-    /// </summary>
     private void CheckUsbStillPresent()
     {
         if (_exiting) return;
@@ -602,7 +537,10 @@ public sealed class SessionManager : IDisposable
                 if (msg.StartsWith("LAUNCH:", StringComparison.Ordinal))
                 {
                     string target = msg.Substring(7);
-                    OnUi(() => ShowRequested?.Invoke());
+                    if (!IsUnlocked || Payload == null)
+                    {
+                        OnUi(() => ShowRequested?.Invoke());
+                    }
 
                     if (IsUnlocked && Payload != null)
                     {

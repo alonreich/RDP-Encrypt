@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Android.App;
 using Android.Content;
 using Android.OS;
@@ -9,11 +9,6 @@ using RDPVault.Android.Rdp;
 
 namespace RDPVault.Android.Services;
 
-/// <summary>
-/// Foreground Service tracking the embedded FreeRDP session.
-/// Listens to native FreeRDP session callbacks (CONNECTED, DISCONNECTED, CONNECTION_FAILED)
-/// and maintains the active connection notification with an explicit Disconnect action.
-/// </summary>
 [Service(Name = "com.rdpvault.app.services.RdpSessionService", Enabled = true, Exported = false, ForegroundServiceType = global::Android.Content.PM.ForegroundService.TypeConnectedDevice)]
 public class RdpSessionService : Service
 {

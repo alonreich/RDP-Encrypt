@@ -4,25 +4,6 @@ using System.Text;
 
 namespace RDPVault;
 
-/// <summary>
-/// ISSUE #2 - REPLACES THE OLD "RecoveryKeyGenerator".
-///
-/// What was wrong before: the old class produced 24 words drawn at random from a
-/// 230-word stub list, it was never called from anywhere in the app, and - most
-/// importantly - the phrase was not connected to the vault in any way. Typing it
-/// back in could never have unlocked anything. The documentation advertised it as
-/// "the ultimate offline backup". It was decoration.
-///
-/// What this is: a real 256-bit recovery secret that is bound to the vault's master
-/// key at creation time (see VaultCrypto.CreateVault -> file.Recovery). Losing the
-/// master password is now survivable.
-///
-/// Format: 52 characters of Crockford Base32, shown in 13 groups of 4:
-///     R7K4-9M2X-...-QW3T
-/// Crockford's alphabet omits I, L, O and U, and the reader maps the shapes people
-/// confuse anyway (I/l -> 1, O -> 0, U -> V) so a slightly sloppy transcription off
-/// paper still works.
-/// </summary>
 public static class RecoveryCode
 {
     private const string Alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
@@ -30,7 +11,6 @@ public static class RecoveryCode
     private const int CodeChars = 52;
     private const int GroupSize = 4;
 
-    /// <summary>Generates a fresh code, already formatted with dashes for printing.</summary>
     public static string Generate()
     {
         byte[] entropy = RandomNumberGenerator.GetBytes(EntropyBytes);
@@ -44,10 +24,6 @@ public static class RecoveryCode
         }
     }
 
-    /// <summary>
-    /// Turns whatever the user typed into the exact string the KDF expects.
-    /// Case, spaces, dashes and the classic look-alike characters are all forgiven.
-    /// </summary>
     public static string Normalize(string input)
     {
         if (string.IsNullOrEmpty(input)) return "";
@@ -67,7 +43,6 @@ public static class RecoveryCode
         return sb.ToString();
     }
 
-    /// <summary>Cheap client-side sanity check before spending a second on Argon2.</summary>
     public static bool LooksWellFormed(string input) => Normalize(input).Length == CodeChars;
 
     public static string Format(string bare)
